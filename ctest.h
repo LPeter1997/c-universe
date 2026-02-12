@@ -39,7 +39,7 @@ typedef struct TestCase {
 
 #define CTEST_CASE(name) \
 static void name(TestCase* __ctest_ctx); \
-CTEST_TEST_CASE_ATTRIB TestCase name ## _ctest_case = { #name, name }; \
+CTEST_CASE_ATTRIB TestCase name ## _ctest_case = { #name, name }; \
 void name(TestCase* __ctest_ctx)
 
 #define CTEST_ASSERT_FAIL(message) \
@@ -52,18 +52,18 @@ do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ "was ex
 
     #if defined(_WIN32)
 
-        #define CTEST_TEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
-        #define CTEST_TEST_CASES_START (&__ctest_test_start_sentinel + 1)
-        #define CTEST_TEST_CASES_END &__ctest_test_end_sentinel
+        #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
+        #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
+        #define CTEST_CASES_END &__ctest_test_end_sentinel
 
 extern TestCase __start_ctest_test_methods[];
 extern TestCase __stop_ctest_test_methods[];
 
     #else
 
-        #define CTEST_TEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods"), aligned(sizeof(void*))))
-        #define CTEST_TEST_CASES_START __start_ctest_test_methods
-        #define CTEST_TEST_CASES_END __stop_ctest_test_methods
+        #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods"), aligned(sizeof(void*))))
+        #define CTEST_CASES_START __start_ctest_test_methods
+        #define CTEST_CASES_END __stop_ctest_test_methods
 
 extern TestCase __start_ctest_test_methods[];
 extern TestCase __stop_ctest_test_methods[];
@@ -72,9 +72,9 @@ extern TestCase __stop_ctest_test_methods[];
 
 #elif defined(_MSC_VER)
 
-    #define CTEST_TEST_CASE_ATTRIB __declspec(allocate("ctest_test_methods$2cases"))
-    #define CTEST_TEST_CASES_START (&__ctest_test_start_sentinel + 1)
-    #define CTEST_TEST_CASES_END (&__ctest_test_end_sentinel)
+    #define CTEST_CASE_ATTRIB __declspec(allocate("ctest_test_methods$2cases"))
+    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
+    #define CTEST_CASES_END (&__ctest_test_end_sentinel)
 
 extern TestCase __ctest_test_start_sentinel;
 extern TestCase __ctest_test_end_sentinel;
@@ -132,7 +132,7 @@ TestCase __ctest_test_end_sentinel = { 0 };
 #endif
 
 void ctest_run_all() {
-    for (TestCase* testCase = CTEST_TEST_CASES_START; testCase < CTEST_TEST_CASES_END; ++testCase) {
+    for (TestCase* testCase = CTEST_CASES_START; testCase < CTEST_CASES_END; ++testCase) {
         ctest_run_case(testCase);
     }
 }
@@ -178,7 +178,7 @@ ExpectedTestCase expectedCases[] = {
 };
 
 TestCase* find_test_case_by_function(void(*testFn)()) {
-    for (TestCase* c = CTEST_TEST_CASES_START; c != CTEST_TEST_CASES_END; ++c) {
+    for (TestCase* c = CTEST_CASES_START; c != CTEST_CASES_END; ++c) {
         if (c->test_fn == testFn) return c;
     }
     return NULL;
@@ -189,7 +189,7 @@ int main(void) {
     
     // Assert number of cases
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
-    size_t gotCaseCount = (CTEST_TEST_CASES_END - CTEST_TEST_CASES_START);
+    size_t gotCaseCount = (CTEST_CASES_END - CTEST_CASES_START);
     if (gotCaseCount != expectedCaseCount) {
         printf("Expected %llu cases, but found %llu\n", expectedCaseCount, gotCaseCount);
         return 1;
