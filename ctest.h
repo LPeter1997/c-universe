@@ -34,7 +34,7 @@ typedef struct TestCase {
     char const* name;
     void(*test_fn)();
     bool executed;
-    bool failed;
+    bool succeeded;
 } TestCase;
 
 #define CTEST_CASE(name) \
@@ -43,7 +43,7 @@ CTEST_TEST_CASE_ATTRIB TestCase name ## _ctest_case = { #name, name }; \
 void name(TestCase* __ctest_ctx)
 
 #define CTEST_ASSERT_FAIL(message) \
-do { __ctest_ctx->failed = true; } while (false)
+do { __ctest_ctx->succeeded = false; } while (false)
 
 #define CTEST_ASSERT_TRUE(...) \
 do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ "was expected to be true, but was false"); } while (false)
@@ -138,7 +138,7 @@ void ctest_run_all() {
 }
 
 void ctest_run_case(TestCase* testCase) {
-    testCase->failed = false;
+    testCase->succeeded = true;
     testCase->executed = true;
     testCase->test_fn();
 }
@@ -148,7 +148,8 @@ void ctest_run_case(TestCase* testCase) {
 #include <string.h>
 
 typedef struct ExpectedTestCase {
-    bool found;
+    size_t runCount;
+    bool shouldSucceed;
     void(*test_fn)();
     char const* name;
 } ExpectedTestCase;
@@ -156,24 +157,32 @@ typedef struct ExpectedTestCase {
 extern ExpectedTestCase expectedCases[];
 
 CTEST_CASE(case1) {
-
+    ++expectedCases[0].runCount;
 }
 
 CTEST_CASE(case2) {
-
+    ++expectedCases[1].runCount;
+    CTEST_ASSERT_FAIL("custom fail message");
 }
 
 CTEST_CASE(case3) {
-
+    ++expectedCases[2].runCount;
 }
 
 ExpectedTestCase expectedCases[] = {
-#define EXPECTED_CASE(n) (ExpectedTestCase) { .found = false, .name = #n, .test_fn = n }
-    EXPECTED_CASE(case1),
-    EXPECTED_CASE(case2),
-    EXPECTED_CASE(case3),
+#define EXPECTED_CASE(n, s) (ExpectedTestCase) { .runCount = 0, .shouldSucceed = s, .name = #n, .test_fn = n }
+    EXPECTED_CASE(case1, true),
+    EXPECTED_CASE(case2, false),
+    EXPECTED_CASE(case3, true),
 #undef EXPECTED_CASE
 };
+
+TestCase* find_test_case_by_function(void(*testFn)()) {
+    for (TestCase* c = CTEST_TEST_CASES_START; c != CTEST_TEST_CASES_END; ++c) {
+        if (c->test_fn == testFn) return c;
+    }
+    return NULL;
+}
 
 int main(void) {
     puts("Running CTEST self-test...");
@@ -190,24 +199,36 @@ int main(void) {
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
         // Look for the expected case in the test suite
-        for (TestCase* gotCase = CTEST_TEST_CASES_START; gotCase != CTEST_TEST_CASES_END; ++gotCase) {
-            // Identify by function pointer
-            if (expectedCase->test_fn != gotCase->test_fn) continue;
-            // Found, mark off and check name
-            expectedCase->found = true;
-            if (strcmp(expectedCase->name, gotCase->name) != 0) {
-                printf("test case %s has wrong name (%s)\n", expectedCase->name, gotCase->name);
-                return 1;
-            }
-            break;
-        }
-        if (!expectedCase->found) {
+        TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
+        if (gotCase == NULL) {
             printf("iteration did not yield test case %s\n", expectedCase->name);
+            return 1;
+        }
+        // Check initial data
+        if (strcmp(expectedCase->name, gotCase->name) != 0) {
+            printf("test case %s has wrong name (%s)\n", expectedCase->name, gotCase->name);
             return 1;
         }
     }
 
     ctest_run_all();
+
+    // Assert that each test ran exactly once and that they have the appropriate fail state
+    for (size_t i = 0; i < expectedCaseCount; ++i) {
+        ExpectedTestCase* expectedCase = &expectedCases[i];
+        TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
+        if (expectedCase->runCount != 1) {
+            printf("expected test case to run exactly once, but was run %llu time(s)\n", expectedCase->runCount);
+            return 1;
+        }
+        if (expectedCase->shouldSucceed != gotCase->succeeded) {
+            char const* expectedStateName = expectedCase->shouldSucceed ? "succeed" : "fail";
+            char const* gotStateName = expectedCase->shouldSucceed ? "failed" : "succeeded";
+
+            printf("expected test case %s to %s, but it %s\n", expectedCase->name, expectedStateName, gotStateName);
+            return 1;
+        }
+    }
 
     puts("Self-test completed successfully!");
     return 0;
