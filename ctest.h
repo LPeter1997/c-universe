@@ -33,6 +33,7 @@ extern "C" {
 typedef struct TestCase {
     char const* name;
     void(*test_fn)();
+    bool executed;
     bool failed;
 } TestCase;
 
@@ -84,7 +85,7 @@ extern TestCase __ctest_test_end_sentinel;
 
 // TODO: Better API
 CTEST_DEF void ctest_run_all();
-CTEST_DEF void ctest_init_case(TestCase* testCase);
+CTEST_DEF void ctest_run_case(TestCase* testCase);
 
 #ifdef __cplusplus
 }
@@ -132,21 +133,87 @@ TestCase __ctest_test_end_sentinel = { 0 };
 
 void ctest_run_all() {
     for (TestCase* testCase = CTEST_TEST_CASES_START; testCase < CTEST_TEST_CASES_END; ++testCase) {
-        printf("Running %s... ", testCase->name);
-        ctest_init_case(testCase);
-        testCase->test_fn();
-        if (testCase->failed) {
-            printf("Failed!\n");
-        }
-        else {
-            printf("Ok!\n");
-        }
+        ctest_run_case(testCase);
     }
 }
 
-void ctest_init_case(TestCase* testCase) {
+void ctest_run_case(TestCase* testCase) {
     testCase->failed = false;
+    testCase->executed = true;
+    testCase->test_fn();
 }
+
+#ifdef CTEST_SELF_TEST
+
+#include <string.h>
+
+typedef struct ExpectedTestCase {
+    bool found;
+    void(*test_fn)();
+    char const* name;
+} ExpectedTestCase;
+
+extern ExpectedTestCase expectedCases[];
+
+CTEST_CASE(case1) {
+
+}
+
+CTEST_CASE(case2) {
+
+}
+
+CTEST_CASE(case3) {
+
+}
+
+ExpectedTestCase expectedCases[] = {
+#define EXPECTED_CASE(n) (ExpectedTestCase) { .found = false, .name = #n, .test_fn = n }
+    EXPECTED_CASE(case1),
+    EXPECTED_CASE(case2),
+    EXPECTED_CASE(case3),
+#undef EXPECTED_CASE
+};
+
+int main(void) {
+    puts("Running CTEST self-test...");
+    
+    // Assert number of cases
+    const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
+    size_t gotCaseCount = (CTEST_TEST_CASES_END - CTEST_TEST_CASES_START);
+    if (gotCaseCount != expectedCaseCount) {
+        printf("Expected %llu cases, but found %llu\n", expectedCaseCount, gotCaseCount);
+        return 1;
+    }
+    
+    // Assert initial test case contents
+    for (size_t i = 0; i < expectedCaseCount; ++i) {
+        ExpectedTestCase* expectedCase = &expectedCases[i];
+        // Look for the expected case in the test suite
+        for (TestCase* gotCase = CTEST_TEST_CASES_START; gotCase != CTEST_TEST_CASES_END; ++gotCase) {
+            // Identify by function pointer
+            if (expectedCase->test_fn != gotCase->test_fn) continue;
+            // Found, mark off and check name
+            expectedCase->found = true;
+            if (strcmp(expectedCase->name, gotCase->name) != 0) {
+                printf("test case %s has wrong name (%s)\n", expectedCase->name, gotCase->name);
+                return 1;
+            }
+            break;
+        }
+        if (!expectedCase->found) {
+            printf("iteration did not yield test case %s\n", expectedCase->name);
+            return 1;
+        }
+    }
+
+    ctest_run_all();
+
+    puts("Self-test completed successfully!");
+    return 0;
+}
+
+#endif /* CTEST_SELF_TEST */
 
 #ifdef __cplusplus
 }
