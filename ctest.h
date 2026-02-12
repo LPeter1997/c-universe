@@ -191,7 +191,7 @@ int main(void) {
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
     size_t gotCaseCount = (CTEST_CASES_END - CTEST_CASES_START);
     if (gotCaseCount != expectedCaseCount) {
-        printf("Expected %llu cases, but found %llu\n", expectedCaseCount, gotCaseCount);
+        printf("Expected %zu cases, but found %zu\n", expectedCaseCount, gotCaseCount);
         return 1;
     }
     
@@ -218,7 +218,7 @@ int main(void) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
         TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
         if (expectedCase->runCount != 1) {
-            printf("expected test case to run exactly once, but was run %llu time(s)\n", expectedCase->runCount);
+            printf("expected test case to run exactly once, but was run %zu time(s)\n", expectedCase->runCount);
             return 1;
         }
         if (expectedCase->shouldSucceed != gotCase->succeeded) {
