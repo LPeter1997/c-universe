@@ -85,37 +85,12 @@ do { __ctest_ctx->passed = false; } while (false)
 #define CTEST_ASSERT_TRUE(...) \
 do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was expected to be true, but was false"); } while (false)
 
-#if defined(__GNUC__)
-
-    #if defined(_WIN32)
-
-        #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
-        #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
-        #define CTEST_CASES_END &__ctest_test_end_sentinel
-
-extern TestCase __start_ctest_test_methods[];
-extern TestCase __stop_ctest_test_methods[];
-
-    #else
-
-        #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods"), aligned(sizeof(void*))))
-        #define CTEST_CASES_START __start_ctest_test_methods
-        #define CTEST_CASES_END __stop_ctest_test_methods
-
-extern TestCase __start_ctest_test_methods[];
-extern TestCase __stop_ctest_test_methods[];
-
-    #endif
-
+#if defined(__GNUC__) && defined(_WIN32)
+    #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
+#elif defined(__GNUC__)
+    #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods"), aligned(sizeof(void*))))
 #elif defined(_MSC_VER)
-
     #define CTEST_CASE_ATTRIB __declspec(allocate("ctest_test_methods$2cases"))
-    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
-    #define CTEST_CASES_END (&__ctest_test_end_sentinel)
-
-extern TestCase __ctest_test_start_sentinel;
-extern TestCase __ctest_test_end_sentinel;
-
 #else
     #error "unsupported C compiler"
 #endif
@@ -146,29 +121,29 @@ CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 extern "C" {
 #endif
 
-#if defined(__GNUC__)
-    #if defined(_WIN32)
+#if defined(__GNUC__) && defined(_WIN32)
+    __attribute__((section("ctest_test_methods$1start"), aligned(sizeof(void*))))
+    TestCase __ctest_test_start_sentinel;
 
-__attribute__((section("ctest_test_methods$1start"), aligned(sizeof(void*))))
-TestCase __ctest_test_start_sentinel;
+    __attribute__((section("ctest_test_methods$3end"), aligned(sizeof(void*))))
+    TestCase __ctest_test_end_sentinel;
 
-__attribute__((section("ctest_test_methods$3end"), aligned(sizeof(void*))))
-TestCase __ctest_test_end_sentinel;
+    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
+    #define CTEST_CASES_END &__ctest_test_end_sentinel
+#elif defined(__GNUC__)
+    extern TestCase __start_ctest_test_methods[];
+    extern TestCase __stop_ctest_test_methods[];
 
-    #endif
+    #define CTEST_CASES_START __start_ctest_test_methods
+    #define CTEST_CASES_END __stop_ctest_test_methods
 #elif defined(_MSC_VER)
-
     #pragma section("ctest_test_methods$1start", read)
     #pragma section("ctest_test_methods$2cases", read)
     #pragma section("ctest_test_methods$3end", read)
     #pragma comment(linker, "/include:__ctest_test_start_sentinel")
 
-__declspec(allocate("ctest_test_methods$1start"))
-TestCase __ctest_test_start_sentinel = { 0 };
-
-__declspec(allocate("ctest_test_methods$3end"))
-TestCase __ctest_test_end_sentinel = { 0 };
-
+    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
+    #define CTEST_CASES_END (&__ctest_test_end_sentinel)
 #else
     #error "unsupported C compiler"
 #endif
