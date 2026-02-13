@@ -284,6 +284,10 @@ int main(void) {
     // Assert number of cases
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
     size_t gotCaseCount = suite.test_cases_length;
+    if (gotCaseCount != expectedCaseCount) {
+        printf("Expected %zu cases, but found %zu\n", expectedCaseCount, gotCaseCount);
+        return 1;
+    }
 
     // Assert initial test case contents
     for (size_t i = 0; i < expectedCaseCount; ++i) {
@@ -306,7 +310,6 @@ int main(void) {
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
-        TestCase const* gotCase = find_test_case_in_suite_by_function(suite, expectedCase->test_fn);
         TestExecution* gotExecution = find_test_execution_in_report_by_function(report, expectedCase->test_fn);
         if (expectedCase->runCount != 1) {
             printf("expected test case to run exactly once, but was run %zu time(s)\n", expectedCase->runCount);
