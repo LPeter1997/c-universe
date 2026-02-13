@@ -49,6 +49,11 @@ typedef struct TestCase {
     void(*test_fn)(TestExecution*);
 } TestCase;
 
+typedef struct TestSuite {
+    TestCase const* test_cases;
+    size_t test_cases_length;
+} TestSuite;
+
 typedef struct TestExecution {
     TestCase const* test_case;
     bool passed;
@@ -116,8 +121,8 @@ extern TestCase __ctest_test_end_sentinel;
 #endif
 
 // TODO: Better API
-CTEST_DEF TestReport ctest_run_all();
-CTEST_DEF TestReport ctest_run(TestFilter input);
+CTEST_DEF TestSuite ctest_get_suite();
+CTEST_DEF TestReport ctest_run(TestSuite suite, TestFilter input);
 CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 
 #ifdef __cplusplus
@@ -168,12 +173,20 @@ TestCase __ctest_test_end_sentinel = { 0 };
     #error "unsupported C compiler"
 #endif
 
-TestReport ctest_run_all() {
-    TestFilter input = { .filter_fn = NULL, .user = NULL };
-    return ctest_run(input);
+TestSuite ctest_get_suite() {
+    size_t caseCount = (CTEST_CASES_END - CTEST_CASES_START);
+    TestCase* cases = (TestCase*)CTEST_ALLOC(sizeof(TestCase) * caseCount);
+    CTEST_ASSERT(cases != NULL, "failed to allocate memory for test suite");
+    for (size_t i = 0; i < caseCount; ++i) {
+        cases[i] = CTEST_CASES_START[i];
+    }
+    return (TestSuite){
+        .test_cases = cases,
+        .test_cases_length = caseCount,
+    };
 }
 
-TestReport ctest_run(TestFilter input) {
+TestReport ctest_run(TestSuite suite, TestFilter input) {
     TestReport report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
@@ -182,7 +195,9 @@ TestReport ctest_run(TestFilter input) {
         .failing_cases_length = 0,
         .failing_cases_capacity = 0,
     };
-    for (TestCase* testCase = CTEST_CASES_START; testCase < CTEST_CASES_END; ++testCase) {
+    for (size_t i = 0; i < suite.test_cases_length; ++i) {
+        TestCase const* testCase = &suite.test_cases[i];
+
         // Use filter function, if specified
         if (input.filter_fn != NULL && !input.filter_fn(testCase, input.user)) continue;
 
@@ -285,15 +300,14 @@ TestExecution* find_test_execution_in_report_by_function(TestReport report, void
 
 int main(void) {
     puts("Running CTEST self-test...");
-    
+
+    // Collect suite
+    TestSuite suite = ctest_get_suite();
+
     // Assert number of cases
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
-    size_t gotCaseCount = (CTEST_CASES_END - CTEST_CASES_START);
-    if (gotCaseCount != expectedCaseCount) {
-        printf("Expected %zu cases, but found %zu\n", expectedCaseCount, gotCaseCount);
-        return 1;
-    }
-    
+    size_t gotCaseCount = suite.test_cases_length;
+
     // Assert initial test case contents
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
@@ -310,7 +324,7 @@ int main(void) {
         }
     }
 
-    TestReport report = ctest_run_all();
+    TestReport report = ctest_run(suite, (TestFilter){ .filter_fn = NULL, .user = NULL });
 
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
