@@ -156,6 +156,18 @@ CTEST_DEF TestReport ctest_run_suite(TestSuite suite, TestFilter filter);
  */
 CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 
+/**
+ * Frees the memory allocated for the given test suite.
+ * @param suite The test suite to free.
+ */
+CTEST_DEF void ctest_free_suite(TestSuite* suite);
+
+/**
+ * Frees the memory allocated for the given test report.
+ * @param report The test report to free.
+ */
+CTEST_DEF void ctest_free_report(TestReport* report);
+
 #ifdef __cplusplus
 }
 #endif
@@ -261,6 +273,23 @@ TestExecution ctest_run_case(TestCase const* testCase) {
     // Actually run it
     testCase->test_fn(&execution);
     return execution;
+}
+
+void ctest_free_suite(TestSuite* suite) {
+    CTEST_FREE((void*)suite->test_cases);
+    suite->test_cases = NULL;
+    suite->test_cases_length = 0;
+}
+
+void ctest_free_report(TestReport* report) {
+    CTEST_FREE(report->passing_cases);
+    CTEST_FREE(report->failing_cases);
+    report->passing_cases = NULL;
+    report->failing_cases = NULL;
+    report->passing_cases_length = 0;
+    report->failing_cases_length = 0;
+    report->passing_cases_capacity = 0;
+    report->failing_cases_capacity = 0;
 }
 
 #ifdef __cplusplus
@@ -383,6 +412,9 @@ int main(void) {
             return 1;
         }
     }
+
+    ctest_free_report(&report);
+    ctest_free_suite(&suite);
 
     puts("Self-test completed successfully!");
     return 0;
