@@ -30,20 +30,38 @@
 extern "C" {
 #endif
 
+typedef struct TestExecution TestExecution;
+
 typedef struct TestCase {
     char const* name;
-    void(*test_fn)();
-    bool executed;
-    bool succeeded;
+    void(*test_fn)(TestExecution*);
 } TestCase;
 
-#define CTEST_CASE(name) \
-static void name(TestCase* __ctest_ctx); \
-CTEST_CASE_ATTRIB TestCase name ## _ctest_case = { #name, name }; \
-void name(TestCase* __ctest_ctx)
+typedef struct TestExecution {
+    TestCase const* test_case;
+    bool passed;
+} TestExecution;
+
+typedef struct TestExecutionInput {
+    bool(*filter_fn)(TestCase const*, void*);
+    void* user;
+} TestExecutionInput;
+
+typedef struct TestReport {
+    TestExecution* passing_cases;
+    size_t passing_cases_length;
+
+    TestExecution* failing_cases;
+    size_t failing_cases_length;
+} TestReport;
+
+#define CTEST_CASE(n) \
+static void n(TestExecution* __ctest_ctx); \
+CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
+void n(TestExecution* __ctest_ctx)
 
 #define CTEST_ASSERT_FAIL(message) \
-do { __ctest_ctx->succeeded = false; } while (false)
+do { __ctest_ctx->passed = false; } while (false)
 
 #define CTEST_ASSERT_TRUE(...) \
 do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ "was expected to be true, but was false"); } while (false)
@@ -84,8 +102,9 @@ extern TestCase __ctest_test_end_sentinel;
 #endif
 
 // TODO: Better API
-CTEST_DEF void ctest_run_all();
-CTEST_DEF void ctest_run_case(TestCase* testCase);
+CTEST_DEF TestReport ctest_run_all();
+CTEST_DEF TestReport ctest_run(TestExecutionInput input);
+CTEST_DEF TestExecution ctest_run_case(TestReport* report, TestCase const* testCase);
 
 #ifdef __cplusplus
 }
@@ -131,26 +150,60 @@ TestCase __ctest_test_end_sentinel = { 0 };
     #error "unsupported C compiler"
 #endif
 
-void ctest_run_all() {
+TestReport ctest_run_all() {
+    TestExecutionInput input = { .filter_fn = NULL, .user = NULL };
+    return ctest_run(input);
+}
+
+TestReport ctest_run(TestExecutionInput input) {
+    TestReport report = {
+        .passing_cases = NULL,
+        .passing_cases_length = 0,
+        .failing_cases = NULL,
+        .failing_cases_length = 0,
+    };
     for (TestCase* testCase = CTEST_CASES_START; testCase < CTEST_CASES_END; ++testCase) {
-        ctest_run_case(testCase);
+        // Use filter function, if specified
+        if (input.filter_fn != NULL && !input.filter_fn(testCase, input.user)) continue;
+
+        ctest_run_case(&report, testCase);
     }
+    return report;
 }
 
-void ctest_run_case(TestCase* testCase) {
-    testCase->succeeded = true;
-    testCase->executed = true;
-    testCase->test_fn();
+TestExecution ctest_run_case(TestReport* report, TestCase const* testCase) {
+    // Create execution context for the test case
+    TestExecution execution = {
+        .test_case = testCase,
+        // By default, tests are passing until an assertion fail happens
+        .passed = true,
+    };
+    // Actually run it
+    testCase->test_fn(&execution);
+    if (report != NULL) {
+        // Observe result and append to appropriate list
+        // TODO
+    }
+    return execution;
 }
 
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* CTEST_IMPLEMENTATION */
+
+////////////////////////////////////////////////////////////////////////////////
+// Self-testing section                                                       //
+////////////////////////////////////////////////////////////////////////////////
 #ifdef CTEST_SELF_TEST
 
 #include <string.h>
 
 typedef struct ExpectedTestCase {
     size_t runCount;
-    bool shouldSucceed;
-    void(*test_fn)();
+    bool shouldPass;
+    void(*test_fn)(TestExecution*);
     char const* name;
 } ExpectedTestCase;
 
@@ -170,16 +223,30 @@ CTEST_CASE(case3) {
 }
 
 ExpectedTestCase expectedCases[] = {
-#define EXPECTED_CASE(n, s) (ExpectedTestCase) { .runCount = 0, .shouldSucceed = s, .name = #n, .test_fn = n }
+#define EXPECTED_CASE(n, s) (ExpectedTestCase) { .runCount = 0, .shouldPass = s, .name = #n, .test_fn = n }
     EXPECTED_CASE(case1, true),
     EXPECTED_CASE(case2, false),
     EXPECTED_CASE(case3, true),
 #undef EXPECTED_CASE
 };
 
-TestCase* find_test_case_by_function(void(*testFn)()) {
+TestCase* find_test_case_by_function(void(*testFn)(TestExecution*)) {
     for (TestCase* c = CTEST_CASES_START; c != CTEST_CASES_END; ++c) {
         if (c->test_fn == testFn) return c;
+    }
+    return NULL;
+}
+
+TestExecution* find_test_execution_in_report_by_function(TestReport report, void(*testFn)(TestExecution*)) {
+    for (size_t i = 0; i < report.passing_cases_length; ++i) {
+        if (report.passing_cases[i].test_case->test_fn == testFn) {
+            return &report.passing_cases[i];
+        }
+    }
+    for (size_t i = 0; i < report.failing_cases_length; ++i) {
+        if (report.failing_cases[i].test_case->test_fn == testFn) {
+            return &report.failing_cases[i];
+        }
     }
     return NULL;
 }
@@ -211,19 +278,24 @@ int main(void) {
         }
     }
 
-    ctest_run_all();
+    TestReport report = ctest_run_all();
 
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
         TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
+        TestExecution* gotExecution = find_test_execution_in_report_by_function(report, expectedCase->test_fn);
         if (expectedCase->runCount != 1) {
             printf("expected test case to run exactly once, but was run %zu time(s)\n", expectedCase->runCount);
             return 1;
         }
-        if (expectedCase->shouldSucceed != gotCase->succeeded) {
-            char const* expectedStateName = expectedCase->shouldSucceed ? "succeed" : "fail";
-            char const* gotStateName = expectedCase->shouldSucceed ? "failed" : "succeeded";
+        if (gotExecution == NULL) {
+            printf("could not find execution in report for test case %s\n", expectedCase->name);
+            return 1;
+        }
+        if (expectedCase->shouldPass != gotExecution->passed) {
+            char const* expectedStateName = expectedCase->shouldPass ? "pass" : "fail";
+            char const* gotStateName = expectedCase->shouldPass ? "failed" : "passed";
 
             printf("expected test case %s to %s, but it %s\n", expectedCase->name, expectedStateName, gotStateName);
             return 1;
@@ -235,9 +307,3 @@ int main(void) {
 }
 
 #endif /* CTEST_SELF_TEST */
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* CTEST_IMPLEMENTATION */
