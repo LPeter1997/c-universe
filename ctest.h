@@ -44,42 +44,82 @@ extern "C" {
 
 typedef struct TestExecution TestExecution;
 
+/**
+ * A single test case in the test suite.
+ */
 typedef struct TestCase {
+    // The name of the test case
     char const* name;
+    // The test function that gets executed when this case is ran
     void(*test_fn)(TestExecution*);
 } TestCase;
 
+/**
+ * A test suite, which is a collection of test cases.
+ */
 typedef struct TestSuite {
+    // The test cases in the suite
     TestCase const* test_cases;
+    // The number of test cases in the suite
     size_t test_cases_length;
 } TestSuite;
 
+/**
+ * The context and result of a test case execution.
+ */
 typedef struct TestExecution {
+    // The test case that was executed
     TestCase const* test_case;
+    // True, if the test case passed, false if it failed
     bool passed;
 } TestExecution;
 
+/**
+ * A filter for test cases, used to select which cases to run when running a test suite.
+ */
 typedef struct TestFilter {
+    // A function that gets called for each test case in the suite, and returns true if the case should be run, or false if it should be skipped
     bool(*filter_fn)(TestCase const*, void*);
+    // User data that gets passed to the filter function
     void* user;
 } TestFilter;
 
+/**
+ * The report of a test suite execution, containing the results of all ran test cases.
+ */
 typedef struct TestReport {
+    // The test executions that passed
     TestExecution* passing_cases;
+    // The number of test executions that passed
     size_t passing_cases_length;
+    // The capacity of the passing_cases array
     size_t passing_cases_capacity;
 
+    // The test executions that failed
     TestExecution* failing_cases;
+    // The number of test executions that failed
     size_t failing_cases_length;
+    // The capacity of the failing_cases array
     size_t failing_cases_capacity;
 } TestReport;
 
+/**
+ * Fails the current test case with the given message.
+ * @param message The message to fail with.
+ */
 #define CTEST_ASSERT_FAIL(message) \
 do { __ctest_ctx->passed = false; } while (false)
 
+/**
+ * Asserts that the given condition is true, and fails the current test case with a message containing the condition if it is false.
+ */
 #define CTEST_ASSERT_TRUE(...) \
 do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was expected to be true, but was false"); } while (false)
 
+/**
+ * Defines a test case with the given identifier as a name.
+ * @param n The identifier to use as the test case name.
+ */
 #define CTEST_CASE(n) \
 static void n(TestExecution* __ctest_ctx); \
 CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
@@ -95,9 +135,25 @@ void n(TestExecution* __ctest_ctx)
     #error "unsupported C compiler"
 #endif
 
-// TODO: Better API
+/**
+ * Automatically collects all test cases defined with @see CTEST_CASE and returns them as a test suite.
+ * @returns A test suite containing all test cases defined with @see CTEST_CASE.
+ */
 CTEST_DEF TestSuite ctest_get_suite();
-CTEST_DEF TestReport ctest_run_suite(TestSuite suite, TestFilter input);
+
+/**
+ * Runs the given test suite with the given filter, and returns a report of the execution.
+ * @param suite The test suite to run.
+ * @param filter The filter to use when running the test suite.
+ * @returns A report of the test suite execution.
+ */
+CTEST_DEF TestReport ctest_run_suite(TestSuite suite, TestFilter filter);
+
+/**
+ * Runs the given test case and returns the execution result.
+ * @param testCase The test case to run.
+ * @returns The execution result of the test case.
+ */
 CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 
 #ifdef __cplusplus
@@ -161,7 +217,7 @@ TestSuite ctest_get_suite() {
     };
 }
 
-TestReport ctest_run_suite(TestSuite suite, TestFilter input) {
+TestReport ctest_run_suite(TestSuite suite, TestFilter filter) {
     TestReport report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
@@ -174,7 +230,7 @@ TestReport ctest_run_suite(TestSuite suite, TestFilter input) {
         TestCase const* testCase = &suite.test_cases[i];
 
         // Use filter function, if specified
-        if (input.filter_fn != NULL && !input.filter_fn(testCase, input.user)) continue;
+        if (filter.filter_fn != NULL && !filter.filter_fn(testCase, filter.user)) continue;
 
         TestExecution execution = ctest_run_case(testCase);
 
