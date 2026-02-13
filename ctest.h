@@ -42,10 +42,10 @@ typedef struct TestExecution {
     bool passed;
 } TestExecution;
 
-typedef struct TestExecutionInput {
+typedef struct TestFilter {
     bool(*filter_fn)(TestCase const*, void*);
     void* user;
-} TestExecutionInput;
+} TestFilter;
 
 typedef struct TestReport {
     TestExecution* passing_cases;
@@ -103,7 +103,7 @@ extern TestCase __ctest_test_end_sentinel;
 
 // TODO: Better API
 CTEST_DEF TestReport ctest_run_all();
-CTEST_DEF TestReport ctest_run(TestExecutionInput input);
+CTEST_DEF TestReport ctest_run(TestFilter input);
 CTEST_DEF TestExecution ctest_run_case(TestReport* report, TestCase const* testCase);
 
 #ifdef __cplusplus
@@ -151,11 +151,11 @@ TestCase __ctest_test_end_sentinel = { 0 };
 #endif
 
 TestReport ctest_run_all() {
-    TestExecutionInput input = { .filter_fn = NULL, .user = NULL };
+    TestFilter input = { .filter_fn = NULL, .user = NULL };
     return ctest_run(input);
 }
 
-TestReport ctest_run(TestExecutionInput input) {
+TestReport ctest_run(TestFilter input) {
     TestReport report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
