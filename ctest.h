@@ -97,7 +97,7 @@ do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was e
 
 // TODO: Better API
 CTEST_DEF TestSuite ctest_get_suite();
-CTEST_DEF TestReport ctest_run(TestSuite suite, TestFilter input);
+CTEST_DEF TestReport ctest_run_suite(TestSuite suite, TestFilter input);
 CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 
 #ifdef __cplusplus
@@ -161,7 +161,7 @@ TestSuite ctest_get_suite() {
     };
 }
 
-TestReport ctest_run(TestSuite suite, TestFilter input) {
+TestReport ctest_run_suite(TestSuite suite, TestFilter input) {
     TestReport report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
@@ -299,7 +299,7 @@ int main(void) {
         }
     }
 
-    TestReport report = ctest_run(suite, (TestFilter){ .filter_fn = NULL, .user = NULL });
+    TestReport report = ctest_run_suite(suite, (TestFilter){ .filter_fn = NULL, .user = NULL });
 
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
