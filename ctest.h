@@ -211,6 +211,8 @@ TestExecution ctest_run_case(TestCase const* testCase) {
 }
 #endif
 
+#undef CTEST_CASES_START
+#undef CTEST_CASES_END
 #undef CTEST_ASSERT
 
 #endif /* CTEST_IMPLEMENTATION */
@@ -252,9 +254,9 @@ ExpectedTestCase expectedCases[] = {
 #undef EXPECTED_CASE
 };
 
-TestCase* find_test_case_by_function(void(*testFn)(TestExecution*)) {
-    for (TestCase* c = CTEST_CASES_START; c != CTEST_CASES_END; ++c) {
-        if (c->test_fn == testFn) return c;
+TestCase const* find_test_case_in_suite_by_function(TestSuite suite, void(*testFn)(TestExecution*)) {
+    for (size_t i = 0; i < suite.test_cases_length; ++i) {
+        if (suite.test_cases[i].test_fn == testFn) return &suite.test_cases[i];
     }
     return NULL;
 }
@@ -287,7 +289,7 @@ int main(void) {
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
         // Look for the expected case in the test suite
-        TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
+        TestCase const* gotCase = find_test_case_in_suite_by_function(suite, expectedCase->test_fn);
         if (gotCase == NULL) {
             printf("iteration did not yield test case %s\n", expectedCase->name);
             return 1;
@@ -304,7 +306,7 @@ int main(void) {
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
-        TestCase* gotCase = find_test_case_by_function(expectedCase->test_fn);
+        TestCase const* gotCase = find_test_case_in_suite_by_function(suite, expectedCase->test_fn);
         TestExecution* gotExecution = find_test_execution_in_report_by_function(report, expectedCase->test_fn);
         if (expectedCase->runCount != 1) {
             printf("expected test case to run exactly once, but was run %zu time(s)\n", expectedCase->runCount);
