@@ -19,11 +19,23 @@
 #define CTEST_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 #ifdef CTEST_STATIC
 #   define CTEST_DEF static
 #else
 #   define CTEST_DEF extern
+#endif
+
+#ifndef CTEST_ALLOC
+#   define CTEST_ALLOC malloc
+#endif
+#ifndef CTEST_REALLOC
+#   define CTEST_REALLOC realloc
+#endif
+#ifndef CTEST_FREE
+#   define CTEST_FREE free
 #endif
 
 #ifdef __cplusplus
@@ -50,9 +62,11 @@ typedef struct TestFilter {
 typedef struct TestReport {
     TestExecution* passing_cases;
     size_t passing_cases_length;
+    size_t passing_cases_capacity;
 
     TestExecution* failing_cases;
     size_t failing_cases_length;
+    size_t failing_cases_capacity;
 } TestReport;
 
 #define CTEST_CASE(n) \
@@ -104,7 +118,7 @@ extern TestCase __ctest_test_end_sentinel;
 // TODO: Better API
 CTEST_DEF TestReport ctest_run_all();
 CTEST_DEF TestReport ctest_run(TestFilter input);
-CTEST_DEF TestExecution ctest_run_case(TestReport* report, TestCase const* testCase);
+CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
 
 #ifdef __cplusplus
 }
@@ -117,7 +131,11 @@ CTEST_DEF TestExecution ctest_run_case(TestReport* report, TestCase const* testC
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef CTEST_IMPLEMENTATION
 
+#include <assert.h>
+#include <stdlib.h>
 #include <stdio.h>
+
+#define CTEST_ASSERT(condition, message) assert(((void)message, condition))
 
 #ifdef __cplusplus
 extern "C" {
@@ -159,19 +177,35 @@ TestReport ctest_run(TestFilter input) {
     TestReport report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
+        .passing_cases_capacity = 0,
         .failing_cases = NULL,
         .failing_cases_length = 0,
+        .failing_cases_capacity = 0,
     };
     for (TestCase* testCase = CTEST_CASES_START; testCase < CTEST_CASES_END; ++testCase) {
         // Use filter function, if specified
         if (input.filter_fn != NULL && !input.filter_fn(testCase, input.user)) continue;
 
-        ctest_run_case(&report, testCase);
+        TestExecution execution = ctest_run_case(testCase);
+
+        // Add execution to report
+        TestExecution** targetList = execution.passed ? &report.passing_cases : &report.failing_cases;
+        size_t* targetListLength = execution.passed ? &report.passing_cases_length : &report.failing_cases_length;
+        size_t* targetListCapacity = execution.passed ? &report.passing_cases_capacity : &report.failing_cases_capacity;
+        if (*targetListLength + 1 > *targetListCapacity) {
+            size_t newCapacity = (*targetListCapacity == 0) ? 8 : (*targetListCapacity * 2);
+            TestExecution* newList = (TestExecution*)CTEST_REALLOC(*targetList, newCapacity * sizeof(TestExecution));
+            CTEST_ASSERT(newList != NULL, "failed to allocate memory for test report");
+            *targetList = newList;
+            *targetListCapacity = newCapacity;
+        }
+        (*targetList)[*targetListLength] = execution;
+        ++(*targetListLength);
     }
     return report;
 }
 
-TestExecution ctest_run_case(TestReport* report, TestCase const* testCase) {
+TestExecution ctest_run_case(TestCase const* testCase) {
     // Create execution context for the test case
     TestExecution execution = {
         .test_case = testCase,
@@ -180,16 +214,14 @@ TestExecution ctest_run_case(TestReport* report, TestCase const* testCase) {
     };
     // Actually run it
     testCase->test_fn(&execution);
-    if (report != NULL) {
-        // Observe result and append to appropriate list
-        // TODO
-    }
     return execution;
 }
 
 #ifdef __cplusplus
 }
 #endif
+
+#undef CTEST_ASSERT
 
 #endif /* CTEST_IMPLEMENTATION */
 
