@@ -74,16 +74,16 @@ typedef struct TestReport {
     size_t failing_cases_capacity;
 } TestReport;
 
-#define CTEST_CASE(n) \
-static void n(TestExecution* __ctest_ctx); \
-CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
-void n(TestExecution* __ctest_ctx)
-
 #define CTEST_ASSERT_FAIL(message) \
 do { __ctest_ctx->passed = false; } while (false)
 
 #define CTEST_ASSERT_TRUE(...) \
 do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was expected to be true, but was false"); } while (false)
+
+#define CTEST_CASE(n) \
+static void n(TestExecution* __ctest_ctx); \
+CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
+void n(TestExecution* __ctest_ctx)
 
 #if defined(__GNUC__) && defined(_WIN32)
     #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
