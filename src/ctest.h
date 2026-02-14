@@ -6,10 +6,17 @@
  * Before #include-ing this header, #define CTEST_IMPLEMENTATION in the file you want to paste the implementation.
  *
  * Configuration:
- *  - TODO
+ *  - #define CTEST_STATIC before including this header to make all functions have internal linkage
+ *  - #define CTEST_ALLOC, CTEST_REALLOC and CTEST_FREE to use custom memory allocation functions (by default, they use malloc, realloc and free from the C standard library)
+ *  - #define CTEST_SELF_TEST before including this header to compile a self-test that verifies the framework's functionality
  *
  * API:
- *  - TODO
+ *  - Use CTEST_CASE to define test cases, which automatically registers them in the default test suite
+ *  - Use ctest_get_suite to get the default test suite, which contains all cases defined with CTEST_CASE
+ *  - Use ctest_run_suite to run a test suite with a filter, which returns a report of the execution
+ *  - Use ctest_run_case to run a single test case and get the execution result
+ *  - Use ctest_free_suite and ctest_free_report to free the memory allocated for test suites and reports, respectively
+ *  - Use CTEST_ASSERT_TRUE and CTEST_ASSERT_FAIL to make assertions in test cases, which will cause the case to fail if they are not met
  */
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,6 +80,8 @@ typedef struct TestExecution {
     TestCase const* test_case;
     // True, if the test case passed, false if it failed
     bool passed;
+    // An optional message describing the failure, if the test case failed
+    char const* fail_message;
 } TestExecution;
 
 /**
@@ -112,7 +121,7 @@ extern TestSuite __ctest_default_suite;
  * @param message The message to fail with.
  */
 #define CTEST_ASSERT_FAIL(message) \
-do { __ctest_ctx->passed = false; } while (false)
+do { __ctest_ctx->passed = false; __ctest_ctx->fail_message = message; } while (false)
 
 /**
  * Asserts that the given condition is true, and fails the current test case with a message containing the condition if it is false.
@@ -193,6 +202,12 @@ CTEST_DEF void ctest_free_suite(TestSuite* suite);
  * @param report The test report to free.
  */
 CTEST_DEF void ctest_free_report(TestReport* report);
+
+/**
+ * Prints a human-readable report of the given test report to stdout.
+ * @param report The test report to print.
+ */
+CTEST_DEF void ctest_print_report(TestReport report);
 
 #ifdef __cplusplus
 }
@@ -296,6 +311,26 @@ void ctest_free_report(TestReport* report) {
     report->failing_cases_capacity = 0;
 }
 
+void ctest_print_report(TestReport report) {
+    printf("Test report:\n");
+    printf("  Passing cases (%zu):\n", report.passing_cases_length);
+    for (size_t i = 0; i < report.passing_cases_length; ++i) {
+        TestExecution execution = report.passing_cases[i];
+        printf("    - %s\n", execution.test_case->name);
+    }
+    printf("  Failing cases (%zu):\n", report.failing_cases_length);
+    for (size_t i = 0; i < report.failing_cases_length; ++i) {
+        TestExecution execution = report.failing_cases[i];
+        printf("    - %s: %s\n", execution.test_case->name, execution.fail_message);
+    }
+    if (report.failing_cases_length == 0) {
+        printf(" Success!\n");
+    }
+    else {
+        printf(" Failure (%zu/%zu)!\n", report.failing_cases_length, report.passing_cases_length + report.failing_cases_length);
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -305,6 +340,54 @@ void ctest_free_report(TestReport* report) {
 #undef CTEST_ASSERT
 
 #endif /* CTEST_IMPLEMENTATION */
+
+////////////////////////////////////////////////////////////////////////////////
+// Main-program section                                                       //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef CTEST_MAIN
+
+#include <string.h>
+
+typedef struct CliFilters {
+    char* words[];
+    size_t word_count;
+} CliFilters;
+
+static bool filter_cases_by_name(TestCase const* testCase, void* user) {
+    CliFilters* filters = (CliFilters*)user;
+    for (size_t i = 0; i < filters->word_count; ++i) {
+        if (strstr(testCase->name, filters->words[i]) != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int main(int argc, char* argv[]) {
+    // We implement a default main program that runs all test cases, if no arguments are specified
+    // If there are arguments, we use them as filters and only run the cases that contain any of the arguments as a substring in their name
+
+    TestFilter filter = { 0 };
+    CliFilters cliFilters = { 0 };
+    if (argc > 1) {
+        cliFilters.words = &argv[1];
+        cliFilters.word_count = (size_t)(argc - 1);
+        filter.filter_fn = filter_cases_by_name;
+        filter.user = &filters;
+    }
+
+    TestSuite suite = ctest_get_suite();
+    TestReport report = ctest_run_suite(suite, filter);
+    ctest_print_report(report);
+    int exitCode = (report.failing_cases_length == 0) ? 0 : 1;
+
+    ctest_free_report(&report);
+    ctest_free_suite(&suite);
+
+    return exitCode;
+}
+
+#endif /* CTEST_MAIN */
 
 ////////////////////////////////////////////////////////////////////////////////
 // Self-testing section                                                       //
