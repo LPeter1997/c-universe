@@ -328,7 +328,7 @@ void ctest_print_report(TestReport report) {
         printf(" Success!\n");
     }
     else {
-        printf(" Failure (%zu/%zu)!\n", report.failing_cases_length, report.passing_cases_length + report.failing_cases_length);
+        printf(" Failure (%zu/%zu)!\n", report.passing_cases_length, report.passing_cases_length + report.failing_cases_length);
     }
 }
 

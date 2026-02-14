@@ -89,7 +89,7 @@ jobs:
       # -----------------------------------
       # Run tests
       # -----------------------------------
-      - name: Run test_all for all except Windows MinGW
+      - name: Run all tests
         run: |
           cd scripts
           ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
