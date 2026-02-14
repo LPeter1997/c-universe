@@ -126,17 +126,17 @@ do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was e
  */
 #define CTEST_CASE(n) \
 static void n(TestExecution* __ctest_ctx); \
-__CTEST_CASE_REGISTER(n) \
+__CTEST_AUTOREGISTER_CASE(n) \
 void n(TestExecution* __ctest_ctx)
 
 #if defined(__GNUC__) || defined(__clang__)
-    #define __CTEST_CASE_REGISTER(n) \
+    #define __CTEST_AUTOREGISTER_CASE(n) \
     __attribute__((constructor)) \
     static void __ctest_register_ ## n(void) { \
         ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
     }
 #elif defined(_MSC_VER)
-    #define __CTEST_CASE_REGISTER(n) \
+    #define __CTEST_AUTOREGISTER_CASE(n) \
     __declspec(allocate("ctest_test_methods$2cases")) \
     TestCase n ## _ctest_case = { .name = #n, .test_fn = n };
 #else
