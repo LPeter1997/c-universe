@@ -96,7 +96,7 @@ jobs:
       # Run tests
       # -----------------------------------
       - name: Run test_all for all except Windows MinGW
-        if: !(runner.os == 'Windows' && matrix.compiler == 'gcc')
+        if: ${{ !(runner.os == 'Windows' && matrix.compiler == 'gcc') }}
         run: |
           cd scripts
           ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
