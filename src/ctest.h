@@ -8,6 +8,7 @@
  * Configuration:
  *  - #define CTEST_STATIC before including this header to make all functions have internal linkage
  *  - #define CTEST_ALLOC, CTEST_REALLOC and CTEST_FREE to use custom memory allocation functions (by default, they use malloc, realloc and free from the C standard library)
+ *  - #define CTEST_MAIN before including this header to compile a default main program that runs all test cases defined with CTEST_CASE, and accepts optional command-line arguments to filter which cases to run
  *  - #define CTEST_SELF_TEST before including this header to compile a self-test that verifies the framework's functionality
  *
  * API:
