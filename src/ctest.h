@@ -8,6 +8,7 @@
  *  - #define CTEST_REALLOC and CTEST_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
  *  - #define CTEST_MAIN before including this header to compile a default main program that runs all test cases defined with CTEST_CASE, and accepts optional command-line arguments to filter which cases to run
  *  - #define CTEST_SELF_TEST before including this header to compile a self-test that verifies the framework's functionality
+ *  - #define CTESTS_EXAMPLE before including this header to compile a simple example that demonstrates how to use the framework
  *
  * API:
  *  - Use CTEST_CASE to define test cases, which automatically registers them in the default test suite
@@ -16,6 +17,8 @@
  *  - Use ctest_run_case to run a single test case and get the execution result
  *  - Use ctest_free_suite and ctest_free_report to free the memory allocated for test suites and reports, respectively
  *  - Use CTEST_ASSERT_TRUE and CTEST_ASSERT_FAIL to make assertions in test cases, which will cause the case to fail if they are not met
+ *
+ * Check the example section at the end of this file for a full example.
  */
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -345,7 +348,7 @@ void ctest_print_report(TestReport report) {
 #include <string.h>
 
 typedef struct CliFilters {
-    char* words[];
+    char** words;
     size_t word_count;
 } CliFilters;
 
@@ -369,7 +372,7 @@ int main(int argc, char* argv[]) {
         cliFilters.words = &argv[1];
         cliFilters.word_count = (size_t)(argc - 1);
         filter.filter_fn = filter_cases_by_name;
-        filter.user = &filters;
+        filter.user = &cliFilters;
     }
 
     TestSuite suite = ctest_get_suite();
@@ -507,3 +510,31 @@ int main(void) {
 }
 
 #endif /* CTEST_SELF_TEST */
+
+////////////////////////////////////////////////////////////////////////////////
+// Example section                                                            //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef CTEST_EXAMPLE
+#undef CTEST_EXAMPLE
+
+// This example relies on the built-in main program provided by the library to implement a very simple test runner.
+
+#define CTEST_IMPLEMENTATION
+#define CTEST_STATIC
+#define CTEST_MAIN
+#include "ctest.h"
+
+int factorial(int n) {
+    if (n == 0) return 1;
+    return n * factorial(n - 1);
+}
+
+CTEST_CASE(factorial_of_zero) {
+    CTEST_ASSERT_TRUE(factorial(0) == 1);
+}
+
+CTEST_CASE(factorial_of_positive) {
+    CTEST_ASSERT_TRUE(factorial(5) == 120);
+}
+
+#endif /* CTEST_EXAMPLE */
