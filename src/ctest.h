@@ -58,9 +58,11 @@ typedef struct TestCase {
  */
 typedef struct TestSuite {
     // The test cases in the suite
-    TestCase const* test_cases;
+    TestCase* test_cases;
     // The number of test cases in the suite
     size_t test_cases_length;
+    // The capacity of the test_cases array
+    size_t test_cases_capacity;
 } TestSuite;
 
 /**
@@ -102,6 +104,9 @@ typedef struct TestReport {
     size_t failing_cases_capacity;
 } TestReport;
 
+// Used as a target to automatically register the cases
+extern TestSuite __ctest_default_suite;
+
 /**
  * Fails the current test case with the given message.
  * @param message The message to fail with.
@@ -121,20 +126,29 @@ do { if (!(__VA_ARGS__)) CTEST_ASSERT_FAIL("the condition " #__VA_ARGS__ " was e
  */
 #define CTEST_CASE(n) \
 static void n(TestExecution* __ctest_ctx); \
-CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
+__CTEST_CASE_REGISTER(n) \
 void n(TestExecution* __ctest_ctx)
 
-#if defined(__GNUC__) && defined(__APPLE__) && defined(__MACH__)
-    #define CTEST_CASE_ATTRIB __attribute__((used, section("__DATA,ctest_m"), aligned(sizeof(void*))))
-#elif defined(__GNUC__) && defined(_WIN32)
-    #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
-#elif defined(__GNUC__)
-    #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods"), aligned(sizeof(void*))))
+#if defined(__GNUC__)
+    #define __CTEST_CASE_REGISTER(n) \
+    __attribute__((constructor)) \
+    static void __ctest_register_ ## n(void) { \
+        ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
+    }
 #elif defined(_MSC_VER)
-    #define CTEST_CASE_ATTRIB __declspec(allocate("ctest_test_methods$2cases"))
+    #define __CTEST_CASE_REGISTER(n) \
+    __declspec(allocate("ctest_test_methods$2cases")) \
+    TestCase n ## _ctest_case = { .name = #n, .test_fn = n };
 #else
     #error "unsupported C compiler"
 #endif
+
+/**
+ * Registers the given test case in the given test suite.
+ * @param suite The test suite to register the case in.
+ * @param testCase The test case to register.
+ */
+CTEST_DEF void ctest_register_case(TestSuite* suite, TestCase testCase);
 
 /**
  * Automatically collects all test cases defined with @see CTEST_CASE and returns them as a test suite.
@@ -190,50 +204,28 @@ CTEST_DEF void ctest_free_report(TestReport* report);
 extern "C" {
 #endif
 
-#if defined(__GNUC__) && defined(__APPLE__) && defined(__MACH__)
-    extern TestCase __start_ctest_m[];
-    extern TestCase __stop_ctest_m[];
-
-    #define CTEST_CASES_START __start_ctest_m
-    #define CTEST_CASES_END __stop_ctest_m
-#elif defined(__GNUC__) && defined(_WIN32)
-    __attribute__((section("ctest_test_methods$1start"), aligned(sizeof(void*))))
-    TestCase __ctest_test_start_sentinel;
-
-    __attribute__((section("ctest_test_methods$3end"), aligned(sizeof(void*))))
-    TestCase __ctest_test_end_sentinel;
-
-    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
-    #define CTEST_CASES_END &__ctest_test_end_sentinel
-#elif defined(__GNUC__)
-    extern TestCase __start_ctest_test_methods[];
-    extern TestCase __stop_ctest_test_methods[];
-
-    #define CTEST_CASES_START __start_ctest_test_methods
-    #define CTEST_CASES_END __stop_ctest_test_methods
+#if defined(__GNUC__)
 #elif defined(_MSC_VER)
-    #pragma section("ctest_test_methods$1start", read)
-    #pragma section("ctest_test_methods$2cases", read)
-    #pragma section("ctest_test_methods$3end", read)
-    #pragma comment(linker, "/include:__ctest_test_start_sentinel")
-
-    #define CTEST_CASES_START (&__ctest_test_start_sentinel + 1)
-    #define CTEST_CASES_END (&__ctest_test_end_sentinel)
 #else
     #error "unsupported C compiler"
 #endif
 
-TestSuite ctest_get_suite(void) {
-    size_t caseCount = (size_t)(CTEST_CASES_END - CTEST_CASES_START);
-    TestCase* cases = (TestCase*)CTEST_ALLOC(sizeof(TestCase) * caseCount);
-    CTEST_ASSERT(cases != NULL, "failed to allocate memory for test suite");
-    for (size_t i = 0; i < caseCount; ++i) {
-        cases[i] = CTEST_CASES_START[i];
+TestSuite __ctest_default_suite;
+
+void ctest_register_case(TestSuite* suite, TestCase testCase) {
+    if (suite->test_cases_length + 1 > suite->test_cases_capacity) {
+        size_t newCapacity = (suite->test_cases_capacity == 0) ? 8 : (suite->test_cases_capacity * 2);
+        TestCase* newCases = (TestCase*)CTEST_REALLOC((void*)suite->test_cases, sizeof(TestCase) * newCapacity);
+        CTEST_ASSERT(newCases != NULL, "failed to allocate memory for test suite");
+        suite->test_cases = newCases;
+        suite->test_cases_capacity = newCapacity;
     }
-    return (TestSuite){
-        .test_cases = cases,
-        .test_cases_length = caseCount,
-    };
+    suite->test_cases[suite->test_cases_length] = testCase;
+    ++suite->test_cases_length;
+}
+
+TestSuite ctest_get_suite(void) {
+    return __ctest_default_suite;
 }
 
 TestReport ctest_run_suite(TestSuite suite, TestFilter filter) {
