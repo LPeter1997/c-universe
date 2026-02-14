@@ -125,7 +125,7 @@ CTEST_CASE_ATTRIB TestCase n ## _ctest_case = { .name = #n, .test_fn = n }; \
 void n(TestExecution* __ctest_ctx)
 
 #if defined(__GNUC__) && defined(__APPLE__) && defined(__MACH__)
-    #define CTEST_CASE_ATTRIB __attribute__((used, section("__DATA,ctest_test_methods"), aligned(sizeof(void*))))
+    #define CTEST_CASE_ATTRIB __attribute__((used, section("__DATA,ctest_m"), aligned(sizeof(void*))))
 #elif defined(__GNUC__) && defined(_WIN32)
     #define CTEST_CASE_ATTRIB __attribute__((used, section("ctest_test_methods$2cases"), aligned(sizeof(void*))))
 #elif defined(__GNUC__)
@@ -191,11 +191,11 @@ extern "C" {
 #endif
 
 #if defined(__GNUC__) && defined(__APPLE__) && defined(__MACH__)
-    extern TestCase __start___DATA_ctest_test_methods[];
-    extern TestCase __stop___DATA_ctest_test_methods[];
+    extern TestCase __start___DATA_ctest_m[];
+    extern TestCase __stop___DATA_ctest_m[];
 
-    #define CTEST_CASES_START __start___DATA_ctest_test_methods
-    #define CTEST_CASES_END __stop___DATA_ctest_test_methods
+    #define CTEST_CASES_START __start___DATA_ctest_m
+    #define CTEST_CASES_END __stop___DATA_ctest_m
 #elif defined(__GNUC__) && defined(_WIN32)
     __attribute__((section("ctest_test_methods$1start"), aligned(sizeof(void*))))
     TestCase __ctest_test_start_sentinel;
