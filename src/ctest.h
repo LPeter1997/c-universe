@@ -331,7 +331,7 @@ CTEST_CASE(case3) {
 }
 
 ExpectedTestCase expectedCases[] = {
-#define EXPECTED_CASE(n, s) (ExpectedTestCase) { .runCount = 0, .shouldPass = s, .name = #n, .test_fn = n }
+#define EXPECTED_CASE(n, s) { .runCount = 0, .shouldPass = s, .name = #n, .test_fn = n }
     EXPECTED_CASE(case1, true),
     EXPECTED_CASE(case2, false),
     EXPECTED_CASE(case3, true),
