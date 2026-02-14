@@ -129,7 +129,7 @@ static void n(TestExecution* __ctest_ctx); \
 __CTEST_CASE_REGISTER(n) \
 void n(TestExecution* __ctest_ctx)
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
     #define __CTEST_CASE_REGISTER(n) \
     __attribute__((constructor)) \
     static void __ctest_register_ ## n(void) { \
@@ -204,7 +204,7 @@ CTEST_DEF void ctest_free_report(TestReport* report);
 extern "C" {
 #endif
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #elif defined(_MSC_VER)
 #else
     #error "unsupported C compiler"
