@@ -41,7 +41,7 @@
 extern "C" {
 #endif
 
-typedef struct TestExecution TestExecution;
+struct TestExecution;
 
 /**
  * A single test case in the test suite.
@@ -50,7 +50,7 @@ typedef struct TestCase {
     // The name of the test case
     char const* name;
     // The test function that gets executed when this case is ran
-    void(*test_fn)(TestExecution*);
+    void(*test_fn)(struct TestExecution*);
 } TestCase;
 
 /**
@@ -138,7 +138,7 @@ void n(TestExecution* __ctest_ctx)
  * Automatically collects all test cases defined with @see CTEST_CASE and returns them as a test suite.
  * @returns A test suite containing all test cases defined with @see CTEST_CASE.
  */
-CTEST_DEF TestSuite ctest_get_suite();
+CTEST_DEF TestSuite ctest_get_suite(void);
 
 /**
  * Runs the given test suite with the given filter, and returns a report of the execution.
@@ -215,8 +215,8 @@ extern "C" {
     #error "unsupported C compiler"
 #endif
 
-TestSuite ctest_get_suite() {
-    size_t caseCount = (CTEST_CASES_END - CTEST_CASES_START);
+TestSuite ctest_get_suite(void) {
+    size_t caseCount = (size_t)(CTEST_CASES_END - CTEST_CASES_START);
     TestCase* cases = (TestCase*)CTEST_ALLOC(sizeof(TestCase) * caseCount);
     CTEST_ASSERT(cases != NULL, "failed to allocate memory for test suite");
     for (size_t i = 0; i < caseCount; ++i) {

@@ -17,7 +17,10 @@ param(
     [string[]]$Defines = @(),
 
     [Parameter(Mandatory=$false)]
-    [string]$Output = "a.out"
+    [string]$Output = "a.out",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$AllowUnusedParameters
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,37 +48,63 @@ function Show-Version {
 function Compile {
     Write-Host "building with $Compiler ($Style)..."
 
-    # Convert defines
-    $DefineFlags = @()
-    foreach ($def in $Defines) {
-        if ($Style -eq "msvc") {
-            $DefineFlags += "/D$def"
-        } elseif ($Style -eq "gcc") {
-            $DefineFlags += "-D$def"
-        } else {
-            throw "unknown style $Style"
-        }
-    }
-
+    # Build flags
+    $Args = @()
     if ($Style -eq "msvc") {
-        & $Compiler `
-            /std:c99 `
-            /W4 /WX `
-            /permissive- `
-            /Zc:preprocessor `
-            $DefineFlags `
-            /Fe:$Output `
-            $Sources
+        # Standard
+        $Args += "/std:c99"
+        # Warnings
+        $Args += "/W4"
+        $Args += "/WX"
+        $Args += "/permissive-"
+        $Args += "/Zc:preprocessor"
+        # Disable unused params warnings if requested
+        if ($AllowUnusedParameters) {
+            $Args += "/wd4100"
+        }
+        # Add each define as a separate /D flag
+        foreach ($def in $Defines) {
+            $Args += "/D$def"
+        }
+        # Output
+        $Args += "/Fe:$Output"
+        # Add each source file
+        foreach ($src in $Sources) {
+            $Args += $src
+        }
     } elseif ($Style -eq "gcc") {
-        & $Compiler `
-            -std=c99 `
-            -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes -Werror `
-            $DefineFlags `
-            $Sources `
-            -o $Output
+        # Standard
+        $Args += "-std=c99"
+        # Warnings
+        $Args += "-Wall"
+        $Args += "-Wextra"
+        $Args += "-Wpedantic"
+        $Args += "-Wconversion"
+        $Args += "-Wshadow"
+        $Args += "-Wstrict-prototypes"
+        $Args += "-Werror"
+        # Disable unused params warnings if requested
+        if ($AllowUnusedParameters) {
+            $Args += "-Wno-unused-parameter"
+        }
+        # Add each define as a separate -D flag
+        foreach ($def in $Defines) {
+            $Args += "-D$def"
+        }
+        # Output
+        $Args += "-o"
+        $Args += $Output
+        # Add each source file and specify their source language explicitly as C to avoid compiling a PCH
+        foreach ($src in $Sources) {
+            $Args += "-x"
+            $Args += "c"
+            $Args += $src
+        }
     } else {
         throw "unknown style $Style"
     }
+
+    & $Compiler $Args
 
     if ($LASTEXITCODE -ne 0) {
         throw "tool $Compiler failed with exit code $LASTEXITCODE"
