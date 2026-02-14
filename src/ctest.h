@@ -191,8 +191,8 @@ extern "C" {
 #endif
 
 #if defined(__GNUC__) && defined(__APPLE__) && defined(__MACH__)
-    extern TestCase __start___DATA_ctest_m[];
-    extern TestCase __stop___DATA_ctest_m[];
+    extern TestCase __start_ctest_m[];
+    extern TestCase __stop_ctest_m[];
 
     #define CTEST_CASES_START __start_ctest_m
     #define CTEST_CASES_END __stop_ctest_m
