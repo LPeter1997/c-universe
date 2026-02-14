@@ -8,7 +8,7 @@
  *  - #define CTEST_REALLOC and CTEST_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
  *  - #define CTEST_MAIN before including this header to compile a default main program that runs all test cases defined with CTEST_CASE, and accepts optional command-line arguments to filter which cases to run
  *  - #define CTEST_SELF_TEST before including this header to compile a self-test that verifies the framework's functionality
- *  - #define CTESTS_EXAMPLE before including this header to compile a simple example that demonstrates how to use the framework
+ *  - #define CTEST_EXAMPLE before including this header to compile a simple example that demonstrates how to use the framework
  *
  * API:
  *  - Use CTEST_CASE to define test cases, which automatically registers them in the default test suite
