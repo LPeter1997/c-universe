@@ -36,7 +36,6 @@ if ($IsWindows -or $env:OS -eq "Windows_NT") {
     }
 }
 
-
 if ($Action -eq "run" -and $Sources.Count -eq 0) {
     throw "for running, at least one source file must be provided via -Sources"
 }

@@ -69,16 +69,7 @@ jobs:
       - name: Set compiler environment
         run: |
           if ("${{ matrix.compiler }}" -eq "gcc") {
-            if ($env:RUNNER_OS -eq "Windows") {
-              if ("${{ matrix.arch }}" -eq "x86") {
-                echo "CCompiler=.\C:\msys64\mingw32\bin\gcc.exe" >> $env:GITHUB_ENV
-              } else {
-                echo "CCompiler=.\C:\msys64\mingw64\bin\gcc.exe" >> $env:GITHUB_ENV
-              }
-            }
-            else {
-              echo "CCompiler=gcc" >> $env:GITHUB_ENV
-            }
+            echo "CCompiler=gcc" >> $env:GITHUB_ENV
             echo "CCompilerStyle=gcc" >> $env:GITHUB_ENV
           }
           elseif ("${{ matrix.compiler }}" -eq "clang") {
@@ -89,6 +80,17 @@ jobs:
             echo "CCompiler=cl" >> $env:GITHUB_ENV
             echo "CCompilerStyle=msvc" >> $env:GITHUB_ENV
           }
+        shell: pwsh
+
+      # -----------------------------------
+      # Verify compiler
+      # -----------------------------------
+      - name: Verify compiler
+        if: runner.os == 'Windows' && matrix.compiler == 'gcc'
+        run: |
+          cd scripts
+          ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
+          cd ..
         shell: pwsh
 
       # -----------------------------------
