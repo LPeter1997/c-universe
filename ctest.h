@@ -20,7 +20,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdlib.h>
 
 #ifdef CTEST_STATIC
 #   define CTEST_DEF static
