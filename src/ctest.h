@@ -136,10 +136,11 @@ void n(TestExecution* __ctest_ctx)
         ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
     }
 #elif defined(_MSC_VER)
+    #pragma section(".CRT$XCU",read)
     #define __CTEST_AUTOREGISTER_CASE(n) \
     static void __ctest_register_ ## n(void); \
-    __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
-    __pragma(comment(linker,"/include:" p #f "_")) \
+    __declspec(allocate(".CRT$XCU")) void (*__ctest_register_ ## n ## _)(void) = __ctest_register_ ## n; \
+    __pragma(comment(linker,"/include:__ctest_register_" #n "_")) \
     static void __ctest_register_ ## n(void) { \
         ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
     }
