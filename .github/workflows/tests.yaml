@@ -86,7 +86,6 @@ jobs:
       # Verify compiler
       # -----------------------------------
       - name: Verify compiler
-        if: runner.os == 'Windows' && matrix.compiler == 'gcc'
         run: |
           cd scripts
           ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
