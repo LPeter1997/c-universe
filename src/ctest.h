@@ -137,8 +137,12 @@ void n(TestExecution* __ctest_ctx)
     }
 #elif defined(_MSC_VER)
     #define __CTEST_AUTOREGISTER_CASE(n) \
-    __declspec(allocate("ctest_test_methods$2cases")) \
-    TestCase n ## _ctest_case = { .name = #n, .test_fn = n };
+    static void __ctest_register_ ## n(void); \
+    __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
+    __pragma(comment(linker,"/include:" p #f "_")) \
+    static void __ctest_register_ ## n(void) { \
+        ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
+    }
 #else
     #error "unsupported C compiler"
 #endif
@@ -202,12 +206,6 @@ CTEST_DEF void ctest_free_report(TestReport* report);
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-#if defined(__GNUC__) || defined(__clang__)
-#elif defined(_MSC_VER)
-#else
-    #error "unsupported C compiler"
 #endif
 
 TestSuite __ctest_default_suite;

@@ -51,8 +51,8 @@ function Compile {
     # Build flags
     $Args = @()
     if ($Style -eq "msvc") {
-        # Standard
-        $Args += "/std:c99"
+        # Standard, MSVC has no C99 mode, but we can set the compiler to stick to C
+        $Args += "/TC"
         # Warnings
         $Args += "/W4"
         $Args += "/WX"
