@@ -501,6 +501,9 @@ int main(void) {
         }
     }
 
+    puts("Sample output of a report:");
+    ctest_print_report(report);
+
     ctest_free_report(&report);
     ctest_free_suite(&suite);
 
