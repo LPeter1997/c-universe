@@ -69,7 +69,14 @@ jobs:
       - name: Set compiler environment
         run: |
           if ("${{ matrix.compiler }}" -eq "gcc") {
-            echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            if ($env:RUNNER_OS -eq "Windows") {
+              # MSYS2 sets MSYSTEM_PREFIX to the correct MinGW root
+              $gccPath = Join-Path $env:MSYSTEM_PREFIX "bin\gcc.exe"
+              echo "CCompiler=$gccPath" >> $env:GITHUB_ENV
+            }
+            else {
+              echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            }
             echo "CCompilerStyle=gcc" >> $env:GITHUB_ENV
           }
           elseif ("${{ matrix.compiler }}" -eq "clang") {
@@ -83,31 +90,12 @@ jobs:
         shell: pwsh
 
       # -----------------------------------
-      # Verify compiler
-      # -----------------------------------
-      - name: Verify compiler
-        run: |
-          cd scripts
-          ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
-          cd ..
-        shell: pwsh
-
-      # -----------------------------------
       # Run tests
       # -----------------------------------
       - name: Run test_all for all except Windows MinGW
-        if: ${{ !(runner.os == 'Windows' && matrix.compiler == 'gcc') }}
         run: |
           cd scripts
           ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
           ./test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }}
           cd ..
         shell: pwsh
-      - name: Run test_all for Windows MinGW
-        if: runner.os == 'Windows' && matrix.compiler == 'gcc'
-        run: |
-          cd scripts
-          pwsh ./compile_and_run.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }} -Action version
-          pwsh ./test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }}
-          cd ..
-        shell: msys2 {0}
