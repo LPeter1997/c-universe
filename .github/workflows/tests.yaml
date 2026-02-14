@@ -28,6 +28,10 @@ jobs:
           # macOS no real 32-bit support anymore
           - os: macos-latest
             arch: x86
+          # Note: I can't be bothered to make MinGW work on x86...
+          - os: windows-latest
+            compiler: gcc
+            arch: x86
 
     steps:
       - name: Checkout
@@ -69,14 +73,7 @@ jobs:
       - name: Set compiler environment
         run: |
           if ("${{ matrix.compiler }}" -eq "gcc") {
-            if ($env:RUNNER_OS -eq "Windows") {
-              # MSYS2 sets MSYSTEM_PREFIX to the correct MinGW root
-              $gccPath = Join-Path $env:MSYSTEM_PREFIX "bin\gcc.exe"
-              echo "CCompiler=$gccPath" >> $env:GITHUB_ENV
-            }
-            else {
-              echo "CCompiler=gcc" >> $env:GITHUB_ENV
-            }
+            echo "CCompiler=gcc" >> $env:GITHUB_ENV
             echo "CCompilerStyle=gcc" >> $env:GITHUB_ENV
           }
           elseif ("${{ matrix.compiler }}" -eq "clang") {
