@@ -1,9 +1,7 @@
 /**
  * ctest.h is a single-header C testing framework.
  *
- * Useful for embedding for tools that need to emit code but also require user-facing templating.
- *
- * Before #include-ing this header, #define CTEST_IMPLEMENTATION in the file you want to paste the implementation.
+ * A fairly minimalistic single-header testing framework for C.
  *
  * Configuration:
  *  - #define CTEST_STATIC before including this header to make all functions have internal linkage
