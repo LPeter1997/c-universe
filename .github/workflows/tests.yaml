@@ -69,7 +69,16 @@ jobs:
       - name: Set compiler environment
         run: |
           if ("${{ matrix.compiler }}" -eq "gcc") {
-            echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            if ($env:RUNNER_OS -eq "Windows") {
+              # On Windows, we need to specify the full path to the MinGW gcc executable to avoid arch issues
+              if ("${{ matrix.arch }}" -eq "x86") {
+                echo "CCompiler=C:\msys64\mingw32\bin\gcc.exe" >> $env:GITHUB_ENV
+              } else {
+                echo "CCompiler=C:\msys64\mingw64\bin\gcc.exe" >> $env:GITHUB_ENV
+              }
+            } else {
+              echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            }
             echo "CCompilerStyle=gcc" >> $env:GITHUB_ENV
           }
           elseif ("${{ matrix.compiler }}" -eq "clang") {
