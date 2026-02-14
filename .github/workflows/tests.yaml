@@ -97,5 +97,5 @@ jobs:
       # Run tests
       # -----------------------------------
       - name: Run test_all
-        run: ./test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle
+        run: ./scripts/test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle
         shell: pwsh
