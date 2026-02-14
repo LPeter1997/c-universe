@@ -7,6 +7,10 @@ param(
     [string]$Style,
 
     [Parameter(Mandatory=$true)]
+    [ValidateSet("x86","x64")]
+    [string]$Arch,
+
+    [Parameter(Mandatory=$true)]
     [ValidateSet("version","run")]
     [string]$Action,
 
@@ -90,6 +94,12 @@ function Compile {
         # Add each define as a separate -D flag
         foreach ($def in $Defines) {
             $Args += "-D$def"
+        }
+        # Architecture
+        if ($Arch -eq "x86") {
+            $Args += "-m32"
+        } elseif ($Arch -eq "x64") {
+            $Args += "-m64"
         }
         # Output
         $Args += "-o"

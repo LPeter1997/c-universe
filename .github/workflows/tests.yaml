@@ -9,38 +9,25 @@ on:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.os }} - ${{ matrix.compiler }}
+    name: ${{ matrix.os }} - ${{ matrix.compiler }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # ------------------------
-          # Windows
-          # ------------------------
-          - os: windows-latest
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        compiler: [gcc, clang, msvc]
+        arch: [x64, x86]
+        # Illegal configurations to exclude
+        exclude:
+          # MSVC only on Windows
+          - os: ubuntu-latest
             compiler: msvc
-          - os: windows-latest
-            compiler: gcc
-          - os: windows-latest
-            compiler: clang
-
-          # ------------------------
-          # Linux
-          # ------------------------
-          - os: ubuntu-latest
-            compiler: gcc
-          - os: ubuntu-latest
-            compiler: clang
-
-          # ------------------------
-          # macOS
-          # ------------------------
           - os: macos-latest
-            compiler: gcc
+            compiler: msvc
+          # macOS no real 32-bit support anymore
           - os: macos-latest
-            compiler: clang
+            arch: x86
 
     steps:
       - name: Checkout
@@ -53,7 +40,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang
+          sudo apt-get install -y build-essential clang gcc-multilib g++-multilib
         shell: bash
 
       # -----------------------------------
@@ -63,9 +50,10 @@ jobs:
         if: runner.os == 'Windows' && matrix.compiler == 'gcc'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.arch == 'x86' && 'MINGW32' || 'MINGW64' }}
           update: true
-          install: mingw-w64-x86_64-gcc
+          install:
+            ${{ matrix.arch == 'x86' && 'mingw-w64-i686-gcc' || 'mingw-w64-x86_64-gcc' }}
 
       # -----------------------------------
       # Setup MSVC (Windows)
@@ -73,6 +61,8 @@ jobs:
       - name: Setup MSVC
         if: runner.os == 'Windows' && matrix.compiler == 'msvc'
         uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
 
       # -----------------------------------
       # Select compiler
@@ -99,6 +89,6 @@ jobs:
       - name: Run test_all
         run: |
           cd scripts
-          ./test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle
+          ./test_all.ps1 -Compiler $env:CCompiler -Style $env:CCompilerStyle -Arch ${{ matrix.arch }}
           cd ..
         shell: pwsh

@@ -4,7 +4,11 @@ param(
 
     [Parameter(Mandatory=$true)]
     [ValidateSet("gcc","msvc")]
-    [string]$Style
+    [string]$Style,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateSet("x86","x64")]
+    [string]$Arch
 )
 
 # We invoke compile_and_run.ps1 for each library we test
@@ -13,6 +17,7 @@ param(
 .\compile_and_run.ps1 `
     -Compiler $Compiler `
     -Style $Style `
+    -Arch $Arch `
     -Action "run" `
     -AllowUnusedParameters `
     -Sources @("../src/ctest.h") `
