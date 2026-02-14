@@ -194,8 +194,8 @@ extern "C" {
     extern TestCase __start___DATA_ctest_m[];
     extern TestCase __stop___DATA_ctest_m[];
 
-    #define CTEST_CASES_START __start___DATA_ctest_m
-    #define CTEST_CASES_END __stop___DATA_ctest_m
+    #define CTEST_CASES_START __start_ctest_m
+    #define CTEST_CASES_END __stop_ctest_m
 #elif defined(__GNUC__) && defined(_WIN32)
     __attribute__((section("ctest_test_methods$1start"), aligned(sizeof(void*))))
     TestCase __ctest_test_start_sentinel;
