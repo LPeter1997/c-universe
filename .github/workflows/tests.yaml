@@ -52,8 +52,7 @@ jobs:
         with:
           msystem: ${{ matrix.arch == 'x86' && 'MINGW32' || 'MINGW64' }}
           update: true
-          install:
-            ${{ matrix.arch == 'x86' && 'mingw-w64-i686-gcc' || 'mingw-w64-x86_64-gcc' }}
+          install: ${{ matrix.arch == 'x86' && 'mingw-w64-i686-gcc' || 'mingw-w64-x86_64-gcc' }}
 
       # -----------------------------------
       # Setup MSVC (Windows)
@@ -70,7 +69,16 @@ jobs:
       - name: Set compiler environment
         run: |
           if ("${{ matrix.compiler }}" -eq "gcc") {
-            echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            if ($env:RUNNER_OS -eq "Windows") {
+              if ("${{ matrix.arch }}" -eq "x86") {
+                echo "CCompiler=C:\msys64\mingw32\bin\gcc.exe" >> $env:GITHUB_ENV
+              } else {
+                echo "CCompiler=C:\msys64\mingw64\bin\gcc.exe" >> $env:GITHUB_ENV
+              }
+            }
+            else {
+              echo "CCompiler=gcc" >> $env:GITHUB_ENV
+            }
             echo "CCompilerStyle=gcc" >> $env:GITHUB_ENV
           }
           elseif ("${{ matrix.compiler }}" -eq "clang") {
