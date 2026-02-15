@@ -352,6 +352,7 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
         // Check if we have a value for the required option
         bool found = false;
         for (size_t j = 0; j < result.options_length; ++j) {
+            // TODO: Bug is here, this comparison will NEVER be true :(
             if (&result.options[j].description == optionDesc) {
                 found = true;
                 break;
