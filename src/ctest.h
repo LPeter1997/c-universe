@@ -120,7 +120,7 @@ extern TestSuite __ctest_default_suite;
  * @param message The message to fail with.
  */
 #define CTEST_ASSERT_FAIL(message) \
-do { __ctest_ctx->passed = false; __ctest_ctx->fail_message = message; } while (false)
+do { __ctest_ctx->passed = false; __ctest_ctx->fail_message = message; return; } while (false)
 
 /**
  * Asserts that the given condition is true, and fails the current test case with a message containing the condition if it is false.
