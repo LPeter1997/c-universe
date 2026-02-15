@@ -62,6 +62,8 @@ typedef struct ArgumentPack {
     CommandDescription* command;
     Option* options;
     size_t options_length;
+
+    char const* error;
 } ArgumentPack;
 
 #ifdef __cplusplus
