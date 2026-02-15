@@ -36,8 +36,9 @@ extern "C" {
 #endif
 
 typedef struct OptionParseResult {
-    bool success;
     void* value;
+    // Owned error message in case of a parsing failure, must be freed by the caller
+    // A non-NULL value indicates a parsing failure, while a NULL value indicates a parsing success
     char const* error;
 } OptionParseResult;
 
@@ -184,11 +185,47 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
         // If we already have the max number of argumnets, then we have an error
         if (result.options_length >= result.command->options_length) {
             result.error = __argparse_snprintf("argument '%s' is over the maximum number of allowed arguments for command '%s'", argPart, result.command->name);
-            break;
+            return result;
         }
 
-        // Look for an option matching the given argument
-        // TODO
+        // Parse this option, find the matching option description for it
+        // First we look for a full match for either the long or the short name of the option
+        for (size_t i = 0; i < result.command->options_length; ++i) {
+            OptionDescription* optionDesc = &result.command->options[i];
+
+            // Check if this option matches the long name or the short name
+            if (!((optionDesc->long_name != NULL && strcmp(optionDesc->long_name, argPart) == 0)
+               || (optionDesc->short_name != NULL && strcmp(optionDesc->short_name, argPart) == 0)))  continue;
+
+            // Full name match
+            if (!optionDesc->takes_value) {
+                // The option takes no value, we can just add it to the result and move on
+                result.options[result.options_length++] = (Option){ .description = *optionDesc, .value = optionDesc->default_value };
+                ++argIndex;
+                goto next_arg;
+            }
+
+            // The option takes a value, so we need to look at the next argument for the value
+            if (argIndex + 1 >= argc) {
+                result.error = __argparse_snprintf("option '%s' requires a value, but no more arguments were provided", argPart);
+                return result;
+            }
+
+            // We have a value for this option, so we can parse it using the option's parse function
+            char const* valuePart = argv[argIndex + 1];
+            OptionParseResult parseResult = optionDesc->parse_fn(valuePart, strlen(valuePart));
+            if (parseResult.error != NULL) {
+                result.error = __argparse_snprintf("failed to parse value '%s' for option '%s': %s", valuePart, argPart, parseResult.error);
+                ARGPARSE_FREE(parseResult.error);
+                return result;
+            }
+
+            // We successfully parsed the value, so we can add the option with the parsed value to the result and move on
+            result.options[result.options_length++] = (Option){ .description = *optionDesc, .value = parseResult.value };
+            argIndex += 2;
+            goto next_arg;
+        }
+    next_arg:;
     }
 }
 
