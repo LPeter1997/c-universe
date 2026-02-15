@@ -100,8 +100,8 @@ ARGPARSE_DEF void argparse_add_option(CommandDescription* command, OptionDescrip
 ARGPARSE_DEF void argparse_add_subcommand(CommandDescription* command, CommandDescription subcommand);
 ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 
-ARGPARSE_DEF bool argparse_has_option(ArgumentPack* pack, OptionDescription* optionDesc);
-ARGPARSE_DEF void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc);
+ARGPARSE_DEF bool argparse_has_option(ArgumentPack* pack, char const* name);
+ARGPARSE_DEF void* argparse_get_value(ArgumentPack* pack, char const* name);
 
 #ifdef __cplusplus
 }
@@ -170,6 +170,11 @@ static bool __argparse_options_eq(OptionDescription* a, OptionDescription* b) {
         || (a->short_name != NULL && a->short_name == b->short_name);
 }
 
+static bool __argparse_option_has_name(OptionDescription* optionDesc, char const* name) {
+    return (optionDesc->long_name != NULL && strcmp(optionDesc->long_name, name) == 0)
+        || (optionDesc->short_name != NULL && strcmp(optionDesc->short_name, name) == 0);
+}
+
 static void __argparse_pack_ensure_option_capacity(ArgumentPack* pack, size_t newCapacity) {
     if (newCapacity <= pack->options_capacity) return;
 
@@ -205,8 +210,7 @@ static bool __argparse_match_option_to_argument(ArgumentPack* pack, OptionDescri
     // NOTE: this function is guaranteed to be called with argIndex < argc, so argv[*argIndex] is always valid
     char const* argPart = argv[*argIndex];
     // Try to match either fully or partially with a separator following with a value, if the option takes a value
-    bool fullMatch = (optionDesc->long_name != NULL && strcmp(argPart, optionDesc->long_name) == 0)
-                  || (optionDesc->short_name != NULL && strcmp(argPart, optionDesc->short_name) == 0);
+    bool fullMatch = __argparse_option_has_name(optionDesc, argPart);
     if (fullMatch) {
         if (optionDesc->takes_value) {
             // The value must be the next argument
@@ -419,22 +423,30 @@ void argparse_free_command(CommandDescription* command) {
     command->subcommands_capacity = 0;
 }
 
-bool argparse_has_option(ArgumentPack* pack, OptionDescription* optionDesc) {
+bool argparse_has_option(ArgumentPack* pack, char const* name) {
     for (size_t i = 0; i < pack->options_length; ++i) {
-        if (&pack->options[i].description == optionDesc) {
+        if (__argparse_option_has_name(&pack->options[i].description, name)) {
             return true;
         }
     }
     return false;
 }
 
-void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc) {
+void* argparse_get_value(ArgumentPack* pack, char const* name) {
+    // Look among the specified options
     for (size_t i = 0; i < pack->options_length; ++i) {
-        if (&pack->options[i].description == optionDesc) {
+        if (__argparse_option_has_name(&pack->options[i].description, name)) {
             return pack->options[i].value;
         }
     }
-    return optionDesc->default_value;
+    // Looks for a default value in the command's option descriptions
+    for (size_t i = 0; i < pack->command->options_length; ++i) {
+        OptionDescription* optionDesc = &pack->command->options[i];
+        if (__argparse_option_has_name(optionDesc, name)) {
+            return optionDesc->default_value;
+        }
+    }
+    return NULL;
 }
 
 #endif /* ARGPARSE_IMPLEMENTATION */
@@ -567,10 +579,10 @@ CTEST_CASE(successful_parse_separate_argument) {
     ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error == NULL);
-    void* numberValue = argparse_get_value(&pack, &rootCommand.options[0]);
+    void* numberValue = argparse_get_value(&pack, "--number");
     CTEST_ASSERT_TRUE(numberValue != NULL);
     CTEST_ASSERT_TRUE(*(int*)numberValue == 42);
-    bool hasFlag = argparse_has_option(&pack, &rootCommand.options[1]);
+    bool hasFlag = argparse_has_option(&pack, "--flag");
     CTEST_ASSERT_TRUE(hasFlag);
 
     argparse_free(&pack);
