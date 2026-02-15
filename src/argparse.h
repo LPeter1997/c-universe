@@ -196,6 +196,14 @@ static void __argparse_add_option_to_pack(ArgumentPack* pack, OptionDescription*
 }
 
 static void* __argparse_parse_option_value(ArgumentPack* pack, OptionDescription* optionDesc, char const* valueText, size_t valueTextLength) {
+    // If the parse function is null, we just return the raw text as the value, since we have no way to parse it
+    if (optionDesc->parse_fn == NULL) {
+        char* value = (char*)ARGPARSE_REALLOC(NULL, valueTextLength + 1);
+        ARGPARSE_ASSERT(value != NULL, "failed to allocate memory for option value");
+        strncpy(value, valueText, valueTextLength);
+        value[valueTextLength] = '\0';
+        return value;
+    }
     OptionParseResult parseResult = optionDesc->parse_fn(valueText, valueTextLength);
     if (parseResult.error != NULL) {
         char const* optionName = __argparse_infer_option_name(optionDesc);
