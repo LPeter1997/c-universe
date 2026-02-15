@@ -100,6 +100,8 @@ ARGPARSE_DEF void argparse_add_option(CommandDescription* command, OptionDescrip
 ARGPARSE_DEF void argparse_add_subcommand(CommandDescription* command, CommandDescription subcommand);
 ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 
+ARGPARSE_DEF void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc);
+
 #ifdef __cplusplus
 }
 #endif
@@ -409,6 +411,15 @@ void argparse_free_command(CommandDescription* command) {
     command->subcommands = NULL;
     command->subcommands_length = 0;
     command->subcommands_capacity = 0;
+}
+
+void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc) {
+    for (size_t i = 0; i < pack->options_length; ++i) {
+        if (&pack->options[i].description == optionDesc) {
+            return pack->options[i].value;
+        }
+    }
+    return optionDesc->default_value;
 }
 
 #endif /* ARGPARSE_IMPLEMENTATION */
