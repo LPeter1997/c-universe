@@ -24,6 +24,13 @@
 #   define ARGPARSE_DEF extern
 #endif
 
+#ifndef ARGPARSE_REALLOC
+#   define ARGPARSE_REALLOC realloc
+#endif
+#ifndef ARGPARSE_FREE
+#   define ARGPARSE_FREE free
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -66,9 +73,13 @@ typedef struct ArgumentPack {
     char const* program_name;
 
     CommandDescription* command;
+    // Owned array of options that were parsed for the command
+    // The allocated memory might be longer than the actual number of options
     Option* options;
     size_t options_length;
 
+    // Error message in case of a parsing failure
+    // The memory is owned by this struct and must be freed
     char const* error;
 } ArgumentPack;
 
@@ -85,13 +96,53 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef ARGPARSE_IMPLEMENTATION
 
+#include <assert.h>
 #include <string.h>
+
+#define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
+
+/**
+ * Duplicates a string, moving the copy to heap-memory.
+ * Used for errors that we want to return in owned memory.
+ * @param str The string to duplicate.
+ * @return A pointer to the duplicated string, which is owned by the caller and must be freed.
+ */
+static char const* __argparse_strdup(char const* str) {
+    size_t length = strlen(str);
+    char* copy = (char*)ARGPARSE_REALLOC(NULL, length + 1);
+    ARGPARSE_ASSERT(copy != NULL, "failed to allocate memory for string copy");
+    strcpy(copy, str);
+    return copy;
+}
+
+/**
+ * Formats a string using printf-style formatting, moving the result to heap-memory.
+ * Used for errors that we want to return in owned memory.
+ * @param format The printf-style format string.
+ * @param ... The arguments for the format string.
+ * @return A pointer to the formatted string, which is owned by the caller and must be freed.
+ */
+static char const* __argparse_snprintf(char const* format, ...) {
+    va_list args;
+    va_start(args, format);
+    size_t length = vsnprintf(NULL, 0, format, args);
+    va_end(args);
+
+    char* result = (char*)ARGPARSE_REALLOC(NULL, length + 1);
+    ARGPARSE_ASSERT(result != NULL, "failed to allocate memory for formatted string");
+
+    va_start(args, format);
+    vsnprintf(result, length + 1, format, args);
+    va_end(args);
+
+    return result;
+}
 
 ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_command) {
     ArgumentPack result = { 0 };
 
     if (argc < 1) {
-        result.error = "an empty argument list was provided";
+        result.error = __argparse_strdup("an empty argument list was provided");
         return result;
     }
 
@@ -125,7 +176,20 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
     }
 
     // We have looked up the appropriate command, now we need to parse the options for it
-    // TODO
+    result.options = (Option*)ARGPARSE_REALLOC(NULL, sizeof(Option) * result.command->options_length);
+    ARGPARSE_ASSERT(result.options != NULL, "failed to allocate memory for options");
+    while (argIndex < argc) {
+        char const* argPart = argv[argIndex];
+
+        // If we already have the max number of argumnets, then we have an error
+        if (result.options_length >= result.command->options_length) {
+            result.error = __argparse_snprintf("argument '%s' is over the maximum number of allowed arguments for command '%s'", argPart, result.command->name);
+            break;
+        }
+
+        // Look for an option matching the given argument
+        // TODO
+    }
 }
 
 #endif /* ARGPARSE_IMPLEMENTATION */
