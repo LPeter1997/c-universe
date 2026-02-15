@@ -81,6 +81,10 @@ typedef struct TestExecution {
     bool passed;
     // An optional message describing the failure, if the test case failed
     char const* fail_message;
+    // An optional file path to the file where the failure happened
+    char const* fail_file;
+    // An optional line number where the failure happened
+    int fail_line;
 } TestExecution;
 
 /**
@@ -123,6 +127,8 @@ extern TestSuite __ctest_default_suite;
     do { \
         __ctest_ctx->passed = false; \
         __ctest_ctx->fail_message = message; \
+        __ctest_ctx->fail_file = __FILE__; \
+        __ctest_ctx->fail_line = __LINE__; \
         return; \
     } while (false)
 
@@ -328,7 +334,7 @@ void ctest_print_report(TestReport report) {
     printf("  Failing cases (%zu):\n", report.failing_cases_length);
     for (size_t i = 0; i < report.failing_cases_length; ++i) {
         TestExecution execution = report.failing_cases[i];
-        printf("    - %s: %s\n", execution.test_case->name, execution.fail_message);
+        printf("    - %s: %s (file: %s, line: %d)\n", execution.test_case->name, execution.fail_message, execution.fail_file, execution.fail_line);
     }
     if (report.failing_cases_length == 0) {
         printf(" Success!\n");
