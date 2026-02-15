@@ -165,6 +165,11 @@ static char const* __argparse_infer_option_name(OptionDescription* optionDesc) {
     return "<unnamed option>";
 }
 
+static bool __argparse_options_eq(OptionDescription* a, OptionDescription* b) {
+    return (a->long_name != NULL && a->long_name == b->long_name)
+        || (a->short_name != NULL && a->short_name == b->short_name);
+}
+
 static void __argparse_pack_ensure_option_capacity(ArgumentPack* pack, size_t newCapacity) {
     if (newCapacity <= pack->options_capacity) return;
 
@@ -352,8 +357,7 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
         // Check if we have a value for the required option
         bool found = false;
         for (size_t j = 0; j < result.options_length; ++j) {
-            // TODO: Bug is here, this comparison will NEVER be true :(
-            if (&result.options[j].description == optionDesc) {
+            if (__argparse_options_eq(&result.options[j].description, optionDesc)) {
                 found = true;
                 break;
             }
