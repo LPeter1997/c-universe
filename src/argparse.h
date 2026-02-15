@@ -66,9 +66,11 @@ typedef struct CommandDescription {
 
     OptionDescription* options;
     size_t options_length;
+    size_t options_capacity;
 
     CommandDescription* subcommands;
     size_t subcommands_length;
+    size_t subcommands_capacity;
 } CommandDescription;
 
 typedef struct Option {
@@ -90,7 +92,12 @@ typedef struct ArgumentPack {
     char const* error;
 } ArgumentPack;
 
-ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_command);
+ARGPARSE_DEF ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_command);
+ARGPARSE_DEF void argparse_free(ArgumentPack* pack);
+
+ARGPARSE_DEF void argparse_add_command_option(CommandDescription* command, OptionDescription optionDesc);
+ARGPARSE_DEF void argparse_add_command_subcommand(CommandDescription* command, CommandDescription subcommand);
+ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 
 #ifdef __cplusplus
 }
@@ -344,6 +351,53 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
     }
 
     return result;
+}
+
+void argparse_free(ArgumentPack* pack) {
+    for (size_t i = 0; i < pack->options_length; ++i) {
+        ARGPARSE_FREE(pack->options[i].value);
+    }
+    ARGPARSE_FREE(pack->options);
+    if (pack->error != NULL) {
+        ARGPARSE_FREE((void*)pack->error);
+    }
+}
+
+void argparse_add_command_option(CommandDescription* command, OptionDescription optionDesc) {
+    if (command->options_length >= command->options_capacity) {
+        size_t newCapacity = (command->options_capacity == 0) ? 8 : command->options_capacity * 2;
+        OptionDescription* newOptions = (OptionDescription*)ARGPARSE_REALLOC(command->options, sizeof(OptionDescription) * newCapacity);
+        ARGPARSE_ASSERT(newOptions != NULL, "failed to allocate memory for command options");
+        command->options = newOptions;
+        command->options_capacity = newCapacity;
+    }
+    command->options[command->options_length++] = optionDesc;
+}
+
+void argparse_add_command_subcommand(CommandDescription* command, CommandDescription subcommand) {
+    if (command->subcommands_length >= command->subcommands_capacity) {
+        size_t newCapacity = (command->subcommands_capacity == 0) ? 8 : command->subcommands_capacity * 2;
+        CommandDescription* newSubcommands = (CommandDescription*)ARGPARSE_REALLOC(command->subcommands, sizeof(CommandDescription) * newCapacity);
+        ARGPARSE_ASSERT(newSubcommands != NULL, "failed to allocate memory for command subcommands");
+        command->subcommands = newSubcommands;
+        command->subcommands_capacity = newCapacity;
+    }
+    command->subcommands[command->subcommands_length++] = subcommand;
+}
+
+void argparse_free_command(CommandDescription* command) {
+    ARGPARSE_FREE(command->options);
+    command->options = NULL;
+    command->options_length = 0;
+    command->options_capacity = 0;
+
+    for (size_t i = 0; i < command->subcommands_length; ++i) {
+        argparse_free_command(&command->subcommands[i]);
+    }
+    ARGPARSE_FREE(command->subcommands);
+    command->subcommands = NULL;
+    command->subcommands_length = 0;
+    command->subcommands_capacity = 0;
 }
 
 #endif /* ARGPARSE_IMPLEMENTATION */
