@@ -59,9 +59,7 @@ typedef struct Option {
 typedef struct ArgumentPack {
     char const* program_name;
 
-    char const** command_path;
-    size_t command_path_length;
-
+    CommandDescription* command;
     Option* options;
     size_t options_length;
 } ArgumentPack;
