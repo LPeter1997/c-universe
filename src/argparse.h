@@ -16,6 +16,7 @@
 #ifndef ARGPARSE_H
 #define ARGPARSE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef ARGPARSE_STATIC
@@ -68,7 +69,7 @@ typedef struct CommandDescription {
     size_t options_length;
     size_t options_capacity;
 
-    CommandDescription* subcommands;
+    struct CommandDescription* subcommands;
     size_t subcommands_length;
     size_t subcommands_capacity;
 } CommandDescription;
@@ -95,8 +96,8 @@ typedef struct ArgumentPack {
 ARGPARSE_DEF ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_command);
 ARGPARSE_DEF void argparse_free(ArgumentPack* pack);
 
-ARGPARSE_DEF void argparse_add_command_option(CommandDescription* command, OptionDescription optionDesc);
-ARGPARSE_DEF void argparse_add_command_subcommand(CommandDescription* command, CommandDescription subcommand);
+ARGPARSE_DEF void argparse_add_option(CommandDescription* command, OptionDescription optionDesc);
+ARGPARSE_DEF void argparse_add_subcommand(CommandDescription* command, CommandDescription subcommand);
 ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 
 #ifdef __cplusplus
@@ -111,6 +112,9 @@ ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 #ifdef ARGPARSE_IMPLEMENTATION
 
 #include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
@@ -139,7 +143,7 @@ static char const* __argparse_strdup(char const* str) {
 static char const* __argparse_snprintf(char const* format, ...) {
     va_list args;
     va_start(args, format);
-    size_t length = vsnprintf(NULL, 0, format, args);
+    size_t length = (size_t)vsnprintf(NULL, 0, format, args);
     va_end(args);
 
     char* result = (char*)ARGPARSE_REALLOC(NULL, length + 1);
@@ -315,7 +319,7 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
         // Try to match the argument to an option
         for (size_t i = 0; i < result.command->options_length; ++i) {
             OptionDescription* optionDesc = &result.command->options[i];
-            if (__argparse_match_option_to_argument(&result, optionDesc, argv, &argIndex)) {
+            if (__argparse_match_option_to_argument(&result, optionDesc, argc, argv, &argIndex)) {
                 // Match found
                 break;
             }
@@ -338,7 +342,7 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
         // Check if we have a value for the required option
         bool found = false;
         for (size_t j = 0; j < result.options_length; ++j) {
-            if (result.options[j].description == optionDesc) {
+            if (&result.options[j].description == optionDesc) {
                 found = true;
                 break;
             }
@@ -363,7 +367,7 @@ void argparse_free(ArgumentPack* pack) {
     }
 }
 
-void argparse_add_command_option(CommandDescription* command, OptionDescription optionDesc) {
+void argparse_add_option(CommandDescription* command, OptionDescription optionDesc) {
     if (command->options_length >= command->options_capacity) {
         size_t newCapacity = (command->options_capacity == 0) ? 8 : command->options_capacity * 2;
         OptionDescription* newOptions = (OptionDescription*)ARGPARSE_REALLOC(command->options, sizeof(OptionDescription) * newCapacity);
@@ -374,7 +378,7 @@ void argparse_add_command_option(CommandDescription* command, OptionDescription 
     command->options[command->options_length++] = optionDesc;
 }
 
-void argparse_add_command_subcommand(CommandDescription* command, CommandDescription subcommand) {
+void argparse_add_subcommand(CommandDescription* command, CommandDescription subcommand) {
     if (command->subcommands_length >= command->subcommands_capacity) {
         size_t newCapacity = (command->subcommands_capacity == 0) ? 8 : command->subcommands_capacity * 2;
         CommandDescription* newSubcommands = (CommandDescription*)ARGPARSE_REALLOC(command->subcommands, sizeof(CommandDescription) * newCapacity);
@@ -401,3 +405,103 @@ void argparse_free_command(CommandDescription* command) {
 }
 
 #endif /* ARGPARSE_IMPLEMENTATION */
+
+////////////////////////////////////////////////////////////////////////////////
+// Self-testing section                                                       //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef ARGPARSE_SELF_TEST
+
+#include <ctype.h>
+#include <stdio.h>
+
+// Let's use our own test framework
+#define CTEST_STATIC
+#define CTEST_IMPLEMENTATION
+#define CTEST_MAIN
+#include "ctest.h"
+
+static OptionParseResult parse_int_option(char const* text, size_t length) {
+    // Just check, if it's all digits
+    for (size_t i = 0; i < length; ++i) {
+        if (!isdigit((unsigned char)text[i])) {
+            return (OptionParseResult){
+                .value = NULL,
+                // TODO: We shouldn't leak internal API like this
+                // But we should also provide the user with a nicer API to report errors...
+                .error = __argparse_snprintf("expected an integer value, but got '%s'", text),
+            };
+        }
+    }
+    // It is a valid integer, so we parse it and return the value
+    int* value = (int*)ARGPARSE_REALLOC(NULL, sizeof(int));
+    ARGPARSE_ASSERT(value != NULL, "failed to allocate memory for parsed integer value");
+    *value = atoi(text);
+    return (OptionParseResult){
+        .value = value,
+        .error = NULL,
+    };
+}
+
+// We build a command-tree like so:
+// <root>: two options, --number/-n that takes an integer value (required) and --flag/-f that is a simple bool (optional)
+static CommandDescription build_sample_command(void) {
+    CommandDescription rootCommand = { 0 };
+    rootCommand.name = "<root>";
+    rootCommand.description = "Root command";
+
+    argparse_add_option(&rootCommand, (OptionDescription){
+        .long_name = "--number",
+        .short_name = "-n",
+        .description = "A required option that takes an integer value",
+        .is_required = true,
+        .takes_value = true,
+        .default_value = NULL,
+        .allow_multiple = false,
+        .parse_fn = parse_int_option,
+    });
+    argparse_add_option(&rootCommand, (OptionDescription){
+        .long_name = "--flag",
+        .short_name = "-f",
+        .description = "An optional flag that doesn't take a value",
+        .is_required = false,
+        .takes_value = false,
+        .default_value = NULL,
+        .allow_multiple = false,
+        .parse_fn = NULL,
+    });
+
+    // TODO: To suppress error
+    if (false) {
+        argparse_add_subcommand(&rootCommand, (CommandDescription){
+            .name = "subcommand",
+            .description = "A subcommand that doesn't do anything",
+        });
+    }
+
+    return rootCommand;
+}
+
+CTEST_CASE(empty_argument_list) {
+    CommandDescription rootCommand = build_sample_command();
+    ArgumentPack pack = argparse_parse(0, NULL, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error != NULL);
+    // printf("Expected error for empty argument list: %s\n", pack.error);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+CTEST_CASE(missing_required_option) {
+    CommandDescription rootCommand = build_sample_command();
+    char* argv[] = { "program" };
+    ArgumentPack pack = argparse_parse(1, argv, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error != NULL);
+    printf("Expected error for missing required option: %s\n", pack.error);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+#endif /* ARGPARSE_SELF_TEST */
