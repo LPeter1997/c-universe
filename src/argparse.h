@@ -100,6 +100,7 @@ ARGPARSE_DEF void argparse_add_option(CommandDescription* command, OptionDescrip
 ARGPARSE_DEF void argparse_add_subcommand(CommandDescription* command, CommandDescription subcommand);
 ARGPARSE_DEF void argparse_free_command(CommandDescription* command);
 
+ARGPARSE_DEF bool argparse_has_option(ArgumentPack* pack, OptionDescription* optionDesc);
 ARGPARSE_DEF void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc);
 
 #ifdef __cplusplus
@@ -413,6 +414,15 @@ void argparse_free_command(CommandDescription* command) {
     command->subcommands_capacity = 0;
 }
 
+bool argparse_has_option(ArgumentPack* pack, OptionDescription* optionDesc) {
+    for (size_t i = 0; i < pack->options_length; ++i) {
+        if (&pack->options[i].description == optionDesc) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void* argparse_get_value(ArgumentPack* pack, OptionDescription* optionDesc) {
     for (size_t i = 0; i < pack->options_length; ++i) {
         if (&pack->options[i].description == optionDesc) {
@@ -541,6 +551,22 @@ CTEST_CASE(invalid_option_value) {
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
     // printf("Expected error for invalid option value: %s\n", pack.error);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+CTEST_CASE(successful_parse_separate_argument) {
+    CommandDescription rootCommand = build_sample_command();
+    char* argv[] = { "program", "--number", "42", "--flag" };
+    ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error == NULL);
+    void* numberValue = argparse_get_value(&pack, &rootCommand.options[0]);
+    CTEST_ASSERT_TRUE(numberValue != NULL);
+    CTEST_ASSERT_TRUE(*(int*)numberValue == 42);
+    bool hasFlag = argparse_has_option(&pack, &rootCommand.options[1]);
+    CTEST_ASSERT_TRUE(hasFlag);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
