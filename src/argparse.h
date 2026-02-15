@@ -28,19 +28,17 @@
 extern "C" {
 #endif
 
+typedef bool OptionParseFn(char const* text, size_t length, void* result);
+
 typedef struct OptionDescription {
     char const* long_name;
     char const* short_name;
     char const* description;
     bool is_required;
-    char const* default_value;
     bool takes_value;
+    void* default_value;
+    OptionParseFn* parse_fn;
 } OptionDescription;
-
-typedef struct Option {
-    OptionDescription description;
-    char const* value;
-} Option;
 
 typedef struct CommandDescription {
     char const* name;
@@ -52,6 +50,11 @@ typedef struct CommandDescription {
     CommandDescription* subcommands;
     size_t subcommands_length;
 } CommandDescription;
+
+typedef struct Option {
+    OptionDescription description;
+    void* value;
+} Option;
 
 typedef struct ArgumentPack {
     char const* program_name;
