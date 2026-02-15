@@ -257,9 +257,10 @@ static bool __argparse_match_option_to_argument(ArgumentPack* pack, OptionDescri
         // We assume 0 is no match
         if (nameLength == 0) continue;
         // Check if the name is followed by the separator
-        if (strcmp(argPart + nameLength, separator) != 0) continue;
+        size_t separatorLength = strlen(separator);
+        if (strncmp(argPart + nameLength, separator, separatorLength) != 0) continue;
         // We have a match, so we try to parse the value after the separator
-        char const* valueText = argPart + nameLength + strlen(separator);
+        char const* valueText = argPart + nameLength + separatorLength;
         // Since the value can be enclosed in quotes here, we trim it so the parser doesn't have to deal with that
         size_t valueTextLength = strlen(valueText);
         if (valueText[0] == '"' || valueText[0] == '\'') {
@@ -531,7 +532,6 @@ CTEST_CASE(empty_argument_list) {
     ArgumentPack pack = argparse_parse(0, NULL, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
-    // printf("Expected error for empty argument list: %s\n", pack.error);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
@@ -543,7 +543,6 @@ CTEST_CASE(missing_required_option) {
     ArgumentPack pack = argparse_parse(1, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
-    // printf("Expected error for missing required option: %s\n", pack.error);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
@@ -555,7 +554,6 @@ CTEST_CASE(unrecognized_option) {
     ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
-    // printf("Expected error for unrecognized option: %s\n", pack.error);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
@@ -567,7 +565,6 @@ CTEST_CASE(invalid_option_value) {
     ArgumentPack pack = argparse_parse(3, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
-    // printf("Expected error for invalid option value: %s\n", pack.error);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
@@ -577,6 +574,22 @@ CTEST_CASE(successful_parse_separate_argument) {
     CommandDescription rootCommand = build_sample_command();
     char* argv[] = { "program", "--number", "42", "--flag" };
     ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error == NULL);
+    void* numberValue = argparse_get_value(&pack, "--number");
+    CTEST_ASSERT_TRUE(numberValue != NULL);
+    CTEST_ASSERT_TRUE(*(int*)numberValue == 42);
+    bool hasFlag = argparse_has_option(&pack, "--flag");
+    CTEST_ASSERT_TRUE(hasFlag);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+CTEST_CASE(successful_parse_combined_argument) {
+    CommandDescription rootCommand = build_sample_command();
+    char* argv[] = { "program", "--number=42", "-f" };
+    ArgumentPack pack = argparse_parse(3, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error == NULL);
     void* numberValue = argparse_get_value(&pack, "--number");
