@@ -321,7 +321,7 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
             OptionDescription* optionDesc = &result.command->options[i];
             if (__argparse_match_option_to_argument(&result, optionDesc, argc, argv, &argIndex)) {
                 // Match found
-                break;
+                goto found_option;
             }
             else if (result.error != NULL) {
                 // Error, exit immediately
@@ -332,6 +332,13 @@ ArgumentPack argparse_parse(int argc, char** argv, CommandDescription* root_comm
                 continue;
             }
         }
+
+        // If we get here, we couldn't match the argument to any option, so we return an error
+        result.error = __argparse_snprintf("unrecognized argument '%s' for command '%s'", argv[argIndex], result.command->name);
+        return result;
+
+    found_option:
+        continue;
     }
 
     // Check, if all required options were provided, and if not, return an error
@@ -498,7 +505,31 @@ CTEST_CASE(missing_required_option) {
     ArgumentPack pack = argparse_parse(1, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
-    printf("Expected error for missing required option: %s\n", pack.error);
+    // printf("Expected error for missing required option: %s\n", pack.error);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+CTEST_CASE(unrecognized_option) {
+    CommandDescription rootCommand = build_sample_command();
+    char* argv[] = { "program", "--number", "42", "--unknown" };
+    ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error != NULL);
+    // printf("Expected error for unrecognized option: %s\n", pack.error);
+
+    argparse_free(&pack);
+    argparse_free_command(&rootCommand);
+}
+
+CTEST_CASE(invalid_option_value) {
+    CommandDescription rootCommand = build_sample_command();
+    char* argv[] = { "program", "--number", "not_an_integer" };
+    ArgumentPack pack = argparse_parse(3, argv, &rootCommand);
+
+    CTEST_ASSERT_TRUE(pack.error != NULL);
+    // printf("Expected error for invalid option value: %s\n", pack.error);
 
     argparse_free(&pack);
     argparse_free_command(&rootCommand);
