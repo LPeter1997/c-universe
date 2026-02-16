@@ -46,6 +46,7 @@ typedef struct GC_World {
     struct {
         struct GC_HashBucket* buckets;
         size_t buckets_capacity;
+        size_t entry_count;
     } hash_map;
 } GC_World;
 
@@ -116,13 +117,7 @@ static uintptr_t gc_hash_code(void* address) {
 static double gc_hash_map_load_factor(GC_World* gc) {
     // We handle NULL buckets as max load factor
     if (gc->hash_map.buckets == NULL) return 1;
-    // Count the total number of elements
-    size_t totalElementCount = 0;
-    for (size_t i = 0; i < gc->hash_map.buckets_capacity; ++i) {
-        totalElementCount += gc->hash_map.buckets[i].length;
-    }
-    // Now we can compute load factor
-    return (double)totalElementCount / gc->hash_map.buckets_capacity;
+    return (double)gc->hash_map.entry_count / gc->hash_map.buckets_capacity;
 }
 
 static void gc_add_to_hash_bucket(GC_HashBucket* bucket, GC_HashEntry entry) {
@@ -192,6 +187,7 @@ static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation
     };
     size_t bucketIndex = entry.hash_code % gc->hash_map.buckets_capacity;
     gc_add_to_hash_bucket(&gc->hash_map.buckets[bucketIndex], entry);
+    ++gc->hash_map.entry_count;
 }
 
 static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
@@ -205,6 +201,7 @@ static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) 
         if (bucket->entries[i].allocation.base == baseAddress) {
             // Found
             gc_remove_from_hash_bucket_at(bucket, i);
+            --gc->hash_map.entry_count;
             break;
         }
     }
