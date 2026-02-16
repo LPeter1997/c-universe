@@ -211,6 +211,23 @@ static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) 
     if (loadFactor < GC_HashTable_DownsizeLoadFactor) gc_shrink_hash_map(gc);
 }
 
+static GC_HashEntry* gc_get_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
+    if (gc->hash_map.buckets_capacity == 0) return NULL;
+
+    // First, compute what bucket the element would be in
+    size_t bucketIndex = gc_hash_code(baseAddress) % gc->hash_map.buckets_capacity;
+     // Search within bucket
+    GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
+    for (size_t i = 0; i < bucket->length; ++i) {
+        GC_HashEntry* entry = &bucket->entries[i];
+        // Found
+        if (entry->allocation.base == baseAddress) return entry;
+    }
+
+    // Not found
+    return NULL;
+}
+
 // TODO: Other ////////////////////////////////////////////////////////////////
 
 #undef GC_ASSERT
