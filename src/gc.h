@@ -75,6 +75,7 @@ GC_DEF void gc_unpin(GC_World* gc, void* mem);
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define GC_ASSERT(condition, message) assert(((void)message, condition))
@@ -82,8 +83,8 @@ GC_DEF void gc_unpin(GC_World* gc, void* mem);
 enum : uint8_t {
     GC_FLAG_NONE = 0,
     GC_FLAG_CREATED = 1 << 0,
-    GC_FLAG_MARKED = 2 << 0,
-    GC_FLAG_PINNED = 3 << 0,
+    GC_FLAG_MARKED = 1 << 1,
+    GC_FLAG_PINNED = 1 << 2,
 };
 
 typedef struct GC_Allocation {
@@ -96,7 +97,7 @@ typedef struct GC_Allocation {
 
 typedef struct GC_HashEntry {
     GC_Allocation allocation;
-    uint32_t hash_code;
+    uintptr_t hash_code;
 } GC_HashEntry;
 
 typedef struct GC_HashBucket {
@@ -105,23 +106,23 @@ typedef struct GC_HashBucket {
     size_t capacity;
 } GC_HashBucket;
 
-const double GC_HashTable_UpsizeLoadFactor = 0.75;
-const double GC_HashTable_DownsizeLoadFactor = 0.25;
+static const double GC_HashTable_UpsizeLoadFactor = 0.75;
+static const double GC_HashTable_DownsizeLoadFactor = 0.25;
 
-static size_t gc_hash_code(coid* address) {
-    return (uint32_t)address / 8;
+static uintptr_t gc_hash_code(void* address) {
+    return (uintptr_t)address / 8;
 }
 
-static double gc_hash_map_load_factor(GC_World* gc, GC_Allocation allocation) {
+static double gc_hash_map_load_factor(GC_World* gc) {
     // We handle NULL buckets as max load factor
     if (gc->hash_map.buckets == NULL) return 1;
-    // Count the number of occupied buckets
-    size_t occupiedBucketCount = 0;
+    // Count the total number of elements
+    size_t totalElementCount = 0;
     for (size_t i = 0; i < gc->hash_map.buckets_capacity; ++i) {
-        if (gc->hash_map.buckets[i].length > 0) ++occupiedBucketCount;
+        totalElementCount += gc->hash_map.buckets[i].length;
     }
     // Now we can compute load factor
-    return (double)occupiedBucketCount / gc->hash_map.buckets_capacity;
+    return (double)totalElementCount / gc->hash_map.buckets_capacity;
 }
 
 static void gc_add_to_hash_bucket(GC_HashBucket* bucket, GC_HashEntry entry) {
@@ -182,7 +183,7 @@ static void gc_shrink_hash_map(GC_World* gc) {
 static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation) {
     // Grow if needed
     double loadFactor = gc_hash_map_load_factor(gc);
-    if (loadFactor > GC_HashTable_UpsizeLoadFactor) gc_grow_hash_map(gc);
+    if (loadFactor > GC_HashTable_UpsizeLoadFactor || gc->hash_map.buckets_capacity == 0) gc_grow_hash_map(gc);
 
     // Emplace
     GC_HashEntry entry = {
@@ -194,17 +195,23 @@ static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation
 }
 
 static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
+    if (gc->hash_map.buckets_capacity == 0) return;
+
     // First, compute what bucket the element would be in
     size_t bucketIndex = gc_hash_code(baseAddress) % gc->hash_map.buckets_capacity;
     // Look for the index within the bucket
     GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
     for (size_t i = 0; i < bucket->length; ++i) {
-        if (bucket->entries.allocation.base == baseAddr) {
+        if (bucket->entries[i].allocation.base == baseAddress) {
             // Found
             gc_remove_from_hash_bucket_at(bucket, i);
-            return;
+            break;
         }
     }
+
+    // Shrink, if needed
+    double loadFactor = gc_hash_map_load_factor(gc);
+    if (loadFactor < GC_HashTable_DownsizeLoadFactor) gc_shrink_hash_map(gc);
 }
 
 // TODO: Other ////////////////////////////////////////////////////////////////
