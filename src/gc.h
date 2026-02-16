@@ -41,6 +41,7 @@ struct GC_Allocation;
 
 typedef struct GC_World {
     double sweep_factor;
+    bool paused;
 
     // Main data-structure of the opaque allocation elements
     struct {
@@ -83,9 +84,8 @@ GC_DEF void gc_unpin(GC_World* gc, void* mem);
 
 enum : uint8_t {
     GC_FLAG_NONE = 0,
-    GC_FLAG_CREATED = 1 << 0,
-    GC_FLAG_MARKED = 1 << 1,
-    GC_FLAG_PINNED = 1 << 2,
+    GC_FLAG_MARKED = 1 << 0,
+    GC_FLAG_PINNED = 1 << 1,
 };
 
 typedef struct GC_Allocation {
@@ -228,7 +228,35 @@ static GC_Allocation* gc_get_allocation_from_hash_map(GC_World* gc, void* baseAd
     return NULL;
 }
 
-// TODO: Other ////////////////////////////////////////////////////////////////
+// Mark and sweep //////////////////////////////////////////////////////////////
+
+static void gc_mark_address(GC_World* gc, void* addr) {
+    GC_Allocation* allocation = gc_get_allocation_from_hash_map(gc, addr);
+    // If not belonging to an allocation, nothing to do
+    if (allocation == NULL) return;
+    // If already marked, nothing to do
+    if ((allocation->flags & GC_FLAG_MARKED) != 0) return;
+    // First off, mark
+    allocation->flags |= GC_FLAG_MARKED;
+    // Then we can mark each address within this allocated region
+    uint8_t* startAddress = (uint8_t*)allocation->base;
+    // NOTE: We make sure to only read addresses fully within
+    uint8_t* endAddress = startAddress + allocation->size - (allocation->size % sizeof(uintptr_t));
+    // Align start address
+    uintptr_t misalign = (uintptr_t)startAddress % sizeof(uintptr_t);
+    if (misalign > 0) startAddress += sizeof(uintptr_t) - misalign;
+    // Mark every address referenced within
+    for (uintptr_t* addr = (uintptr_t*)startAddress; addr < (uintptr_t*)endAddress; ++addr) {
+        void* referencedAddr = (void*)*addr;
+        gc_mark_address(gc, referencedAddr);
+    }
+}
+
+static void gc_mark(GC_World* gc) {
+    gc_mark_pinned(gc);
+    gc_mark_stack(gc);
+    gc_mark_globals(gc);
+}
 
 #undef GC_ASSERT
 
