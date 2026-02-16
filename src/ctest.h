@@ -354,8 +354,6 @@ void ctest_print_report(CTest_Report report) {
 }
 #endif
 
-#undef CTEST_CASES_START
-#undef CTEST_CASES_END
 #undef CTEST_ASSERT
 
 #endif /* CTEST_IMPLEMENTATION */
