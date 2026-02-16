@@ -92,21 +92,42 @@ enum : uint8_t {
     GC_FLAG_PINNED = 1 << 1,
 };
 
+typedef struct GC_GlobalSections {
+    void** starts;
+    void** ends;
+    size_t length;
+} GC_GlobalSections;
+
 typedef struct GC_Allocation {
     void* base_address;
     size_t size;
     uint8_t flags;
 } GC_Allocation;
 
+static void gc_add_global_section(GC_GlobalSections* sections, void* start, void* end) {
+    ++sections->length;
+    sections->starts = GC_REALLOC(sections->starts, sizeof(void*) * sections->length);
+    GC_ASSERT(sections->starts != NULL, "failed to reallocate section start array");
+    sections->ends = GC_REALLOC(sections->ends, sizeof(void*) * sections->length);
+    GC_ASSERT(sections->ends != NULL, "failed to reallocate section end array");
+    sections->starts[sections->length - 1] = start;
+    sections->ends[sections->length - 1] = end;
+}
+
 // Platform-specific ///////////////////////////////////////////////////////////
 
 #if defined(_WIN32)
+// NOTE: For now this ties us to Windows 8 or later, maybe look into eliminating it
+// We need this for the stack size
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602
 #include <Windows.h>
+#include <processthreadsapi.h>
 #elif defined(__linux__) || defined(__APPLE__)
 #include <pthread.h>
 #endif
 
-void* gc_platform_compute_stack_bottom() {
+static void* gc_platform_compute_stack_bottom() {
 #if defined(_WIN32)
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
@@ -126,21 +147,38 @@ void* gc_platform_compute_stack_bottom() {
 }
 
 #if defined(_WIN32)
-    // TODO
+    EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #elif defined(__linux__) || defined(__APPLE__)
     extern char __data_start;
     extern char _end;
 #endif
 
-void gc_platform_get_global_section_range(void** start, void** end) {
+static GC_GlobalSections gc_platform_get_global_sections() {
+    GC_GlobalSections sections;
 #if defined(_WIN32)
-    // TODO
+    // Base of the module (executable or DLL)
+    uintptr_t base = (uintptr_t)&__ImageBase;
+    // Get the DOS header
+    IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    // Iterate sections
+    IMAGE_SECTION_HEADER* sectionHeaders = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        IMAGE_SECTION_HEADER* s = &sectionHeaders[i];
+        // Look for .data or .bss (uninitialized data is usually in .bss)
+        if ((memcmp(s->Name, ".data", 5) == 0)
+         || (memcmp(s->Name, ".bss", 4) == 0)) {
+            uintptr_t start = base + s->VirtualAddress;
+            uintptr_t end = start + s->Misc.VirtualSize;
+            gc_add_global_section(&sections, (void*)start, (void*)end);
+        }
+    }
 #elif defined(__linux__) || defined(__APPLE__)
-    *start = (void*)__data_start;
-    *end = (void*)_end;
+    gc_add_global_section(&sections, (void*)__data_start, (void*)_end);
 #else
     #error "unsupported platform"
 #endif
+    return sections;
 }
 
 // Hash-map ////////////////////////////////////////////////////////////////////
