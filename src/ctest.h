@@ -47,36 +47,36 @@
 extern "C" {
 #endif
 
-struct TestExecution;
+struct CTest_Execution;
 
 /**
  * A single test case in the test suite.
  */
-typedef struct TestCase {
+typedef struct CTest_Case {
     // The name of the test case
     char const* name;
     // The test function that gets executed when this case is ran
-    void(*test_fn)(struct TestExecution*);
-} TestCase;
+    void(*test_fn)(struct CTest_Execution*);
+} CTest_Case;
 
 /**
  * A test suite, which is a collection of test cases.
  */
-typedef struct TestSuite {
+typedef struct CTest_Suite {
     // The test cases in the suite
-    TestCase* test_cases;
+    CTest_Case* test_cases;
     // The number of test cases in the suite
     size_t test_cases_length;
     // The capacity of the test_cases array
     size_t test_cases_capacity;
-} TestSuite;
+} CTest_Suite;
 
 /**
  * The context and result of a test case execution.
  */
-typedef struct TestExecution {
+typedef struct CTest_Execution {
     // The test case that was executed
-    TestCase const* test_case;
+    CTest_Case const* test_case;
     // True, if the test case passed, false if it failed
     bool passed;
     // An optional message describing the failure, if the test case failed
@@ -85,39 +85,39 @@ typedef struct TestExecution {
     char const* fail_file;
     // An optional line number where the failure happened
     int fail_line;
-} TestExecution;
+} CTest_Execution;
 
 /**
  * A filter for test cases, used to select which cases to run when running a test suite.
  */
-typedef struct TestFilter {
+typedef struct CTest_Filter {
     // A function that gets called for each test case in the suite, and returns true if the case should be run, or false if it should be skipped
-    bool(*filter_fn)(TestCase const*, void*);
+    bool(*filter_fn)(CTest_Case const*, void*);
     // User data that gets passed to the filter function
     void* user;
-} TestFilter;
+} CTest_Filter;
 
 /**
  * The report of a test suite execution, containing the results of all ran test cases.
  */
-typedef struct TestReport {
+typedef struct CTest_Report {
     // The test executions that passed
-    TestExecution* passing_cases;
+    CTest_Execution* passing_cases;
     // The number of test executions that passed
     size_t passing_cases_length;
     // The capacity of the passing_cases array
     size_t passing_cases_capacity;
 
     // The test executions that failed
-    TestExecution* failing_cases;
+    CTest_Execution* failing_cases;
     // The number of test executions that failed
     size_t failing_cases_length;
     // The capacity of the failing_cases array
     size_t failing_cases_capacity;
-} TestReport;
+} CTest_Report;
 
 // Used as a target to automatically register the cases
-extern TestSuite __ctest_default_suite;
+extern CTest_Suite __ctest_default_suite;
 
 /**
  * Fails the current test case with the given message.
@@ -147,15 +147,15 @@ extern TestSuite __ctest_default_suite;
  * @param n The identifier to use as the test case name.
  */
 #define CTEST_CASE(n) \
-static void n(TestExecution* __ctest_ctx); \
+static void n(CTest_Execution* __ctest_ctx); \
 __CTEST_AUTOREGISTER_CASE(n) \
-void n(TestExecution* __ctest_ctx)
+void n(CTest_Execution* __ctest_ctx)
 
 #if defined(__GNUC__) || defined(__clang__)
     #define __CTEST_AUTOREGISTER_CASE(n) \
     __attribute__((constructor)) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n }); \
     }
 #elif defined(_MSC_VER)
     #ifdef _WIN64
@@ -170,7 +170,7 @@ void n(TestExecution* __ctest_ctx)
     __declspec(allocate(".CRT$XCU")) void (*__ctest_register_ ## n ## _)(void) = __ctest_register_ ## n; \
     __pragma(comment(linker,"/include:" __CTEST_LINKER_PREFIX "__ctest_register_" #n "_")) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (TestCase){ .name = #n, .test_fn = n }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n }); \
     }
 #else
     #error "unsupported C compiler"
@@ -181,13 +181,13 @@ void n(TestExecution* __ctest_ctx)
  * @param suite The test suite to register the case in.
  * @param testCase The test case to register.
  */
-CTEST_DEF void ctest_register_case(TestSuite* suite, TestCase testCase);
+CTEST_DEF void ctest_register_case(CTest_Suite* suite, CTest_Case testCase);
 
 /**
  * Automatically collects all test cases defined with @see CTEST_CASE and returns them as a test suite.
  * @returns A test suite containing all test cases defined with @see CTEST_CASE.
  */
-CTEST_DEF TestSuite ctest_get_suite(void);
+CTEST_DEF CTest_Suite ctest_get_suite(void);
 
 /**
  * Runs the given test suite with the given filter, and returns a report of the execution.
@@ -195,32 +195,32 @@ CTEST_DEF TestSuite ctest_get_suite(void);
  * @param filter The filter to use when running the test suite.
  * @returns A report of the test suite execution.
  */
-CTEST_DEF TestReport ctest_run_suite(TestSuite suite, TestFilter filter);
+CTEST_DEF CTest_Report ctest_run_suite(CTest_Suite suite, CTest_Filter filter);
 
 /**
  * Runs the given test case and returns the execution result.
  * @param testCase The test case to run.
  * @returns The execution result of the test case.
  */
-CTEST_DEF TestExecution ctest_run_case(TestCase const* testCase);
+CTEST_DEF CTest_Execution ctest_run_case(CTest_Case const* testCase);
 
 /**
  * Frees the memory allocated for the given test suite.
  * @param suite The test suite to free.
  */
-CTEST_DEF void ctest_free_suite(TestSuite* suite);
+CTEST_DEF void ctest_free_suite(CTest_Suite* suite);
 
 /**
  * Frees the memory allocated for the given test report.
  * @param report The test report to free.
  */
-CTEST_DEF void ctest_free_report(TestReport* report);
+CTEST_DEF void ctest_free_report(CTest_Report* report);
 
 /**
  * Prints a human-readable report of the given test report to stdout.
  * @param report The test report to print.
  */
-CTEST_DEF void ctest_print_report(TestReport report);
+CTEST_DEF void ctest_print_report(CTest_Report report);
 
 #ifdef __cplusplus
 }
@@ -243,12 +243,12 @@ CTEST_DEF void ctest_print_report(TestReport report);
 extern "C" {
 #endif
 
-TestSuite __ctest_default_suite;
+CTest_Suite __ctest_default_suite;
 
-void ctest_register_case(TestSuite* suite, TestCase testCase) {
+void ctest_register_case(CTest_Suite* suite, CTest_Case testCase) {
     if (suite->test_cases_length + 1 > suite->test_cases_capacity) {
         size_t newCapacity = (suite->test_cases_capacity == 0) ? 8 : (suite->test_cases_capacity * 2);
-        TestCase* newCases = (TestCase*)CTEST_REALLOC((void*)suite->test_cases, sizeof(TestCase) * newCapacity);
+        CTest_Case* newCases = (CTest_Case*)CTEST_REALLOC((void*)suite->test_cases, sizeof(CTest_Case) * newCapacity);
         CTEST_ASSERT(newCases != NULL, "failed to allocate memory for test suite");
         suite->test_cases = newCases;
         suite->test_cases_capacity = newCapacity;
@@ -257,12 +257,12 @@ void ctest_register_case(TestSuite* suite, TestCase testCase) {
     ++suite->test_cases_length;
 }
 
-TestSuite ctest_get_suite(void) {
+CTest_Suite ctest_get_suite(void) {
     return __ctest_default_suite;
 }
 
-TestReport ctest_run_suite(TestSuite suite, TestFilter filter) {
-    TestReport report = {
+CTest_Report ctest_run_suite(CTest_Suite suite, CTest_Filter filter) {
+    CTest_Report report = {
         .passing_cases = NULL,
         .passing_cases_length = 0,
         .passing_cases_capacity = 0,
@@ -271,20 +271,20 @@ TestReport ctest_run_suite(TestSuite suite, TestFilter filter) {
         .failing_cases_capacity = 0,
     };
     for (size_t i = 0; i < suite.test_cases_length; ++i) {
-        TestCase const* testCase = &suite.test_cases[i];
+        CTest_Case const* testCase = &suite.test_cases[i];
 
         // Use filter function, if specified
         if (filter.filter_fn != NULL && !filter.filter_fn(testCase, filter.user)) continue;
 
-        TestExecution execution = ctest_run_case(testCase);
+        CTest_Execution execution = ctest_run_case(testCase);
 
         // Add execution to report
-        TestExecution** targetList = execution.passed ? &report.passing_cases : &report.failing_cases;
+        CTest_Execution** targetList = execution.passed ? &report.passing_cases : &report.failing_cases;
         size_t* targetListLength = execution.passed ? &report.passing_cases_length : &report.failing_cases_length;
         size_t* targetListCapacity = execution.passed ? &report.passing_cases_capacity : &report.failing_cases_capacity;
         if (*targetListLength + 1 > *targetListCapacity) {
             size_t newCapacity = (*targetListCapacity == 0) ? 8 : (*targetListCapacity * 2);
-            TestExecution* newList = (TestExecution*)CTEST_REALLOC(*targetList, newCapacity * sizeof(TestExecution));
+            CTest_Execution* newList = (CTest_Execution*)CTEST_REALLOC(*targetList, newCapacity * sizeof(CTest_Execution));
             CTEST_ASSERT(newList != NULL, "failed to allocate memory for test report");
             *targetList = newList;
             *targetListCapacity = newCapacity;
@@ -295,9 +295,9 @@ TestReport ctest_run_suite(TestSuite suite, TestFilter filter) {
     return report;
 }
 
-TestExecution ctest_run_case(TestCase const* testCase) {
+CTest_Execution ctest_run_case(CTest_Case const* testCase) {
     // Create execution context for the test case
-    TestExecution execution = {
+    CTest_Execution execution = {
         .test_case = testCase,
         // By default, tests are passing until an assertion fail happens
         .passed = true,
@@ -307,13 +307,13 @@ TestExecution ctest_run_case(TestCase const* testCase) {
     return execution;
 }
 
-void ctest_free_suite(TestSuite* suite) {
+void ctest_free_suite(CTest_Suite* suite) {
     CTEST_FREE((void*)suite->test_cases);
     suite->test_cases = NULL;
     suite->test_cases_length = 0;
 }
 
-void ctest_free_report(TestReport* report) {
+void ctest_free_report(CTest_Report* report) {
     CTEST_FREE(report->passing_cases);
     CTEST_FREE(report->failing_cases);
     report->passing_cases = NULL;
@@ -324,16 +324,16 @@ void ctest_free_report(TestReport* report) {
     report->failing_cases_capacity = 0;
 }
 
-void ctest_print_report(TestReport report) {
+void ctest_print_report(CTest_Report report) {
     printf("Test report:\n");
     printf("  Passing cases (%zu):\n", report.passing_cases_length);
     for (size_t i = 0; i < report.passing_cases_length; ++i) {
-        TestExecution execution = report.passing_cases[i];
+        CTest_Execution execution = report.passing_cases[i];
         printf("    - %s\n", execution.test_case->name);
     }
     printf("  Failing cases (%zu):\n", report.failing_cases_length);
     for (size_t i = 0; i < report.failing_cases_length; ++i) {
-        TestExecution execution = report.failing_cases[i];
+        CTest_Execution execution = report.failing_cases[i];
         printf("    - %s: %s (file: %s, line: %d)\n", execution.test_case->name, execution.fail_message, execution.fail_file, execution.fail_line);
     }
     if (report.failing_cases_length == 0) {
@@ -366,7 +366,7 @@ typedef struct CliFilters {
     size_t word_count;
 } CliFilters;
 
-static bool filter_cases_by_name(TestCase const* testCase, void* user) {
+static bool filter_cases_by_name(CTest_Case const* testCase, void* user) {
     CliFilters* filters = (CliFilters*)user;
     for (size_t i = 0; i < filters->word_count; ++i) {
         if (strstr(testCase->name, filters->words[i]) != NULL) {
@@ -380,7 +380,7 @@ int main(int argc, char* argv[]) {
     // We implement a default main program that runs all test cases, if no arguments are specified
     // If there are arguments, we use them as filters and only run the cases that contain any of the arguments as a substring in their name
 
-    TestFilter filter = { 0 };
+    CTest_Filter filter = { 0 };
     CliFilters cliFilters = { 0 };
     if (argc > 1) {
         cliFilters.words = &argv[1];
@@ -389,8 +389,8 @@ int main(int argc, char* argv[]) {
         filter.user = &cliFilters;
     }
 
-    TestSuite suite = ctest_get_suite();
-    TestReport report = ctest_run_suite(suite, filter);
+    CTest_Suite suite = ctest_get_suite();
+    CTest_Report report = ctest_run_suite(suite, filter);
     ctest_print_report(report);
     int exitCode = (report.failing_cases_length == 0) ? 0 : 1;
 
@@ -412,7 +412,7 @@ int main(int argc, char* argv[]) {
 typedef struct ExpectedTestCase {
     size_t runCount;
     bool shouldPass;
-    void(*test_fn)(TestExecution*);
+    void(*test_fn)(CTest_Execution*);
     char const* name;
 } ExpectedTestCase;
 
@@ -439,14 +439,14 @@ ExpectedTestCase expectedCases[] = {
 #undef EXPECTED_CASE
 };
 
-TestCase const* find_test_case_in_suite_by_function(TestSuite suite, void(*testFn)(TestExecution*)) {
+CTest_Case const* find_test_case_in_suite_by_function(CTest_Suite suite, void(*testFn)(CTest_Execution*)) {
     for (size_t i = 0; i < suite.test_cases_length; ++i) {
         if (suite.test_cases[i].test_fn == testFn) return &suite.test_cases[i];
     }
     return NULL;
 }
 
-TestExecution* find_test_execution_in_report_by_function(TestReport report, void(*testFn)(TestExecution*)) {
+CTest_Execution* find_test_execution_in_report_by_function(CTest_Report report, void(*testFn)(CTest_Execution*)) {
     for (size_t i = 0; i < report.passing_cases_length; ++i) {
         if (report.passing_cases[i].test_case->test_fn == testFn) {
             return &report.passing_cases[i];
@@ -464,7 +464,7 @@ int main(void) {
     puts("Running CTEST self-test...");
 
     // Collect suite
-    TestSuite suite = ctest_get_suite();
+    CTest_Suite suite = ctest_get_suite();
 
     // Assert number of cases
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
@@ -478,7 +478,7 @@ int main(void) {
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
         // Look for the expected case in the test suite
-        TestCase const* gotCase = find_test_case_in_suite_by_function(suite, expectedCase->test_fn);
+        CTest_Case const* gotCase = find_test_case_in_suite_by_function(suite, expectedCase->test_fn);
         if (gotCase == NULL) {
             printf("iteration did not yield test case %s\n", expectedCase->name);
             return 1;
@@ -490,12 +490,12 @@ int main(void) {
         }
     }
 
-    TestReport report = ctest_run_suite(suite, (TestFilter){ .filter_fn = NULL, .user = NULL });
+    CTest_Report report = ctest_run_suite(suite, (CTest_Filter){ .filter_fn = NULL, .user = NULL });
 
     // Assert that each test ran exactly once and that they have the appropriate fail state
     for (size_t i = 0; i < expectedCaseCount; ++i) {
         ExpectedTestCase* expectedCase = &expectedCases[i];
-        TestExecution* gotExecution = find_test_execution_in_report_by_function(report, expectedCase->test_fn);
+        CTest_Execution* gotExecution = find_test_execution_in_report_by_function(report, expectedCase->test_fn);
         if (expectedCase->runCount != 1) {
             printf("expected test case to run exactly once, but was run %zu time(s)\n", expectedCase->runCount);
             return 1;
