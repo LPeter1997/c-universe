@@ -120,15 +120,21 @@ typedef struct CTest_Report {
 extern CTest_Suite __ctest_default_suite;
 
 /**
+ * The name to refer to for the current test execution context.
+ * When calling an assertion macro from a non-test-case function, make sure to pass this as a parameter to it.
+ */
+#define CTEST_CONTEXT __ctest_ctx
+
+/**
  * Fails the current test case with the given message.
  * @param message The message to fail with.
  */
 #define CTEST_ASSERT_FAIL(message) \
     do { \
-        __ctest_ctx->passed = false; \
-        __ctest_ctx->fail_message = message; \
-        __ctest_ctx->fail_file = __FILE__; \
-        __ctest_ctx->fail_line = __LINE__; \
+        CTEST_CONTEXT->passed = false; \
+        CTEST_CONTEXT->fail_message = message; \
+        CTEST_CONTEXT->fail_file = __FILE__; \
+        CTEST_CONTEXT->fail_line = __LINE__; \
         return; \
     } while (false)
 
@@ -147,9 +153,9 @@ extern CTest_Suite __ctest_default_suite;
  * @param n The identifier to use as the test case name.
  */
 #define CTEST_CASE(n) \
-static void n(CTest_Execution* __ctest_ctx); \
+static void n(CTest_Execution* CTEST_CONTEXT); \
 __CTEST_AUTOREGISTER_CASE(n) \
-void n(CTest_Execution* __ctest_ctx)
+void n(CTest_Execution* CTEST_CONTEXT)
 
 #if defined(__GNUC__) || defined(__clang__)
     #define __CTEST_AUTOREGISTER_CASE(n) \
