@@ -25,43 +25,28 @@
 #   define GC_DEF extern
 #endif
 
-#ifndef GC_REALLOC_INTERNAL
-#   define GC_REALLOC_INTERNAL realloc
+#ifndef GC_REALLOC
+#   define GC_REALLOC realloc
 #endif
-#ifndef GC_FREE_INTERNAL
-#   define GC_FREE_INTERNAL free
+#ifndef GC_FREE
+#   define GC_FREE free
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum GC_AddressMode {
-    GC_ADDRESS_MODE_EXACT = 0,
-    GC_ADDRESS_MODE_CONTAIN = 1,
-} GC_AddressMode;
+struct GC_HashBucket;
+struct GC_Allocation;
 
 typedef struct GC_World {
-    GC_AddressMode address_mode;
     double sweep_factor;
+
     // Main data-structure of the opaque allocation elements
-    union {
-        // Used for exact address matching
-        struct {
-            void* buckets;
-            size_t buckets_length;
-            size_t occupied_buckets_length;
-            double upsize_load_factor;
-            double downsize_load_factor;
-        } __hash_map;
-        // Used for address containment matching
-        struct {
-            void* items;
-            size_t items_length;
-            size_t items_capacity;
-            double downsize_capacity_factor;
-        } __interval_map;
-    };
+    struct {
+        struct GC_HashBucket* buckets;
+        size_t buckets_capacity;
+    } hash_map;
 } GC_World;
 
 GC_DEF void gc_start(GC_World* gc);
@@ -90,6 +75,7 @@ GC_DEF void gc_unpin(GC_World* gc, void* mem);
 
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 
 #define GC_ASSERT(condition, message) assert(((void)message, condition))
 
@@ -106,13 +92,122 @@ typedef struct GC_Allocation {
     uint8_t flags;
 } GC_Allocation;
 
+// Hash-map ////////////////////////////////////////////////////////////////////
+
+typedef struct GC_HashEntry {
+    GC_Allocation allocation;
+    uint32_t hash_code;
+} GC_HashEntry;
+
 typedef struct GC_HashBucket {
-    GC_Allocation* allocations;
+    GC_HashEntry* entries;
     size_t length;
     size_t capacity;
 } GC_HashBucket;
 
-// static void __gc_add_allocation(GC_World* gc, )
+const double GC_HashTable_UpsizeLoadFactor = 0.75;
+const double GC_HashTable_DownsizeLoadFactor = 0.25;
+
+static size_t gc_hash_code(coid* address) {
+    return (uint32_t)address / 8;
+}
+
+static double gc_hash_map_load_factor(GC_World* gc, GC_Allocation allocation) {
+    // We handle NULL buckets as max load factor
+    if (gc->hash_map.buckets == NULL) return 1;
+    // Count the number of occupied buckets
+    size_t occupiedBucketCount = 0;
+    for (size_t i = 0; i < gc->hash_map.buckets_capacity; ++i) {
+        if (gc->hash_map.buckets[i].length > 0) ++occupiedBucketCount;
+    }
+    // Now we can compute load factor
+    return (double)occupiedBucketCount / gc->hash_map.buckets_capacity;
+}
+
+static void gc_add_to_hash_bucket(GC_HashBucket* bucket, GC_HashEntry entry) {
+    if (bucket->length == bucket->capacity) {
+        // Need to resize
+        bucket->capacity *= 2;
+        if (bucket->capacity < 8) bucket->capacity = 8;
+        bucket->entries = (GC_HashEntry*)GC_REALLOC(bucket->entries, sizeof(GC_HashEntry) * bucket->capacity);
+        GC_ASSERT(bucket->entries != NULL, "failed to allocate array for GC hash bucket entries");
+    }
+    bucket->entries[bucket->length++] = entry;
+}
+
+static void gc_remove_from_hash_bucket_at(GC_HashBucket* bucket, size_t index) {
+    --bucket->length;
+    memmove(bucket->entries + index, bucket->entries + index + 1, sizeof(GC_HashEntry) * (bucket->length - index));
+}
+
+static void gc_resize_hash_map_to_number_of_buckets(GC_World* gc, size_t newCapacity) {
+    if (gc->hash_map.buckets_capacity == newCapacity) return;
+    // Allocate a new bucket array
+    GC_HashBucket* newBuckets = (GC_HashBucket*)GC_REALLOC(NULL, sizeof(GC_HashBucket) * newCapacity);
+    GC_ASSERT(newBuckets != NULL, "failed to allocate bucket array for GC hash map upscaling");
+    // Initialize the new bucket arrays
+    memset(newBuckets, 0, sizeof(GC_HashBucket) * newCapacity);
+    // Add each item from each bucket to the new bucket array, essentially redistributing
+    for (size_t i = 0; i < gc->hash_map.buckets_capacity; ++i) {
+        GC_HashBucket* oldBucket = &gc->hash_map.buckets[i];
+        for (size_t j = 0; j < oldBucket->length; ++j) {
+            GC_HashEntry entry = oldBucket->entries[j];
+            // Compute the new bucket index
+            size_t newBucketIndex = entry.hash_code % newCapacity;
+            gc_add_to_hash_bucket(&newBuckets[newBucketIndex], entry);
+        }
+        // The old bucket's elements have been redistributed, free it up
+        GC_FREE(oldBucket->entries);
+    }
+    // Free the old bucket, replace entries
+    GC_FREE(gc->hash_map.buckets);
+    gc->hash_map.buckets = newBuckets;
+    gc->hash_map.buckets_capacity = newCapacity;
+}
+
+static void gc_grow_hash_map(GC_World* gc) {
+    // Let's double the size of the bucket array
+    size_t newCapacity = gc->hash_map.buckets_capacity * 2;
+    if (newCapacity < 8) newCapacity = 8;
+    gc_resize_hash_map_to_number_of_buckets(gc, newCapacity);
+}
+
+static void gc_shrink_hash_map(GC_World* gc) {
+    // Lets halve the size of the bucket array
+    size_t newCapacity = gc->hash_map.buckets_capacity / 2;
+    if (newCapacity < 8) return;
+    gc_resize_hash_map_to_number_of_buckets(gc, newCapacity);
+}
+
+static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation) {
+    // Grow if needed
+    double loadFactor = gc_hash_map_load_factor(gc);
+    if (loadFactor > GC_HashTable_UpsizeLoadFactor) gc_grow_hash_map(gc);
+
+    // Emplace
+    GC_HashEntry entry = {
+        .allocation = allocation,
+        .hash_code = gc_hash_code(allocation.base),
+    };
+    size_t bucketIndex = entry.hash_code % gc->hash_map.buckets_capacity;
+    gc_add_to_hash_bucket(&gc->hash_map.buckets[bucketIndex], entry);
+}
+
+static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
+    // First, compute what bucket the element would be in
+    size_t bucketIndex = gc_hash_code(baseAddress) % gc->hash_map.buckets_capacity;
+    // Look for the index within the bucket
+    GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
+    for (size_t i = 0; i < bucket->length; ++i) {
+        if (bucket->entries.allocation.base == baseAddr) {
+            // Found
+            gc_remove_from_hash_bucket_at(bucket, i);
+            return;
+        }
+    }
+}
+
+// TODO: Other ////////////////////////////////////////////////////////////////
 
 #undef GC_ASSERT
 
