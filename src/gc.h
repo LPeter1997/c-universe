@@ -32,12 +32,15 @@
 #   define GC_FREE free
 #endif
 
+#ifndef GC_LOG
+#   define GC_LOG(...)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct GC_HashBucket;
-struct GC_Allocation;
 
 typedef struct GC_World {
     double sweep_factor;
@@ -57,12 +60,12 @@ GC_DEF void gc_pause(GC_World* gc);
 GC_DEF void gc_resume(GC_World* gc);
 GC_DEF void gc_run(GC_World* gc);
 
+GC_DEF void gc_pin(GC_World* gc, void* mem);
+GC_DEF void gc_unpin(GC_World* gc, void* mem);
+
 GC_DEF void* gc_alloc(GC_World* gc, size_t size);
 GC_DEF void* gc_realloc(GC_World* gc, void* mem, size_t size);
 GC_DEF void gc_free(GC_World* gc, void* mem);
-
-GC_DEF void gc_pin(GC_World* gc, void* mem);
-GC_DEF void gc_unpin(GC_World* gc, void* mem);
 
 #ifdef __cplusplus
 }
@@ -150,7 +153,9 @@ static void* gc_platform_compute_stack_bottom() {
     EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #elif defined(__linux__) || defined(__APPLE__)
     extern char __data_start;
-    extern char _end;
+    extern char __data_end;
+    extern char __bss_start;
+    extern char __bss_end;
 #endif
 
 static GC_GlobalSections gc_platform_get_global_sections() {
@@ -174,7 +179,8 @@ static GC_GlobalSections gc_platform_get_global_sections() {
         }
     }
 #elif defined(__linux__) || defined(__APPLE__)
-    gc_add_global_section(&sections, (void*)__data_start, (void*)_end);
+    gc_add_global_section(&sections, (void*)__data_start, (void*)__data_end);
+    gc_add_global_section(&sections, (void*)__bss_start, (void*)__bss_end);
 #else
     #error "unsupported platform"
 #endif
@@ -371,6 +377,48 @@ static void gc_mark(GC_World* gc) {
     gc_mark_pinned(gc);
     gc_mark_stack(gc);
     gc_mark_globals(gc);
+}
+
+// API functions ///////////////////////////////////////////////////////////////
+
+void gc_start(GC_World* gc) {
+    GC_LOG("TODO: gc_start");
+}
+
+void gc_stop(GC_World* gc) {
+    GC_LOG("TODO: gc_stop");
+}
+
+void gc_pause(GC_World* gc) {
+    GC_LOG("TODO: gc_pause");
+}
+
+void gc_resume(GC_World* gc) {
+    GC_LOG("TODO: gc_resume");
+}
+
+void gc_run(GC_World* gc) {
+    GC_LOG("TODO: gc_run");
+}
+
+void gc_pin(GC_World* gc, void* mem) {
+    GC_LOG("TODO: gc_pin");
+}
+
+void gc_unpin(GC_World* gc, void* mem) {
+    GC_LOG("TODO: gc_unpin");
+}
+
+void* gc_alloc(GC_World* gc, size_t size) {
+    GC_LOG("TODO: gc_alloc");
+}
+
+void* gc_realloc(GC_World* gc, void* mem, size_t size) {
+    GC_LOG("TODO: gc_realloc");
+}
+
+void gc_free(GC_World* gc, void* mem) {
+    GC_LOG("TODO: gc_free");
 }
 
 #ifdef __cplusplus
