@@ -248,7 +248,7 @@ static void gc_remove_from_hash_bucket_at(GC_HashBucket* bucket, size_t index) {
     memmove(bucket->entries + index, bucket->entries + index + 1, sizeof(GC_HashEntry) * (bucket->length - index));
 }
 
-static void gc_resize_hash_map_to_number_of_buckets(GC_World* gc, size_t newLength) {
+static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
     if (gc->hash_map.buckets_length == newLength) return;
     // Allocate a new bucket array
     GC_HashBucket* newBuckets = (GC_HashBucket*)GC_REALLOC(NULL, sizeof(GC_HashBucket) * newLength);
@@ -277,17 +277,17 @@ static void gc_grow_hash_map(GC_World* gc) {
     // Let's double the size of the bucket array
     size_t newLength = gc->hash_map.buckets_length * 2;
     if (newLength < 8) newLength = 8;
-    gc_resize_hash_map_to_number_of_buckets(gc, newLength);
+    gc_resize_hash_map(gc, newLength);
 }
 
 static void gc_shrink_hash_map(GC_World* gc) {
     // Lets halve the size of the bucket array
     size_t newLength = gc->hash_map.buckets_length / 2;
     if (newLength < 8) return;
-    gc_resize_hash_map_to_number_of_buckets(gc, newLength);
+    gc_resize_hash_map(gc, newLength);
 }
 
-static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation) {
+static void gc_add_to_hash_map(GC_World* gc, GC_Allocation allocation) {
     // Grow if needed
     double loadFactor = gc_hash_map_load_factor(gc);
     if (loadFactor > GC_HashTable_UpsizeLoadFactor || gc->hash_map.buckets_length == 0) gc_grow_hash_map(gc);
@@ -302,25 +302,32 @@ static void gc_add_allocation_to_hash_map(GC_World* gc, GC_Allocation allocation
     ++gc->hash_map.entry_count;
 }
 
-static void gc_remove_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
-    if (gc->hash_map.buckets_length == 0) return;
+static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocation* outAllocation) {
+    if (gc->hash_map.buckets_length == 0) return false;
 
     // First, compute what bucket the element would be in
     size_t bucketIndex = gc_hash_code(baseAddress) % gc->hash_map.buckets_length;
     // Look for the index within the bucket
     GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
+    bool found = false;
     for (size_t i = 0; i < bucket->length; ++i) {
-        if (bucket->entries[i].allocation.base_address == baseAddress) {
+        GC_Allocation* allocation = &bucket->entries[i].allocation;
+        if (allocation->base_address == baseAddress) {
             // Found
             gc_remove_from_hash_bucket_at(bucket, i);
             --gc->hash_map.entry_count;
+            *outAllocation = *allocation;
+            found = true;
             break;
         }
     }
 
+    if (!found) return false;
+
     // Shrink, if needed
     double loadFactor = gc_hash_map_load_factor(gc);
     if (loadFactor < GC_HashTable_DownsizeLoadFactor) gc_shrink_hash_map(gc);
+    return true;
 }
 
 static GC_Allocation* gc_get_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
@@ -428,6 +435,30 @@ static void gc_mark(GC_World* gc) {
     GC_LOG("mark phase completed");
 }
 
+// Sweep ///////////////////////////////////////////////////////////////////////
+
+void gc_sweep(GC_World* gc) {
+    // We go through the entries, whatever is marked we just unflag and whatever
+    // was not market is freed
+    for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
+        GC_HashBucket* bucket = &gc->hash_map.buckets[i];
+        for (size_t j = 0; j < bucket->length; ) {
+            GC_Allocation* allocation = &bucket->entries[j].allocation;
+            if ((allocation->flags & GC_FLAG_MARKED) != 0) {
+                // Marked, don't free, just clear flag
+                allocation->flags &= ~GC_FLAG_MARKED;
+                ++j;
+                continue;
+            }
+            // Entry is unmarked, we need to free it
+            GC_LOG("sweep found unmarked allocation (address: %p size: %zu), freeing it", allocation->base_address, allocation->size);
+            GC_FREE(allocation->base_address);
+            gc_remove_from_hash_bucket_at(bucket, j);
+            // Since we removed, we are off-by-one, don't increment j
+        }
+    }
+}
+
 // API functions ///////////////////////////////////////////////////////////////
 
 void gc_start(GC_World* gc) {
@@ -451,7 +482,8 @@ void gc_resume(GC_World* gc) {
 
 void gc_run(GC_World* gc) {
     gc_mark(gc);
-    GC_LOG("TODO: gc_run rest");
+    // TODO: We shouldn't always sweep
+    gc_sweep(gc);
 }
 
 void gc_pin(GC_World* gc, void* mem) {
@@ -463,7 +495,19 @@ void gc_unpin(GC_World* gc, void* mem) {
 }
 
 void* gc_alloc(GC_World* gc, size_t size) {
-    GC_LOG("TODO: gc_alloc");
+    void* mem = GC_REALLOC(NULL, size);
+    if (mem == NULL) {
+        GC_LOG("gc_alloc failed to allocate memory of size %zu", size);
+        return NULL;
+    }
+
+    GC_LOG("allocated memory (address: %p, size: %zu)", mem, size);
+    GC_Allocation allocation = {
+        .base_address = mem,
+        .size = size,
+        .flags = GC_FLAG_NONE,
+    };
+    gc_add_to_hash_map(gc, allocation);
 }
 
 void* gc_realloc(GC_World* gc, void* mem, size_t size) {
@@ -471,7 +515,14 @@ void* gc_realloc(GC_World* gc, void* mem, size_t size) {
 }
 
 void gc_free(GC_World* gc, void* mem) {
-    GC_LOG("TODO: gc_free");
+    GC_Allocation removedAllocation;
+    if (!gc_remove_from_hash_map(gc, mem, &removedAllocation)) {
+        GC_LOG("gc_free called with address %p has no corresponding allocation", mem);
+        return;
+    }
+
+    GC_LOG("maunally freeing allocation (address: %p, size: %zu)", removedAllocation.base_address, removedAllocation.size);
+    GC_FREE(removedAllocation.base_address);
 }
 
 #ifdef __cplusplus
