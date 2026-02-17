@@ -13,7 +13,7 @@
  */
 
 // NOTE: We need this to get some extra non-portable functionality
-#if defined(__linux__) && !defined(_GNU_SOURCE)
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(_GNU_SOURCE)
     #define _GNU_SOURCE
 #endif
 
