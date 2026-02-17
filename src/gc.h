@@ -201,10 +201,10 @@ static void* gc_compute_stack_bottom(void) {
 #if defined(_WIN32)
     EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #elif defined(__linux__) || defined(__APPLE__)
-    extern void* __data_start;
-    extern void* __data_end;
-    extern void* __bss_start;
-    extern void* __bss_end;
+    extern char __data_start;
+    extern char _edata;
+    extern char __bss_start;
+    extern char _end;
 #endif
 
 static void gc_collect_global_sections(GC_World* gc) {
@@ -233,13 +233,13 @@ static void gc_collect_global_sections(GC_World* gc) {
 #elif defined(__linux__) || defined(__APPLE__)
     gc_add_global_section(gc, (GC_GlobalSection){
         .name = ".data",
-        .start = __data_start,
-        .end = __data_end,
+        .start = (void*)&__data_start,
+        .end = (void*)&_edata,
     });
     gc_add_global_section(gc, (GC_GlobalSection){
         .name = ".bss",
-        .start = __bss_start,
-        .end = __bss_end,
+        .start = (void*)&__bss_start,
+        .end = (void*)&_end,
     });
 #else
     #error "unsupported platform"
