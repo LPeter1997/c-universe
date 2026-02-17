@@ -600,6 +600,7 @@ void* gc_realloc(GC_World* gc, void* mem, size_t size) {
         return NULL;
     }
     size_t oldSize = allocation->size;
+    (void)oldSize;
 
     // Call out to reallocation
     void* reMem = GC_REALLOC(mem, size);
@@ -647,6 +648,21 @@ void gc_free(GC_World* gc, void* mem) {
 #undef GC_ASSERT
 
 #endif /* GC_IMPLEMENTATION */
+
+////////////////////////////////////////////////////////////////////////////////
+// Self-testing section                                                       //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef GC_SELF_TEST
+
+// We use our own testing library for self-testing
+#define CTEST_STATIC
+#define CTEST_IMPLEMENTATION
+#define CTEST_MAIN
+#include "ctest.h"
+
+// TODO: Implement a test suite here
+
+#endif /* GC_SELF_TEST */
 
 ////////////////////////////////////////////////////////////////////////////////
 // Example section                                                            //
