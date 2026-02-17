@@ -12,17 +12,16 @@
  * Check the example section at the end of this file for a full example.
  */
 
+// NOTE: We need this to get some extra non-portable functionality
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+    #define _GNU_SOURCE
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
 #ifndef GC_H
 #define GC_H
-
-#if defined(__linux__) || defined(__APPLE__)
-    #if !defined(_GNU_SOURCE)
-        #define _GNU_SOURCE
-    #endif
-#endif
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -193,7 +192,7 @@ static void* gc_compute_stack_bottom(void) {
     void *stackbottom;
     size_t stacksize;
     if (pthread_attr_getstack(&attr, &stackbottom, &stacksize) != 0) return NULL;
-    return stackbottom + stacksize;
+    return (void*)((uint8_t*)stackbottom + stacksize);
 #else
     #error "unsupported platform"
 #endif
