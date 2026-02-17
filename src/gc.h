@@ -514,6 +514,7 @@ void* gc_alloc(GC_World* gc, size_t size) {
         .flags = GC_FLAG_NONE,
     };
     gc_add_to_hash_map(gc, allocation);
+    return mem;
 }
 
 void* gc_realloc(GC_World* gc, void* mem, size_t size) {
