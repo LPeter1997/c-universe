@@ -421,9 +421,11 @@ static void gc_mark_globals(GC_World* gc) {
 }
 
 static void gc_mark(GC_World* gc) {
+    GC_LOG("starting mark phase");
     gc_mark_pinned(gc);
     gc_mark_stack(gc);
     gc_mark_globals(gc);
+    GC_LOG("mark phase completed");
 }
 
 // API functions ///////////////////////////////////////////////////////////////
