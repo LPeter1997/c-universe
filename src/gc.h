@@ -611,26 +611,27 @@ void* gc_realloc(GC_World* gc, void* mem, size_t size) {
     }
     size_t oldSize = allocation->size;
     (void)oldSize;
+    uintptr_t oldMem = (uintptr_t)mem;
 
     // Call out to reallocation
     void* reMem = GC_REALLOC(mem, size);
     if (reMem == NULL) {
-        GC_LOG("gc_realloc with memory %p failed to reallocate memory of size %zu to %zu", mem, oldSize, size);
+        GC_LOG("gc_realloc with memory %p failed to reallocate memory of size %zu to %zu", (void*)oldMem, oldSize, size);
         return NULL;
     }
 
-    if (reMem == mem) {
+    if ((uintptr_t)reMem == oldMem) {
         // We are in luck, we can just resize the allocation
-        GC_LOG("gc_realloc called with address %p was resized in-place from %zu to %zu", mem, oldSize, size);
+        GC_LOG("gc_realloc called with address %p was resized in-place from %zu to %zu", (void*)oldMem, oldSize, size);
         allocation->size = size;
-        return mem;
+        return reMem;
     }
 
     // We need to remove and readd
     // NOTE: We could optimize by getting the bucket index and element index from the getter
     // but that feels a bit of an overkill
-    gc_remove_from_hash_map(gc, mem, NULL);
-    GC_LOG("reallocated memory (old address: %p, old size: %zu, new address: %p, new size: %zu)", mem, oldSize, reMem, size);
+    gc_remove_from_hash_map(gc, (void*)oldMem, NULL);
+    GC_LOG("reallocated memory (old address: %p, old size: %zu, new address: %p, new size: %zu)", (void*)oldMem, oldSize, reMem, size);
     GC_Allocation newAllocation = {
         .base_address = reMem,
         .size = size,
