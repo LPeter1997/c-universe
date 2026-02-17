@@ -52,6 +52,17 @@ typedef struct GC_World {
         size_t buckets_length;
         size_t entry_count;
     } hash_map;
+
+    // Sections of global data that needs scanning
+    struct {
+        // Layout is [start1_inclusive, end1_exclusive, start2_inclusive, end2_exclusive, ...]
+        void** endpoints;
+        // The number of endpoint PAIRS stored
+        size_t length;
+    } global_sections;
+
+    // Bottom of the stack
+    void* stack_bottom;
 } GC_World;
 
 GC_DEF void gc_start(GC_World* gc);
@@ -79,6 +90,7 @@ GC_DEF void gc_free(GC_World* gc, void* mem);
 #ifdef GC_IMPLEMENTATION
 
 #include <assert.h>
+#include <setjmp.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,26 +107,19 @@ enum : uint8_t {
     GC_FLAG_PINNED = 1 << 1,
 };
 
-typedef struct GC_GlobalSections {
-    void** starts;
-    void** ends;
-    size_t length;
-} GC_GlobalSections;
-
 typedef struct GC_Allocation {
     void* base_address;
     size_t size;
     uint8_t flags;
 } GC_Allocation;
 
-static void gc_add_global_section(GC_GlobalSections* sections, void* start, void* end) {
-    ++sections->length;
-    sections->starts = GC_REALLOC(sections->starts, sizeof(void*) * sections->length);
-    GC_ASSERT(sections->starts != NULL, "failed to reallocate section start array");
-    sections->ends = GC_REALLOC(sections->ends, sizeof(void*) * sections->length);
-    GC_ASSERT(sections->ends != NULL, "failed to reallocate section end array");
-    sections->starts[sections->length - 1] = start;
-    sections->ends[sections->length - 1] = end;
+static void gc_add_global_section(GC_World* gc, char const* name, void* start, void* end) {
+    ++gc->global_sections.length;
+    gc->global_sections.endpoints = (void**)GC_REALLOC(gc->global_sections.endpoints, sizeof(void*) * gc->global_sections.length * 2);
+    GC_ASSERT(gc->global_sections.endpoints != NULL, "failed to reallocate section array");
+    gc->global_sections.endpoints[gc->global_sections.length - 2] = start;
+    gc->global_sections.endpoints[gc->global_sections.length - 1] = end;
+    GC_LOG("global section '%s' added (start: %p, end: %p)", name, start, end);
 }
 
 // Platform-specific ///////////////////////////////////////////////////////////
@@ -130,7 +135,7 @@ static void gc_add_global_section(GC_GlobalSections* sections, void* start, void
 #include <pthread.h>
 #endif
 
-static void* gc_platform_compute_stack_bottom() {
+static void* gc_compute_stack_bottom() {
 #if defined(_WIN32)
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
@@ -158,8 +163,7 @@ static void* gc_platform_compute_stack_bottom() {
     extern char __bss_end;
 #endif
 
-static GC_GlobalSections gc_platform_get_global_sections() {
-    GC_GlobalSections sections;
+static void gc_collect_global_sections(GC_World* gc) {
 #if defined(_WIN32)
     // Base of the module (executable or DLL)
     uintptr_t base = (uintptr_t)&__ImageBase;
@@ -175,16 +179,15 @@ static GC_GlobalSections gc_platform_get_global_sections() {
          || (memcmp(s->Name, ".bss", 4) == 0)) {
             uintptr_t start = base + s->VirtualAddress;
             uintptr_t end = start + s->Misc.VirtualSize;
-            gc_add_global_section(&sections, (void*)start, (void*)end);
+            gc_add_global_section(gc, (char const*)s->Name, (void*)start, (void*)end);
         }
     }
 #elif defined(__linux__) || defined(__APPLE__)
-    gc_add_global_section(&sections, (void*)__data_start, (void*)__data_end);
-    gc_add_global_section(&sections, (void*)__bss_start, (void*)__bss_end);
+    gc_add_global_section(gc, ".data", (void*)__data_start, (void*)__data_end);
+    gc_add_global_section(gc, ".bss", (void*)__bss_start, (void*)__bss_end);
 #else
     #error "unsupported platform"
 #endif
-    return sections;
 }
 
 // Hash-map ////////////////////////////////////////////////////////////////////
@@ -323,14 +326,25 @@ static GC_Allocation* gc_get_allocation_from_hash_map(GC_World* gc, void* baseAd
 
 // Mark ////////////////////////////////////////////////////////////////////////
 
-static void* gc_align_address_forward(void* address) {
+static void* gc_align_address_forward(uint8_t* address) {
     uintptr_t misalign = (uintptr_t)address % sizeof(uintptr_t);
     if (misalign > 0) address += sizeof(uintptr_t) - misalign;
     return address;
 }
 
-static void* gc_align_address_backward(void* address) {
+static uint8_t* gc_align_address_backward(uint8_t* address) {
     return address - (uintptr_t)address % sizeof(uintptr_t);
+}
+
+static void gc_mark_address(GC_World* gc, void* addr);
+
+static void gc_mark_values_in_address_range(GC_World* gc, void* startAddress, void* endAddress) {
+    startAddress = gc_align_address_forward(startAddress);
+    endAddress = gc_align_address_backward(endAddress);
+    for (uintptr_t* addr = (uintptr_t*)startAddress; addr < (uintptr_t*)endAddress; ++addr) {
+        void* referencedAddr = (void*)*addr;
+        gc_mark_address(gc, referencedAddr);
+    }
 }
 
 static void gc_mark_address(GC_World* gc, void* addr) {
@@ -342,16 +356,7 @@ static void gc_mark_address(GC_World* gc, void* addr) {
     // First off, mark
     allocation->flags |= GC_FLAG_MARKED;
     // Then we can mark each address within this allocated region
-    uint8_t* startAddress = (uint8_t*)allocation->base_address;
-    // NOTE: We make sure to only read addresses fully within
-    uint8_t* endAddress = gc_align_address_backward(startAddress + allocation->size);
-    // Align start address
-    startAddress = (uint8_t*)gc_align_address_forward(startAddress);
-    // Mark every address referenced within
-    for (uintptr_t* addr = (uintptr_t*)startAddress; addr < (uintptr_t*)endAddress; ++addr) {
-        void* referencedAddr = (void*)*addr;
-        gc_mark_address(gc, referencedAddr);
-    }
+    gc_mark_values_in_address_range(gc, (uint8_t*)allocation->base_address, (uint8_t*)allocation->base_address + allocation->size);
 }
 
 static void gc_mark_pinned(GC_World* gc) {
@@ -366,11 +371,30 @@ static void gc_mark_pinned(GC_World* gc) {
 }
 
 static void gc_mark_stack(GC_World* gc) {
-    // TODO: spill registers and walk through stack
+    // Getting stack top + spilling
+    jmp_buf env;
+    void* stackTop = NULL;
+    // spill registers into jmp_buf
+    if (setjmp(env) == 0) {
+        stackTop = (void*)&env;
+    }
+
+    GC_ASSERT(stackTop != NULL, "failed to retrieve stack top, not scanning stack is fatal");
+
+    if (stackTop > gc->stack_bottom) {
+        // Stack grows down
+        GC_LOG("scanning downwards-growing stack (start: %p, end: %p)", stackTop, gc->stack_bottom);
+        gc_mark_values_in_address_range(gc, gc->stack_bottom, stackTop);
+    }
+    else {
+        // Stack grows up
+        GC_LOG("scanning upwards-growing stack (start: %p, end: %p)", gc->stack_bottom, stackTop);
+        gc_mark_values_in_address_range(gc, stackTop, gc->stack_bottom);
+    }
 }
 
 static void gc_mark_globals(GC_World* gc) {
-    // TODO: go through the globals section
+    GC_LOG("TODO: gc_mark_globals");
 }
 
 static void gc_mark(GC_World* gc) {
@@ -382,7 +406,8 @@ static void gc_mark(GC_World* gc) {
 // API functions ///////////////////////////////////////////////////////////////
 
 void gc_start(GC_World* gc) {
-    GC_LOG("TODO: gc_start");
+    gc->stack_bottom = gc_compute_stack_bottom();
+    gc_collect_global_sections(gc);
 }
 
 void gc_stop(GC_World* gc) {
@@ -398,7 +423,8 @@ void gc_resume(GC_World* gc) {
 }
 
 void gc_run(GC_World* gc) {
-    GC_LOG("TODO: gc_run");
+    gc_mark(gc);
+    GC_LOG("TODO: gc_run rest");
 }
 
 void gc_pin(GC_World* gc, void* mem) {
