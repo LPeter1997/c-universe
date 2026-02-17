@@ -543,6 +543,7 @@ size_t gc_run(GC_World* gc, bool force) {
     }
 
     if (force || gc_needs_sweep(gc)) {
+        GC_LOG("mark-and-sweep triggered (forced: %s, sweep limit: %zu)", (force ? "true" : "false"), gc->sweep_limit);
         gc_mark(gc);
         return gc_sweep(gc);
     }
