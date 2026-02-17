@@ -101,7 +101,7 @@ GC_DEF void gc_free(GC_World* gc, void* mem);
 extern "C" {
 #endif
 
-enum : uint8_t {
+enum {
     GC_FLAG_NONE = 0,
     GC_FLAG_MARKED = 1 << 0,
     GC_FLAG_PINNED = 1 << 1,
