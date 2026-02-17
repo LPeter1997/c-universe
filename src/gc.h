@@ -8,6 +8,8 @@
  *
  * API:
  *  - TODO
+ *
+ * Check the example section at the end of this file for a full example.
  */
 
 ////////////////////////////////////////////////////////////////////////////////

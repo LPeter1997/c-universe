@@ -49,3 +49,9 @@ Compile-And-Run `
     -Sources @("../src/ctest.h") `
     -Defines @("CTEST_EXAMPLE") `
     -AllowUnusedParameters
+
+# 2. GC library
+Write-Host "running example for GC library..."
+Compile-And-Run `
+    -Sources @("../src/gc.h") `
+    -Defines @("GC_EXAMPLE")
