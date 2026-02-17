@@ -170,7 +170,7 @@ static void gc_free_data_structures(GC_World* gc) {
 #include <pthread.h>
 #endif
 
-static void* gc_compute_stack_bottom() {
+static void* gc_compute_stack_bottom(void) {
 #if defined(_WIN32)
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
@@ -204,7 +204,7 @@ static void gc_collect_global_sections(GC_World* gc) {
     uintptr_t base = (uintptr_t)&__ImageBase;
     // Get the DOS header
     IMAGE_DOS_HEADER* dos = (IMAGE_DOS_HEADER*)base;
-    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    IMAGE_NT_HEADERS* nt = (IMAGE_NT_HEADERS*)(base + (uintptr_t)dos->e_lfanew);
     // Iterate sections
     IMAGE_SECTION_HEADER* sectionHeaders = IMAGE_FIRST_SECTION(nt);
     for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
@@ -249,7 +249,7 @@ static uintptr_t gc_hash_code(void* address) {
 static double gc_hash_map_load_factor(GC_World* gc) {
     // We handle NULL buckets as max load factor
     if (gc->hash_map.buckets == NULL) return 1;
-    return (double)gc->hash_map.entry_count / gc->hash_map.buckets_length;
+    return (double)gc->hash_map.entry_count / (double)gc->hash_map.buckets_length;
 }
 
 static void gc_add_to_hash_bucket(GC_World* gc, GC_HashBucket* bucket, GC_HashEntry entry) {
@@ -465,7 +465,8 @@ static void gc_mark(GC_World* gc) {
 // Sweep ///////////////////////////////////////////////////////////////////////
 
 static void gc_recompute_sweep_limit(GC_World* gc) {
-    gc->sweep_limit = (size_t)(gc->hash_map.entry_count + gc->sweep_factor * (gc->hash_map.buckets_length - gc->hash_map.entry_count));
+    // NOTE: Maybe revisit to see if behavior is sensible
+    gc->sweep_limit = (size_t)((double)gc->hash_map.entry_count + gc->sweep_factor * (double)(gc->hash_map.buckets_length - gc->hash_map.entry_count));
 }
 
 static bool gc_needs_sweep(GC_World* gc) {
@@ -644,3 +645,47 @@ void gc_free(GC_World* gc, void* mem) {
 #undef GC_ASSERT
 
 #endif /* GC_IMPLEMENTATION */
+
+////////////////////////////////////////////////////////////////////////////////
+// Example section                                                            //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef GC_EXAMPLE
+#undef GC_EXAMPLE
+
+#include <stdio.h>
+
+#undef GC_LOG
+#define GC_LOG(...) do { printf(__VA_ARGS__); puts(""); } while (0)
+#define GC_IMPLEMENTATION
+#define GC_STATIC
+#include "gc.h"
+
+GC_World gc;
+
+void* memGlobal;
+
+void* bar(void) {
+    void* memLocal = gc_alloc(&gc, 1);
+    (void)memLocal;
+    memGlobal = gc_alloc(&gc, 2);
+    void* memReturned = gc_alloc(&gc, 3);
+    gc_run(&gc, true);
+    return memReturned;
+}
+
+void foo(void) {
+    void* memReturned = bar();
+    (void)memReturned;
+    gc_run(&gc, true);
+    memGlobal = NULL;
+}
+
+int main(void) {
+    gc_start(&gc);
+    foo();
+    gc_run(&gc, true);
+    gc_stop(&gc);
+    return 0;
+}
+
+#endif /* GC_EXAMPLE */
