@@ -180,14 +180,13 @@ static void* gc_compute_stack_bottom(void) {
     GetCurrentThreadStackLimits(&low, &high);
     return (void*)high;
 #elif defined(__linux__) || defined(__APPLE__)
+    pthread_t thread = pthread_self();
     pthread_attr_t attr;
-    pthread_getattr_np(pthread_self(), &attr);
-    size_t stack_size;
-    void* stack_addr;
-    pthread_attr_getstack(&attr, &stack_addr, &stack_size);
-    void* stack_bottom = (char*)stack_addr + stack_size; // top of stack memory
-    pthread_attr_destroy(&attr);
-    return stack_bottom;
+    if (pthread_getattr_np(thread, &attr) != 0) return NULL;
+    void *stackbottom;
+    size_t stacksize;
+    if (pthread_attr_getstack(&attr, &stackbottom, &stacksize) != 0) return NULL;
+    return stackbottom + stacksize;
 #else
     #error "unsupported platform"
 #endif
@@ -518,6 +517,7 @@ static size_t gc_sweep(GC_World* gc) {
 
 void gc_start(GC_World* gc) {
     gc->stack_bottom = gc_compute_stack_bottom();
+    GC_ASSERT(gc->stack_bottom != NULL, "failed to compute stack bottom, cannot start GC");
     if (gc->sweep_factor == 0.0) gc->sweep_factor = 0.5;
     gc_collect_global_sections(gc);
 }
