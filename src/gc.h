@@ -69,7 +69,7 @@ GC_DEF void gc_start(GC_World* gc);
 GC_DEF void gc_stop(GC_World* gc);
 GC_DEF void gc_pause(GC_World* gc);
 GC_DEF void gc_resume(GC_World* gc);
-GC_DEF size_t gc_run(GC_World* gc);
+GC_DEF size_t gc_run(GC_World* gc, bool force);
 
 GC_DEF void gc_pin(GC_World* gc, void* mem);
 GC_DEF void gc_unpin(GC_World* gc, void* mem);
@@ -505,10 +505,12 @@ static size_t gc_sweep(GC_World* gc) {
 
 void gc_start(GC_World* gc) {
     gc->stack_bottom = gc_compute_stack_bottom();
+    if (gc->sweep_factor == 0.0) gc->sweep_factor = 0.5;
     gc_collect_global_sections(gc);
 }
 
 void gc_stop(GC_World* gc) {
+    GC_LOG("garbage collector stopped, unpinning all pinned allocations");
     // Let's unpin all pinned allocations, then run a cycle of mark and sweep
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
@@ -534,13 +536,13 @@ void gc_resume(GC_World* gc) {
     gc->paused = false;
 }
 
-size_t gc_run(GC_World* gc) {
+size_t gc_run(GC_World* gc, bool force) {
     if (gc->paused) {
         GC_LOG("skipping mark-and-sweep, garbage collection paused");
         return 0;
     }
 
-    if (gc_needs_sweep(gc)) {
+    if (force || gc_needs_sweep(gc)) {
         gc_mark(gc);
         return gc_sweep(gc);
     }
