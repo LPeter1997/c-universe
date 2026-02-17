@@ -441,8 +441,7 @@ static void gc_mark(GC_World* gc) {
 // Sweep ///////////////////////////////////////////////////////////////////////
 
 void gc_sweep(GC_World* gc) {
-    // We go through the entries, whatever is marked we just unflag and whatever
-    // was not market is freed
+    // We go through the entries, whatever is marked we just unflag and whatever was not marked is freed
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
         for (size_t j = 0; j < bucket->length; ) {
@@ -456,6 +455,7 @@ void gc_sweep(GC_World* gc) {
             // Entry is unmarked, we need to free it
             GC_LOG("sweep found unmarked allocation (address: %p size: %zu), freeing it", allocation->base_address, allocation->size);
             GC_FREE(allocation->base_address);
+            // NOTE: We are allowed to remove like this, this won't trigger shrinking
             gc_remove_from_hash_bucket_at(bucket, j);
             // Since we removed, we are off-by-one, don't increment j
         }
