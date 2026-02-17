@@ -671,6 +671,8 @@ void gc_free(GC_World* gc, void* mem) {
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef GC_SELF_TEST
 
+#include <math.h>
+
 // We use our own testing library for self-testing
 #define CTEST_STATIC
 #define CTEST_IMPLEMENTATION
@@ -685,6 +687,9 @@ void gc_free(GC_World* gc, void* mem) {
 #else
 #   define GC_TEST_NOINLINE
 #endif
+
+// NOTE: Maybe CTEST should ship with utilities like this?
+#define APPROX_EQ(x, y) (fabs((x) - (y)) < 0.0001)
 
 // Helper to create a fresh GC world for each test
 static GC_World test_gc_create(void) {
@@ -1030,7 +1035,7 @@ CTEST_CASE(gc_custom_sweep_factor) {
     GC_World gc = { 0 };
     gc.sweep_factor = 0.8;  // Set custom sweep factor before start
     gc_start(&gc);
-    CTEST_ASSERT_TRUE(gc.sweep_factor == 0.8);
+    CTEST_ASSERT_TRUE(APPROX_EQ(gc.sweep_factor, 0.8));
     gc_stop(&gc);
 }
 
