@@ -140,7 +140,7 @@ static void* gc_compute_stack_bottom() {
 #if defined(_WIN32)
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
-    return (void*)low;
+    return (void*)high;
 #elif defined(__linux__) || defined(__APPLE__)
     pthread_attr_t attr;
     pthread_getattr_np(pthread_self(), &attr);
@@ -380,17 +380,17 @@ static void gc_mark_stack(GC_World* gc) {
         stackTop = (void*)&env;
     }
 
-    GC_ASSERT(stackTop != NULL, "failed to retrieve stack top, not scanning stack is fatal");
+    GC_ASSERT(stackTop != NULL, "failed to retrieve stack top, not marking stack is fatal");
 
-    if (stackTop > gc->stack_bottom) {
+    if (gc->stack_bottom > stackTop) {
         // Stack grows down
-        GC_LOG("scanning downwards-growing stack (start: %p, end: %p)", gc->stack_bottom, stackTop);
-        gc_mark_values_in_address_range(gc, gc->stack_bottom, stackTop);
+        GC_LOG("marking downwards-growing stack (start: %p, end: %p)", stackTop, gc->stack_bottom);
+        gc_mark_values_in_address_range(gc, stackTop, gc->stack_bottom);
     }
     else {
         // Stack grows up
-        GC_LOG("scanning upwards-growing stack (start: %p, end: %p)", stackTop, gc->stack_bottom);
-        gc_mark_values_in_address_range(gc, stackTop, gc->stack_bottom);
+        GC_LOG("marking upwards-growing stack (start: %p, end: %p)", gc->stack_bottom, stackTop);
+        gc_mark_values_in_address_range(gc, gc->stack_bottom, stackTop);
     }
 }
 
