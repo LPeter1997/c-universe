@@ -287,6 +287,11 @@ static void gc_shrink_hash_map(GC_World* gc) {
     gc_resize_hash_map(gc, newLength);
 }
 
+static void gc_shrink_hash_map_if_needed(GC_World* gc) {
+    double loadFactor = gc_hash_map_load_factor(gc);
+    if (loadFactor < GC_HashTable_DownsizeLoadFactor) gc_shrink_hash_map(gc);
+}
+
 static void gc_add_to_hash_map(GC_World* gc, GC_Allocation allocation) {
     // Grow if needed
     double loadFactor = gc_hash_map_load_factor(gc);
@@ -324,9 +329,7 @@ static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocati
 
     if (!found) return false;
 
-    // Shrink, if needed
-    double loadFactor = gc_hash_map_load_factor(gc);
-    if (loadFactor < GC_HashTable_DownsizeLoadFactor) gc_shrink_hash_map(gc);
+    gc_shrink_hash_map_if_needed(gc);
     return true;
 }
 
@@ -457,6 +460,9 @@ void gc_sweep(GC_World* gc) {
             // Since we removed, we are off-by-one, don't increment j
         }
     }
+
+    // Compact hash map
+    gc_shrink_hash_map_if_needed(gc);
 }
 
 // API functions ///////////////////////////////////////////////////////////////
