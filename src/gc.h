@@ -112,7 +112,7 @@ enum {
 typedef struct GC_Allocation {
     void* base_address;
     size_t size;
-    uint8_t flags;
+    int flags;
 } GC_Allocation;
 
 typedef struct GC_GlobalSection {
