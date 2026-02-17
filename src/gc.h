@@ -114,11 +114,12 @@ typedef struct GC_Allocation {
 } GC_Allocation;
 
 static void gc_add_global_section(GC_World* gc, char const* name, void* start, void* end) {
+    size_t addIndex = gc->global_sections.length * 2;
     ++gc->global_sections.length;
     gc->global_sections.endpoints = (void**)GC_REALLOC(gc->global_sections.endpoints, sizeof(void*) * gc->global_sections.length * 2);
     GC_ASSERT(gc->global_sections.endpoints != NULL, "failed to reallocate section array");
-    gc->global_sections.endpoints[gc->global_sections.length - 2] = start;
-    gc->global_sections.endpoints[gc->global_sections.length - 1] = end;
+    gc->global_sections.endpoints[addIndex + 0] = start;
+    gc->global_sections.endpoints[addIndex + 1] = end;
     GC_LOG("global section '%s' added (start: %p, end: %p)", name, start, end);
 }
 
@@ -383,12 +384,12 @@ static void gc_mark_stack(GC_World* gc) {
 
     if (stackTop > gc->stack_bottom) {
         // Stack grows down
-        GC_LOG("scanning downwards-growing stack (start: %p, end: %p)", stackTop, gc->stack_bottom);
+        GC_LOG("scanning downwards-growing stack (start: %p, end: %p)", gc->stack_bottom, stackTop);
         gc_mark_values_in_address_range(gc, gc->stack_bottom, stackTop);
     }
     else {
         // Stack grows up
-        GC_LOG("scanning upwards-growing stack (start: %p, end: %p)", gc->stack_bottom, stackTop);
+        GC_LOG("scanning upwards-growing stack (start: %p, end: %p)", stackTop, gc->stack_bottom);
         gc_mark_values_in_address_range(gc, stackTop, gc->stack_bottom);
     }
 }
