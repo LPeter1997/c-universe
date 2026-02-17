@@ -171,6 +171,7 @@ static void gc_free_data_structures(GC_World* gc) {
 #include <Windows.h>
 #include <processthreadsapi.h>
 #elif defined(__linux__) || defined(__APPLE__)
+#define _GNU_SOURCE
 #include <pthread.h>
 #endif
 
