@@ -18,6 +18,12 @@
 #ifndef GC_H
 #define GC_H
 
+#if defined(__linux__) || defined(__APPLE__)
+    #if !defined(_GNU_SOURCE)
+        #define _GNU_SOURCE
+    #endif
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
