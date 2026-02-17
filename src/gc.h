@@ -330,7 +330,7 @@ static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocati
     return true;
 }
 
-static GC_Allocation* gc_get_allocation_from_hash_map(GC_World* gc, void* baseAddress) {
+static GC_Allocation* gc_get_from_hash_map(GC_World* gc, void* baseAddress) {
     if (gc->hash_map.buckets_length == 0) return NULL;
 
     // First, compute what bucket the element would be in
@@ -371,7 +371,7 @@ static void gc_mark_values_in_address_range(GC_World* gc, void* startAddress, vo
 }
 
 static void gc_mark_address(GC_World* gc, void* addr) {
-    GC_Allocation* allocation = gc_get_allocation_from_hash_map(gc, addr);
+    GC_Allocation* allocation = gc_get_from_hash_map(gc, addr);
     // If not belonging to an allocation, nothing to do
     if (allocation == NULL) return;
     // If already marked, nothing to do
