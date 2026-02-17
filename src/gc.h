@@ -45,6 +45,7 @@ struct GC_GlobalSection;
 
 typedef struct GC_World {
     double sweep_factor;
+    size_t sweep_limit;
     bool paused;
 
     // Main data-structure of the opaque allocation elements
@@ -68,7 +69,7 @@ GC_DEF void gc_start(GC_World* gc);
 GC_DEF void gc_stop(GC_World* gc);
 GC_DEF void gc_pause(GC_World* gc);
 GC_DEF void gc_resume(GC_World* gc);
-GC_DEF void gc_run(GC_World* gc);
+GC_DEF size_t gc_run(GC_World* gc);
 
 GC_DEF void gc_pin(GC_World* gc, void* mem);
 GC_DEF void gc_unpin(GC_World* gc, void* mem);
@@ -118,12 +119,42 @@ typedef struct GC_GlobalSection {
     void* end;
 } GC_GlobalSection;
 
+typedef struct GC_HashEntry {
+    GC_Allocation allocation;
+    uintptr_t hash_code;
+} GC_HashEntry;
+
+typedef struct GC_HashBucket {
+    GC_HashEntry* entries;
+    size_t length;
+    size_t capacity;
+} GC_HashBucket;
+
 static void gc_add_global_section(GC_World* gc, GC_GlobalSection section) {
+    // NOTE: It's inefficient to resize each time, but for now we expect at most 2 sections to be present
     ++gc->global_sections.length;
     gc->global_sections.sections = (GC_GlobalSection*)GC_REALLOC(gc->global_sections.sections, sizeof(GC_GlobalSection) * gc->global_sections.length);
     GC_ASSERT(gc->global_sections.sections != NULL, "failed to reallocate section array");
     gc->global_sections.sections[gc->global_sections.length - 1] = section;
     GC_LOG("global section '%s' added (start: %p, end: %p)", section.name, section.start, section.end);
+}
+
+static void gc_free_data_structures(GC_World* gc) {
+    // First, we free hash map
+    for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
+        GC_HashBucket* bucket = &gc->hash_map.buckets[i];
+        GC_FREE(bucket->entries);
+        bucket->entries = NULL;
+        bucket->length = 0;
+        bucket->capacity = 0;
+    }
+    GC_FREE(gc->hash_map.buckets);
+    gc->hash_map.buckets_length = 0;
+    gc->hash_map.entry_count = 0;
+
+    // Then the sections array
+    GC_FREE(gc->global_sections.sections);
+    gc->global_sections.length = 0;
 }
 
 // Platform-specific ///////////////////////////////////////////////////////////
@@ -208,17 +239,6 @@ static void gc_collect_global_sections(GC_World* gc) {
 
 // Hash-map ////////////////////////////////////////////////////////////////////
 
-typedef struct GC_HashEntry {
-    GC_Allocation allocation;
-    uintptr_t hash_code;
-} GC_HashEntry;
-
-typedef struct GC_HashBucket {
-    GC_HashEntry* entries;
-    size_t length;
-    size_t capacity;
-} GC_HashBucket;
-
 static const double GC_HashTable_UpsizeLoadFactor = 0.75;
 static const double GC_HashTable_DownsizeLoadFactor = 0.25;
 
@@ -232,7 +252,7 @@ static double gc_hash_map_load_factor(GC_World* gc) {
     return (double)gc->hash_map.entry_count / gc->hash_map.buckets_length;
 }
 
-static void gc_add_to_hash_bucket(GC_HashBucket* bucket, GC_HashEntry entry) {
+static void gc_add_to_hash_bucket(GC_World* gc, GC_HashBucket* bucket, GC_HashEntry entry) {
     if (bucket->length == bucket->capacity) {
         // Need to resize
         bucket->capacity *= 2;
@@ -241,12 +261,16 @@ static void gc_add_to_hash_bucket(GC_HashBucket* bucket, GC_HashEntry entry) {
         GC_ASSERT(bucket->entries != NULL, "failed to allocate array for GC hash bucket entries");
     }
     bucket->entries[bucket->length++] = entry;
+    ++gc->hash_map.entry_count;
 }
 
-static void gc_remove_from_hash_bucket_at(GC_HashBucket* bucket, size_t index) {
+static void gc_remove_from_hash_bucket_at(GC_World* gc, GC_HashBucket* bucket, size_t index) {
     --bucket->length;
+    --gc->hash_map.entry_count;
     memmove(bucket->entries + index, bucket->entries + index + 1, sizeof(GC_HashEntry) * (bucket->length - index));
 }
+
+static void gc_recompute_sweep_limit(GC_World* gc);
 
 static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
     if (gc->hash_map.buckets_length == newLength) return;
@@ -262,7 +286,7 @@ static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
             GC_HashEntry entry = oldBucket->entries[j];
             // Compute the new bucket index
             size_t newBucketIndex = entry.hash_code % newLength;
-            gc_add_to_hash_bucket(&newBuckets[newBucketIndex], entry);
+            gc_add_to_hash_bucket(gc, &newBuckets[newBucketIndex], entry);
         }
         // The old bucket's elements have been redistributed, free it up
         GC_FREE(oldBucket->entries);
@@ -271,6 +295,8 @@ static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
     GC_FREE(gc->hash_map.buckets);
     gc->hash_map.buckets = newBuckets;
     gc->hash_map.buckets_length = newLength;
+    // Recompute sweep limit
+    gc_recompute_sweep_limit(gc);
 }
 
 static void gc_grow_hash_map(GC_World* gc) {
@@ -303,8 +329,7 @@ static void gc_add_to_hash_map(GC_World* gc, GC_Allocation allocation) {
         .hash_code = gc_hash_code(allocation.base_address),
     };
     size_t bucketIndex = entry.hash_code % gc->hash_map.buckets_length;
-    gc_add_to_hash_bucket(&gc->hash_map.buckets[bucketIndex], entry);
-    ++gc->hash_map.entry_count;
+    gc_add_to_hash_bucket(gc, &gc->hash_map.buckets[bucketIndex], entry);
 }
 
 static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocation* outAllocation) {
@@ -319,8 +344,7 @@ static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocati
         GC_Allocation* allocation = &bucket->entries[i].allocation;
         if (allocation->base_address == baseAddress) {
             // Found
-            gc_remove_from_hash_bucket_at(bucket, i);
-            --gc->hash_map.entry_count;
+            gc_remove_from_hash_bucket_at(gc, bucket, i);
             if (outAllocation != NULL) *outAllocation = *allocation;
             found = true;
             break;
@@ -440,8 +464,18 @@ static void gc_mark(GC_World* gc) {
 
 // Sweep ///////////////////////////////////////////////////////////////////////
 
-void gc_sweep(GC_World* gc) {
+static void gc_recompute_sweep_limit(GC_World* gc) {
+    gc->sweep_limit = (size_t)(gc->hash_map.entry_count + gc->sweep_factor * (gc->hash_map.buckets_length - gc->hash_map.entry_count));
+}
+
+static bool gc_needs_sweep(GC_World* gc) {
+    return gc->hash_map.entry_count > gc->sweep_limit;
+}
+
+static size_t gc_sweep(GC_World* gc) {
+    GC_LOG("starting sweep phase");
     // We go through the entries, whatever is marked we just unflag and whatever was not marked is freed
+    size_t freedMem = 0;
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
         for (size_t j = 0; j < bucket->length; ) {
@@ -455,14 +489,16 @@ void gc_sweep(GC_World* gc) {
             // Entry is unmarked, we need to free it
             GC_LOG("sweep found unmarked allocation (address: %p size: %zu), freeing it", allocation->base_address, allocation->size);
             GC_FREE(allocation->base_address);
+            freedMem += allocation->size;
             // NOTE: We are allowed to remove like this, this won't trigger shrinking
-            gc_remove_from_hash_bucket_at(bucket, j);
+            gc_remove_from_hash_bucket_at(gc, bucket, j);
             // Since we removed, we are off-by-one, don't increment j
         }
     }
-
     // Compact hash map
     gc_shrink_hash_map_if_needed(gc);
+    GC_LOG("sweep phase completed (freed %zu bytes)", freedMem);
+    return freedMem;
 }
 
 // API functions ///////////////////////////////////////////////////////////////
@@ -473,7 +509,9 @@ void gc_start(GC_World* gc) {
 }
 
 void gc_stop(GC_World* gc) {
-    GC_LOG("TODO: gc_stop");
+    // TODO: We should free up all memory maybe?
+
+    gc_free_data_structures(gc);
 }
 
 void gc_pause(GC_World* gc) {
@@ -486,18 +524,38 @@ void gc_resume(GC_World* gc) {
     gc->paused = false;
 }
 
-void gc_run(GC_World* gc) {
-    gc_mark(gc);
-    // TODO: We shouldn't always sweep
-    gc_sweep(gc);
+size_t gc_run(GC_World* gc) {
+    if (gc->paused) {
+        GC_LOG("skipping mark-and-sweep, garbage collection paused");
+        return 0;
+    }
+
+    if (gc_needs_sweep(gc)) {
+        gc_mark(gc);
+        return gc_sweep(gc);
+    }
+
+    return 0;
 }
 
 void gc_pin(GC_World* gc, void* mem) {
-    GC_LOG("TODO: gc_pin");
+    GC_Allocation* allocation = gc_get_from_hash_map(gc, mem);
+    if (allocation == NULL) {
+        GC_LOG("gc_pin received a memory address %p that had no corresponding allocation", mem);
+        return;
+    }
+
+    allocation->flags |= GC_FLAG_PINNED;
 }
 
 void gc_unpin(GC_World* gc, void* mem) {
-    GC_LOG("TODO: gc_unpin");
+    GC_Allocation* allocation = gc_get_from_hash_map(gc, mem);
+    if (allocation == NULL) {
+        GC_LOG("gc_unpin received a memory address %p that had no corresponding allocation", mem);
+        return;
+    }
+
+    allocation->flags &= ~GC_FLAG_PINNED;
 }
 
 void* gc_alloc(GC_World* gc, size_t size) {
