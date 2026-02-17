@@ -509,8 +509,18 @@ void gc_start(GC_World* gc) {
 }
 
 void gc_stop(GC_World* gc) {
-    // TODO: We should free up all memory maybe?
+    // Let's unpin all pinned allocations, then run a cycle of mark and sweep
+    for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
+        GC_HashBucket* bucket = &gc->hash_map.buckets[i];
+        for (size_t j = 0; j < bucket->length; ++j) {
+            GC_Allocation* allocation = &bucket->entries[j].allocation;
+            allocation->flags &= ~GC_FLAG_PINNED;
+        }
+    }
+    gc_mark(gc);
+    gc_sweep(gc);
 
+    // Clean up the bookkeeping structures too
     gc_free_data_structures(gc);
 }
 
