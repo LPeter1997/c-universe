@@ -64,11 +64,11 @@ typedef struct CTest_Case {
  */
 typedef struct CTest_Suite {
     // The test cases in the suite
-    CTest_Case* test_cases;
+    CTest_Case* cases;
     // The number of test cases in the suite
-    size_t test_cases_length;
-    // The capacity of the test_cases array
-    size_t test_cases_capacity;
+    size_t length;
+    // The capacity of the cases array
+    size_t capacity;
 } CTest_Suite;
 
 /**
@@ -101,19 +101,25 @@ typedef struct CTest_Filter {
  * The report of a test suite execution, containing the results of all ran test cases.
  */
 typedef struct CTest_Report {
-    // The test executions that passed
-    CTest_Execution* passing_cases;
-    // The number of test executions that passed
-    size_t passing_cases_length;
-    // The capacity of the passing_cases array
-    size_t passing_cases_capacity;
+    // Passing execution info
+    struct {
+        // The test executions that passed
+        CTest_Execution* cases;
+        // The number of test executions that passed
+        size_t length;
+        // The capacity of the passing cases array
+        size_t capacity;
+    } passing;
 
-    // The test executions that failed
-    CTest_Execution* failing_cases;
-    // The number of test executions that failed
-    size_t failing_cases_length;
-    // The capacity of the failing_cases array
-    size_t failing_cases_capacity;
+    // Failing execution info
+    struct {
+        // The test executions that failed
+        CTest_Execution* cases;
+        // The number of test executions that failed
+        size_t length;
+        // The capacity of the failing cases array
+        size_t capacity;
+    } failing;
 } CTest_Report;
 
 // Used as a target to automatically register the cases
@@ -252,15 +258,15 @@ extern "C" {
 CTest_Suite __ctest_default_suite;
 
 void ctest_register_case(CTest_Suite* suite, CTest_Case testCase) {
-    if (suite->test_cases_length + 1 > suite->test_cases_capacity) {
-        size_t newCapacity = (suite->test_cases_capacity == 0) ? 8 : (suite->test_cases_capacity * 2);
-        CTest_Case* newCases = (CTest_Case*)CTEST_REALLOC((void*)suite->test_cases, sizeof(CTest_Case) * newCapacity);
+    if (suite->length + 1 > suite->capacity) {
+        size_t newCapacity = (suite->capacity == 0) ? 8 : (suite->capacity * 2);
+        CTest_Case* newCases = (CTest_Case*)CTEST_REALLOC((void*)suite->cases, sizeof(CTest_Case) * newCapacity);
         CTEST_ASSERT(newCases != NULL, "failed to allocate memory for test suite");
-        suite->test_cases = newCases;
-        suite->test_cases_capacity = newCapacity;
+        suite->cases = newCases;
+        suite->capacity = newCapacity;
     }
-    suite->test_cases[suite->test_cases_length] = testCase;
-    ++suite->test_cases_length;
+    suite->cases[suite->length] = testCase;
+    ++suite->length;
 }
 
 CTest_Suite ctest_get_suite(void) {
@@ -269,15 +275,19 @@ CTest_Suite ctest_get_suite(void) {
 
 CTest_Report ctest_run_suite(CTest_Suite suite, CTest_Filter filter) {
     CTest_Report report = {
-        .passing_cases = NULL,
-        .passing_cases_length = 0,
-        .passing_cases_capacity = 0,
-        .failing_cases = NULL,
-        .failing_cases_length = 0,
-        .failing_cases_capacity = 0,
+        .passing = {
+            .cases = NULL,
+            .length = 0,
+            .capacity = 0,
+        },
+        .failing = {
+            .cases = NULL,
+            .length = 0,
+            .capacity = 0,
+        },
     };
-    for (size_t i = 0; i < suite.test_cases_length; ++i) {
-        CTest_Case const* testCase = &suite.test_cases[i];
+    for (size_t i = 0; i < suite.length; ++i) {
+        CTest_Case const* testCase = &suite.cases[i];
 
         // Use filter function, if specified
         if (filter.filter_fn != NULL && !filter.filter_fn(testCase, filter.user)) continue;
@@ -285,9 +295,9 @@ CTest_Report ctest_run_suite(CTest_Suite suite, CTest_Filter filter) {
         CTest_Execution execution = ctest_run_case(testCase);
 
         // Add execution to report
-        CTest_Execution** targetList = execution.passed ? &report.passing_cases : &report.failing_cases;
-        size_t* targetListLength = execution.passed ? &report.passing_cases_length : &report.failing_cases_length;
-        size_t* targetListCapacity = execution.passed ? &report.passing_cases_capacity : &report.failing_cases_capacity;
+        CTest_Execution** targetList = execution.passed ? &report.passing.cases : &report.failing.cases;
+        size_t* targetListLength = execution.passed ? &report.passing.length : &report.failing.length;
+        size_t* targetListCapacity = execution.passed ? &report.passing.capacity : &report.failing.capacity;
         if (*targetListLength + 1 > *targetListCapacity) {
             size_t newCapacity = (*targetListCapacity == 0) ? 8 : (*targetListCapacity * 2);
             CTest_Execution* newList = (CTest_Execution*)CTEST_REALLOC(*targetList, newCapacity * sizeof(CTest_Execution));
@@ -314,39 +324,39 @@ CTest_Execution ctest_run_case(CTest_Case const* testCase) {
 }
 
 void ctest_free_suite(CTest_Suite* suite) {
-    CTEST_FREE((void*)suite->test_cases);
-    suite->test_cases = NULL;
-    suite->test_cases_length = 0;
+    CTEST_FREE((void*)suite->cases);
+    suite->cases = NULL;
+    suite->length = 0;
 }
 
 void ctest_free_report(CTest_Report* report) {
-    CTEST_FREE(report->passing_cases);
-    CTEST_FREE(report->failing_cases);
-    report->passing_cases = NULL;
-    report->failing_cases = NULL;
-    report->passing_cases_length = 0;
-    report->failing_cases_length = 0;
-    report->passing_cases_capacity = 0;
-    report->failing_cases_capacity = 0;
+    CTEST_FREE(report->passing.cases);
+    CTEST_FREE(report->failing.cases);
+    report->passing.cases = NULL;
+    report->failing.cases = NULL;
+    report->passing.length = 0;
+    report->failing.length = 0;
+    report->passing.capacity = 0;
+    report->failing.capacity = 0;
 }
 
 void ctest_print_report(CTest_Report report) {
     printf("Test report:\n");
-    printf("  Passing cases (%zu):\n", report.passing_cases_length);
-    for (size_t i = 0; i < report.passing_cases_length; ++i) {
-        CTest_Execution execution = report.passing_cases[i];
+    printf("  Passing cases (%zu):\n", report.passing.length);
+    for (size_t i = 0; i < report.passing.length; ++i) {
+        CTest_Execution execution = report.passing.cases[i];
         printf("    - %s\n", execution.test_case->name);
     }
-    printf("  Failing cases (%zu):\n", report.failing_cases_length);
-    for (size_t i = 0; i < report.failing_cases_length; ++i) {
-        CTest_Execution execution = report.failing_cases[i];
+    printf("  Failing cases (%zu):\n", report.failing.length);
+    for (size_t i = 0; i < report.failing.length; ++i) {
+        CTest_Execution execution = report.failing.cases[i];
         printf("    - %s: %s (file: %s, line: %d)\n", execution.test_case->name, execution.fail_message, execution.fail_file, execution.fail_line);
     }
-    if (report.failing_cases_length == 0) {
+    if (report.failing.length == 0) {
         printf(" Success!\n");
     }
     else {
-        printf(" Failure (%zu/%zu)!\n", report.passing_cases_length, report.passing_cases_length + report.failing_cases_length);
+        printf(" Failure (%zu/%zu)!\n", report.passing.length, report.passing.length + report.failing.length);
     }
 }
 
@@ -396,7 +406,7 @@ int main(int argc, char* argv[]) {
     CTest_Suite suite = ctest_get_suite();
     CTest_Report report = ctest_run_suite(suite, filter);
     ctest_print_report(report);
-    int exitCode = (report.failing_cases_length == 0) ? 0 : 1;
+    int exitCode = (report.failing.length == 0) ? 0 : 1;
 
     ctest_free_report(&report);
     ctest_free_suite(&suite);
@@ -444,21 +454,21 @@ ExpectedTestCase expectedCases[] = {
 };
 
 CTest_Case const* find_test_case_in_suite_by_function(CTest_Suite suite, void(*testFn)(CTest_Execution*)) {
-    for (size_t i = 0; i < suite.test_cases_length; ++i) {
-        if (suite.test_cases[i].test_fn == testFn) return &suite.test_cases[i];
+    for (size_t i = 0; i < suite.length; ++i) {
+        if (suite.cases[i].test_fn == testFn) return &suite.cases[i];
     }
     return NULL;
 }
 
 CTest_Execution* find_test_execution_in_report_by_function(CTest_Report report, void(*testFn)(CTest_Execution*)) {
-    for (size_t i = 0; i < report.passing_cases_length; ++i) {
-        if (report.passing_cases[i].test_case->test_fn == testFn) {
-            return &report.passing_cases[i];
+    for (size_t i = 0; i < report.passing.length; ++i) {
+        if (report.passing.cases[i].test_case->test_fn == testFn) {
+            return &report.passing.cases[i];
         }
     }
-    for (size_t i = 0; i < report.failing_cases_length; ++i) {
-        if (report.failing_cases[i].test_case->test_fn == testFn) {
-            return &report.failing_cases[i];
+    for (size_t i = 0; i < report.failing.length; ++i) {
+        if (report.failing.cases[i].test_case->test_fn == testFn) {
+            return &report.failing.cases[i];
         }
     }
     return NULL;
@@ -472,7 +482,7 @@ int main(void) {
 
     // Assert number of cases
     const size_t expectedCaseCount = sizeof(expectedCases) / sizeof(ExpectedTestCase);
-    size_t gotCaseCount = suite.test_cases_length;
+    size_t gotCaseCount = suite.length;
     if (gotCaseCount != expectedCaseCount) {
         printf("Expected %zu cases, but found %zu\n", expectedCaseCount, gotCaseCount);
         return 1;
