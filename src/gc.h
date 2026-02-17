@@ -41,6 +41,7 @@ extern "C" {
 #endif
 
 struct GC_HashBucket;
+struct GC_GlobalSection;
 
 typedef struct GC_World {
     double sweep_factor;
@@ -55,9 +56,7 @@ typedef struct GC_World {
 
     // Sections of global data that needs scanning
     struct {
-        // Layout is [start1_inclusive, end1_exclusive, start2_inclusive, end2_exclusive, ...]
-        void** endpoints;
-        // The number of endpoint PAIRS stored
+        struct GC_GlobalSection* sections;
         size_t length;
     } global_sections;
 
@@ -113,14 +112,18 @@ typedef struct GC_Allocation {
     uint8_t flags;
 } GC_Allocation;
 
-static void gc_add_global_section(GC_World* gc, char const* name, void* start, void* end) {
-    size_t addIndex = gc->global_sections.length * 2;
+typedef struct GC_GlobalSection {
+    char const* name;
+    void* start;
+    void* end;
+} GC_GlobalSection;
+
+static void gc_add_global_section(GC_World* gc, GC_GlobalSection section) {
     ++gc->global_sections.length;
-    gc->global_sections.endpoints = (void**)GC_REALLOC(gc->global_sections.endpoints, sizeof(void*) * gc->global_sections.length * 2);
-    GC_ASSERT(gc->global_sections.endpoints != NULL, "failed to reallocate section array");
-    gc->global_sections.endpoints[addIndex + 0] = start;
-    gc->global_sections.endpoints[addIndex + 1] = end;
-    GC_LOG("global section '%s' added (start: %p, end: %p)", name, start, end);
+    gc->global_sections.sections = (GC_GlobalSection*)GC_REALLOC(gc->global_sections.sections, sizeof(GC_GlobalSection) * gc->global_sections.length);
+    GC_ASSERT(gc->global_sections.sections != NULL, "failed to reallocate section array");
+    gc->global_sections.sections[gc->global_sections.length - 1] = section;
+    GC_LOG("global section '%s' added (start: %p, end: %p)", section.name, section.start, section.end);
 }
 
 // Platform-specific ///////////////////////////////////////////////////////////
@@ -180,12 +183,24 @@ static void gc_collect_global_sections(GC_World* gc) {
          || (memcmp(s->Name, ".bss", 4) == 0)) {
             uintptr_t start = base + s->VirtualAddress;
             uintptr_t end = start + s->Misc.VirtualSize;
-            gc_add_global_section(gc, (char const*)s->Name, (void*)start, (void*)end);
+            gc_add_global_section(gc, (GC_GlobalSection){
+                .name = (char const*)s->Name,
+                .start = (void*)start,
+                .end = (void*)end,
+            });
         }
     }
 #elif defined(__linux__) || defined(__APPLE__)
-    gc_add_global_section(gc, ".data", (void*)__data_start, (void*)__data_end);
-    gc_add_global_section(gc, ".bss", (void*)__bss_start, (void*)__bss_end);
+    gc_add_global_section(gc, (GC_GlobalSection){
+        .name = ".data",
+        .start = (void*)__data_start,
+        .end = (void*)__data_end,
+    });
+    gc_add_global_section(gc, (GC_GlobalSection){
+        .name = ".bss",
+        .start = (void*)__bss_start,
+        .end = (void*)__bss_end,
+    });
 #else
     #error "unsupported platform"
 #endif
@@ -366,7 +381,10 @@ static void gc_mark_pinned(GC_World* gc) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
         for (size_t j = 0; j < bucket->length; ++j) {
             GC_Allocation* allocation = &bucket->entries[j].allocation;
-            if ((allocation->flags & GC_FLAG_PINNED) != 0) gc_mark_address(gc, allocation->base_address);
+            if ((allocation->flags & GC_FLAG_PINNED) != 0) {
+                GC_LOG("marking pinned allocation (base: %p, size: %zu)", allocation->base_address, allocation->size);
+                gc_mark_address(gc, allocation->base_address);
+            }
         }
     }
 }
@@ -395,7 +413,11 @@ static void gc_mark_stack(GC_World* gc) {
 }
 
 static void gc_mark_globals(GC_World* gc) {
-    GC_LOG("TODO: gc_mark_globals");
+    for (size_t i = 0; i < gc->global_sections.length; ++i) {
+        GC_GlobalSection* section = &gc->global_sections.sections[i];
+        GC_LOG("scanning global section '%s' (start: %p, end: %p)", section->name, section->start, section->end);
+        gc_mark_values_in_address_range(gc, section->start, section->end);
+    }
 }
 
 static void gc_mark(GC_World* gc) {
@@ -416,11 +438,13 @@ void gc_stop(GC_World* gc) {
 }
 
 void gc_pause(GC_World* gc) {
-    GC_LOG("TODO: gc_pause");
+    GC_LOG("pausing garbage collection");
+    gc->paused = true;
 }
 
 void gc_resume(GC_World* gc) {
-    GC_LOG("TODO: gc_resume");
+    GC_LOG("resuming garbage collection");
+    gc->paused = false;
 }
 
 void gc_run(GC_World* gc) {
