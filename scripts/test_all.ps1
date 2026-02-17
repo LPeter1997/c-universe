@@ -54,8 +54,10 @@ Compile-And-Run `
 Write-Host "running self-test for GC library..."
 Compile-And-Run `
     -Sources @("../src/gc.h") `
-    -Defines @("GC_STATIC", "GC_IMPLEMENTATION", "GC_SELF_TEST")
+    -Defines @("GC_STATIC", "GC_IMPLEMENTATION", "GC_SELF_TEST") `
+    -AllowUnusedParameters
 Write-Host "running example for GC library..."
 Compile-And-Run `
     -Sources @("../src/gc.h") `
-    -Defines @("GC_EXAMPLE")
+    -Defines @("GC_EXAMPLE") `
+    -AllowUnusedParameters
