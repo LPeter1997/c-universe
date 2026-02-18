@@ -752,7 +752,6 @@ void gc_free(GC_World* gc, void* mem) {
 #define CTEST_MAIN
 #include "ctest.h"
 
-// Cross-platform noinline attribute
 #if defined(_MSC_VER)
 #   define GC_TEST_NOINLINE __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)
@@ -764,7 +763,6 @@ void gc_free(GC_World* gc, void* mem) {
 // NOTE: Maybe CTEST should ship with utilities like this?
 #define APPROX_EQ(x, y) (fabs((x) - (y)) < 0.0001)
 
-// Helper to create a fresh GC world for each test
 static GC_World test_gc_create(void) {
     GC_World gc = { 0 };
     gc_start(&gc);
@@ -775,13 +773,12 @@ static void test_gc_destroy(GC_World* gc) {
     gc_stop(gc);
 }
 
-// Helper functions that allocate in a separate stack frame, so when they return,
-// the pointer is no longer on the stack (enabling collection).
+// Helper functionality to make platform-behavior a little more deterministic
 
 GC_TEST_NOINLINE
 static void helper_allocate_unreferenced(GC_World* gc, size_t size) {
     volatile void* mem = gc_alloc(gc, size);
-    mem = NULL;  // Explicitly clear to prevent conservative GC from finding it
+    mem = NULL;
     (void)mem;
 }
 
@@ -790,7 +787,6 @@ static void helper_allocate_multiple_unreferenced(GC_World* gc) {
     volatile void* m1 = gc_alloc(gc, 32);
     volatile void* m2 = gc_alloc(gc, 64);
     volatile void* m3 = gc_alloc(gc, 128);
-    // Explicitly clear to prevent conservative GC from finding them
     m1 = NULL; m2 = NULL; m3 = NULL;
     (void)m1; (void)m2; (void)m3;
 }
@@ -799,7 +795,7 @@ GC_TEST_NOINLINE
 static void helper_allocate_and_pin(GC_World* gc, size_t size) {
     volatile void* mem = gc_alloc(gc, size);
     gc_pin(gc, (void*)mem);
-    mem = NULL;  // Explicitly clear
+    mem = NULL;
     (void)mem;
 }
 
@@ -808,20 +804,19 @@ static void helper_allocate_pin_then_unpin(GC_World* gc, size_t size) {
     volatile void* mem = gc_alloc(gc, size);
     gc_pin(gc, (void*)mem);
     gc_unpin(gc, (void*)mem);
-    mem = NULL;  // Explicitly clear
+    mem = NULL;
     (void)mem;
 }
 
-// Helper to clobber the stack - call this after helper functions return
-// to overwrite any residual pointer values left in the now-unused stack frames.
-// This is necessary because the conservative GC scans the entire stack range.
+// Useful to clear residual values on the stack, especially to clean up local refs
 GC_TEST_NOINLINE
 static void helper_clobber_stack(void) {
-    volatile uintptr_t buffer[256];  // Large buffer to cover more stack area
+    // Size chosen by a fair dice roll, for these simple calls should be enough
+    volatile uintptr_t buffer[256];
     for (size_t i = 0; i < 256; ++i) {
-        buffer[i] = 0xDEADBEEF;  // Non-pointer value
+        buffer[i] = 0xDEADBEEF;
     }
-    (void)buffer[0];  // Prevent optimization
+    (void)buffer[0]; // Hopefully this is enough to not get it optimized out
 }
 
 // Basic allocation tests //////////////////////////////////////////////////////
@@ -849,9 +844,8 @@ CTEST_CASE(gc_alloc_multiple_allocations) {
 
 CTEST_CASE(gc_alloc_zero_size) {
     GC_World gc = test_gc_create();
-    // Zero-size allocation behavior depends on underlying allocator
+    // Just test that it doesn't crash
     void* mem = gc_alloc(&gc, 0);
-    // Just ensure it doesn't crash; result may be NULL or valid pointer
     (void)mem;
     test_gc_destroy(&gc);
 }
@@ -925,8 +919,10 @@ CTEST_CASE(gc_free_unknown_address_does_not_crash) {
 
 CTEST_CASE(gc_pin_prevents_collection_of_unreferenced_allocation) {
     GC_World gc = test_gc_create();
-    // Allocate and pin in a helper function - pointer leaves stack when helper returns
+    // Helper allocates and pins, pointer leaves stack when helper returns
     helper_allocate_and_pin(&gc, 64);
+    // To stress this, even clobber the stack to clear any residual pointer values
+    helper_clobber_stack();
     CTEST_ASSERT_TRUE(gc.hash_map.entry_count == 1);
     // Force GC - pinned allocation should survive even though no stack reference exists
     gc_run(&gc, true);
@@ -938,7 +934,7 @@ CTEST_CASE(gc_unpin_allows_collection_of_unreferenced_allocation) {
     GC_World gc = test_gc_create();
     // Allocate, pin, then unpin in helper - pointer leaves stack when helper returns
     helper_allocate_pin_then_unpin(&gc, 64);
-    helper_clobber_stack();  // Clear residual pointer values from stack
+    helper_clobber_stack();
     CTEST_ASSERT_TRUE(gc.hash_map.entry_count == 1);
     // Force GC - unpinned allocation with no stack reference should be collected
     gc_run(&gc, true);
@@ -1073,7 +1069,7 @@ CTEST_CASE(gc_run_without_force_respects_sweep_limit) {
     CTEST_ASSERT_TRUE(gc.hash_map.entry_count == 1);
     // Non-forced run should not collect if under sweep limit
     size_t freed = gc_run(&gc, false);
-    // Behavior depends on sweep_limit; just ensure it doesn't crash
+    // Behavior depends on sweep_limit, just ensure it doesn't crash
     (void)freed;
     test_gc_destroy(&gc);
 }
@@ -1106,7 +1102,7 @@ CTEST_CASE(gc_stop_frees_all_allocations) {
 
 CTEST_CASE(gc_custom_sweep_factor) {
     GC_World gc = { 0 };
-    gc.sweep_factor = 0.8;  // Set custom sweep factor before start
+    gc.sweep_factor = 0.8;
     gc_start(&gc);
     CTEST_ASSERT_TRUE(APPROX_EQ(gc.sweep_factor, 0.8));
     gc_stop(&gc);
