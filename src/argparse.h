@@ -65,13 +65,17 @@ typedef struct CommandDescription {
     char const* name;
     char const* description;
 
-    OptionDescription* options;
-    size_t options_length;
-    size_t options_capacity;
+    struct {
+        OptionDescription* elements;
+        size_t length;
+        size_t capacity;
+    } options;
 
-    struct CommandDescription* subcommands;
-    size_t subcommands_length;
-    size_t subcommands_capacity;
+    struct {
+        CommandDescription* elements;
+        size_t length;
+        size_t capacity;
+    } subcommands;
 } CommandDescription;
 
 typedef struct Option {
@@ -83,10 +87,13 @@ typedef struct ArgumentPack {
     char const* program_name;
 
     CommandDescription* command;
+
     // Owned array of options that were parsed for the command
-    Option* options;
-    size_t options_length;
-    size_t options_capacity;
+    struct {
+         Option* elements;
+         size_t length;
+         size_t capacity;
+    } options;
 
     // Error message in case of a parsing failure
     // The memory is owned by this struct and must be freed
