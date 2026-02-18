@@ -104,9 +104,12 @@ typedef struct Argparse_Pack {
          size_t capacity;
     } arguments;
 
-    // Error message in case of a parsing failure
-    // The memory is owned by this struct and must be freed
-    char const* error;
+    // Owned list of errors
+    struct {
+        char const** elements;
+        size_t length;
+        size_t capacity;
+    } errors;
 } Argparse_Pack;
 
 ARGPARSE_DEF Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root);
@@ -144,7 +147,25 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
 }
 
 void argparse_free(Argparse_Pack* pack) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
+    // Free all allocated memory for the parsed arguments
+    // Do not deallocate the command or options, as they are owned by the command hierarchy
+    for (size_t i = 0; i < pack->arguments.length; ++i) {
+        Argparse_Argument* argument = &pack->arguments.elements[i];
+        if (argument->option->allow_multiple) {
+            for (size_t j = 0; j < argument->multiple_values.length; ++j) {
+                ARGPARSE_FREE(argument->multiple_values.elements[j]);
+            }
+            ARGPARSE_FREE(argument->multiple_values.elements);
+        }
+        else {
+            ARGPARSE_FREE(argument->value);
+        }
+    }
+    ARGPARSE_FREE(pack->arguments.elements);
+    for (size_t i = 0; i < pack->errors.length; ++i) {
+        ARGPARSE_FREE((void*)pack->errors.elements[i]);
+    }
+    ARGPARSE_FREE(pack->errors.elements);
 }
 
 void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
@@ -156,7 +177,13 @@ void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcomm
 }
 
 void argparse_free_command(Argparse_Command* command) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
+    // We assume name and description are static, so we don't free them
+    // We only free the options and subcommands arrays, as well as the subcommands themselves
+    for (size_t i = 0; i < command->subcommands.length; ++i) {
+        argparse_free_command(&command->subcommands.elements[i]);
+    }
+    ARGPARSE_FREE(command->subcommands.elements);
+    ARGPARSE_FREE(command->options.elements);
 }
 
 Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
