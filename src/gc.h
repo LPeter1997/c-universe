@@ -281,6 +281,15 @@ static void gc_collect_global_sections(GC_World* gc) {
             .end = data + slide + size,
         });
     }
+    // DATA_DIRTY,__data for modern toolchains
+    data = getsectiondata(header, "__DATA_DIRTY", "__data", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA_DIRTY,__data",
+            .start = data + slide,
+            .end = data + slide + size,
+        });
+    }
 #else
     #error "unsupported platform"
 #endif
