@@ -182,11 +182,25 @@ void argparse_free(Argparse_Pack* pack) {
 }
 
 void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
+    if (command->options.length == command->options.capacity) {
+        size_t newCapacity = command->options.capacity == 0 ? 8 : command->options.capacity * 2;
+        Argparse_Option* newElements = (Argparse_Option*)ARGPARSE_REALLOC(command->options.elements, newCapacity * sizeof(Argparse_Option));
+        ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for new option");
+        command->options.elements = newElements;
+        command->options.capacity = newCapacity;
+    }
+    command->options.elements[command->options.length++] = option;
 }
 
 void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
+    if (command->subcommands.length == command->subcommands.capacity) {
+        size_t newCapacity = command->subcommands.capacity == 0 ? 8 : command->subcommands.capacity * 2;
+        Argparse_Command* newElements = (Argparse_Command*)ARGPARSE_REALLOC(command->subcommands.elements, newCapacity * sizeof(Argparse_Command));
+        ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for new subcommand");
+        command->subcommands.elements = newElements;
+        command->subcommands.capacity = newCapacity;
+    }
+    command->subcommands.elements[command->subcommands.length++] = subcommand;
 }
 
 void argparse_free_command(Argparse_Command* command) {
