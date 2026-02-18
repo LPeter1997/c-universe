@@ -182,6 +182,12 @@ static void gc_free_data_structures(GC_World* gc) {
     #include <pthread.h>
     #include <mach-o/getsect.h>
     #include <mach-o/dyld.h>
+
+    #if defined(__LP64__)
+        typedef struct mach_header_64 mach_header_t;
+    #else
+        typedef struct mach_header mach_header_t;
+    #endif
 #endif
 
 static void* gc_compute_stack_bottom(void) {
@@ -250,7 +256,7 @@ static void gc_collect_global_sections(GC_World* gc) {
         .end = (void*)&_end,
     });
 #elif defined(__APPLE__)
-    const struct mach_header_64* header = (const struct mach_header_64*)_dyld_get_image_header(0);
+    const mach_header_t* header = (const mach_header_t*)_dyld_get_image_header(0);
     intptr_t slide = _dyld_get_image_vmaddr_slide(0);
     unsigned long size;
     uint8_t* data;
