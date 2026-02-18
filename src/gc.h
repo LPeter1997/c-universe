@@ -250,7 +250,7 @@ static void gc_collect_global_sections(GC_World* gc) {
         .end = (void*)&_end,
     });
 #elif defined(__APPLE__)
-    const struct mach_header* header = _dyld_get_image_header(0);
+    const struct mach_header_64* header = (const struct mach_header_64*)_dyld_get_image_header(0);
     intptr_t slide = _dyld_get_image_vmaddr_slide(0);
     unsigned long size;
     uint8_t* data;
