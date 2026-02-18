@@ -257,16 +257,16 @@ static void gc_collect_global_sections(GC_World* gc) {
     });
 #elif defined(__APPLE__)
     const mach_header_t* header = (const mach_header_t*)_dyld_get_image_header(0);
-    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
     unsigned long size;
     uint8_t* data;
+    // NOTE: getsectiondata() returns the in-memory address with slide already applied
     // __DATA,__data
     data = getsectiondata(header, "__DATA", "__data", &size);
     if (data && size) {
         gc_add_global_section(gc, (GC_GlobalSection){
             .name = "__DATA,__data",
-            .start = data + slide,
-            .end = data + slide + size,
+            .start = data,
+            .end = data + size,
         });
     }
     // __DATA,__bss
@@ -274,8 +274,17 @@ static void gc_collect_global_sections(GC_World* gc) {
     if (data && size) {
         gc_add_global_section(gc, (GC_GlobalSection){
             .name = "__DATA,__bss",
-            .start = data + slide,
-            .end = data + slide + size,
+            .start = data,
+            .end = data + size,
+        });
+    }
+    // __DATA,__common - uninitialized globals often go here
+    data = getsectiondata(header, "__DATA", "__common", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA,__common",
+            .start = data,
+            .end = data + size,
         });
     }
     // modern macOS may place globals here
@@ -283,17 +292,26 @@ static void gc_collect_global_sections(GC_World* gc) {
     if (data && size) {
         gc_add_global_section(gc, (GC_GlobalSection){
             .name = "__DATA_CONST,__const",
-            .start = data + slide,
-            .end = data + slide + size,
+            .start = data,
+            .end = data + size,
         });
     }
-    // DATA_DIRTY,__data for modern toolchains
+    // __DATA_DIRTY,__data for modern toolchains
     data = getsectiondata(header, "__DATA_DIRTY", "__data", &size);
     if (data && size) {
         gc_add_global_section(gc, (GC_GlobalSection){
             .name = "__DATA_DIRTY,__data",
-            .start = data + slide,
-            .end = data + slide + size,
+            .start = data,
+            .end = data + size,
+        });
+    }
+    // __DATA_DIRTY,__common for modern toolchains
+    data = getsectiondata(header, "__DATA_DIRTY", "__common", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA_DIRTY,__common",
+            .start = data,
+            .end = data + size,
         });
     }
 #else
