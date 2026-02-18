@@ -170,15 +170,18 @@ static void gc_free_data_structures(GC_World* gc) {
 // Platform-specific ///////////////////////////////////////////////////////////
 
 #if defined(_WIN32)
-// NOTE: For now this ties us to Windows 8 or later, maybe look into eliminating it
-// We need this for the stack size
-#undef _WIN32_WINNT
-#define _WIN32_WINNT 0x0602
-#include <Windows.h>
-#include <processthreadsapi.h>
-#elif defined(__linux__) || defined(__APPLE__)
-#define _GNU_SOURCE
-#include <pthread.h>
+    // NOTE: For now this ties us to Windows 8 or later, maybe look into eliminating it
+    // We need this for the stack size
+    #undef _WIN32_WINNT
+    #define _WIN32_WINNT 0x0602
+    #include <Windows.h>
+    #include <processthreadsapi.h>
+#elif defined(__linux__)
+    #include <pthread.h>
+#elif defined(__APPLE__)
+    #include <pthread.h>
+    #include <mach-o/getsect.h>
+    #include <mach-o/dyld.h>
 #endif
 
 static void* gc_compute_stack_bottom(void) {
@@ -205,7 +208,7 @@ static void* gc_compute_stack_bottom(void) {
 
 #if defined(_WIN32)
     EXTERN_C IMAGE_DOS_HEADER __ImageBase;
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__)
     extern char __data_start;
     extern char _edata;
     extern char __bss_start;
@@ -235,7 +238,7 @@ static void gc_collect_global_sections(GC_World* gc) {
             });
         }
     }
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__)
     gc_add_global_section(gc, (GC_GlobalSection){
         .name = ".data",
         .start = (void*)&__data_start,
@@ -246,6 +249,38 @@ static void gc_collect_global_sections(GC_World* gc) {
         .start = (void*)&__bss_start,
         .end = (void*)&_end,
     });
+#elif defined(__APPLE__)
+    const struct mach_header* header = _dyld_get_image_header(0);
+    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+    unsigned long size;
+    uint8_t* data;
+    // __DATA,__data
+    data = getsectiondata(header, "__DATA", "__data", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA,__data",
+            .start = data + slide,
+            .end = data + slide + size,
+        });
+    }
+    // __DATA,__bss
+    data = getsectiondata(header, "__DATA", "__bss", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA,__bss",
+            .start = data + slide,
+            .end = data + slide + size,
+        });
+    }
+    // modern macOS may place globals here
+    data = getsectiondata(header, "__DATA_CONST", "__const", &size);
+    if (data && size) {
+        gc_add_global_section(gc, (GC_GlobalSection){
+            .name = "__DATA_CONST,__const",
+            .start = data + slide,
+            .end = data + slide + size,
+        });
+    }
 #else
     #error "unsupported platform"
 #endif
