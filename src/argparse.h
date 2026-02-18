@@ -113,13 +113,12 @@ typedef struct Argparse_Pack {
 } Argparse_Pack;
 
 ARGPARSE_DEF Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root);
+ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name);
 ARGPARSE_DEF void argparse_free(Argparse_Pack* pack);
 
 ARGPARSE_DEF void argparse_add_option(Argparse_Command* command, Argparse_Option option);
 ARGPARSE_DEF void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand);
 ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
-
-ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name);
 
 #ifdef __cplusplus
 }
@@ -140,10 +139,24 @@ ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char 
 extern "C" {
 #endif
 
+static bool argparse_option_has_name(Argparse_Option* option, char const* name) {
+    return (option->long_name != NULL && strcmp(option->long_name, name) == 0)
+        || (option->short_name != NULL && strcmp(option->short_name, name) == 0);
+}
+
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
+    for (size_t i = 0; i < pack->arguments.length; ++i) {
+        if (argparse_option_has_name(pack->arguments.elements[i].option, name)) {
+            return &pack->arguments.elements[i];
+        }
+    }
+    return NULL;
 }
 
 void argparse_free(Argparse_Pack* pack) {
@@ -184,10 +197,6 @@ void argparse_free_command(Argparse_Command* command) {
     }
     ARGPARSE_FREE(command->subcommands.elements);
     ARGPARSE_FREE(command->options.elements);
-}
-
-Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
 }
 
 #ifdef __cplusplus
