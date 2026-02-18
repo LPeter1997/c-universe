@@ -62,7 +62,7 @@ typedef struct Argparse_Option {
 } Argparse_Option;
 
 struct Argparse_Pack;
-typedef int Argparse_HandlerFn(Argparse_Pack* pack);
+typedef int Argparse_HandlerFn(struct Argparse_Pack* pack);
 
 typedef struct Argparse_Command {
     char const* name;
@@ -76,7 +76,7 @@ typedef struct Argparse_Command {
     } options;
 
     struct {
-        Argparse_Command* elements;
+        struct Argparse_Command* elements;
         size_t length;
         size_t capacity;
     } subcommands;
@@ -137,7 +137,31 @@ ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char 
 extern "C" {
 #endif
 
-// TODO
+// Public API //////////////////////////////////////////////////////////////////
+
+Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+void argparse_free(Argparse_Pack* pack) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+void argparse_free_command(Argparse_Command* command) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
+
+Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
+    ARGPARSE_ASSERT(false, "not implemented yet");
+}
 
 #ifdef __cplusplus
 }
@@ -161,11 +185,11 @@ extern "C" {
 #define CTEST_MAIN
 #include "ctest.h"
 
-static OptionParseResult parse_int_option(char const* text, size_t length) {
+static Argparse_ParseResult parse_int_option(char const* text, size_t length) {
     // Just check, if it's all digits
     for (size_t i = 0; i < length; ++i) {
         if (!isdigit((unsigned char)text[i])) {
-            return (OptionParseResult){
+            return (Argparse_ParseResult){
                 .value = NULL,
                 // TODO: We shouldn't leak internal API like this
                 // But we should also provide the user with a nicer API to report errors...
@@ -177,7 +201,7 @@ static OptionParseResult parse_int_option(char const* text, size_t length) {
     int* value = (int*)ARGPARSE_REALLOC(NULL, sizeof(int));
     ARGPARSE_ASSERT(value != NULL, "failed to allocate memory for parsed integer value");
     *value = atoi(text);
-    return (OptionParseResult){
+    return (Argparse_ParseResult){
         .value = value,
         .error = NULL,
     };
@@ -185,12 +209,12 @@ static OptionParseResult parse_int_option(char const* text, size_t length) {
 
 // We build a command-tree like so:
 // <root>: two options, --number/-n that takes an integer value (required) and --flag/-f that is a simple bool (optional)
-static CommandDescription build_sample_command(void) {
-    CommandDescription rootCommand = { 0 };
+static Argparse_Command build_sample_command(void) {
+    Argparse_Command rootCommand = { 0 };
     rootCommand.name = "<root>";
     rootCommand.description = "Root command";
 
-    argparse_add_option(&rootCommand, (OptionDescription){
+    argparse_add_option(&rootCommand, (Argparse_Option){
         .long_name = "--number",
         .short_name = "-n",
         .description = "A required option that takes an integer value",
@@ -200,7 +224,7 @@ static CommandDescription build_sample_command(void) {
         .allow_multiple = false,
         .parse_fn = parse_int_option,
     });
-    argparse_add_option(&rootCommand, (OptionDescription){
+    argparse_add_option(&rootCommand, (Argparse_Option){
         .long_name = "--flag",
         .short_name = "-f",
         .description = "An optional flag that doesn't take a value",
@@ -213,7 +237,7 @@ static CommandDescription build_sample_command(void) {
 
     // TODO: To suppress error
     if (false) {
-        argparse_add_subcommand(&rootCommand, (CommandDescription){
+        argparse_add_subcommand(&rootCommand, (Argparse_Command){
             .name = "subcommand",
             .description = "A subcommand that doesn't do anything",
         });
@@ -223,8 +247,8 @@ static CommandDescription build_sample_command(void) {
 }
 
 CTEST_CASE(empty_argument_list) {
-    CommandDescription rootCommand = build_sample_command();
-    ArgumentPack pack = argparse_parse(0, NULL, &rootCommand);
+    Argparse_Command rootCommand = build_sample_command();
+    Argparse_Pack pack = argparse_parse(0, NULL, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
 
@@ -233,9 +257,9 @@ CTEST_CASE(empty_argument_list) {
 }
 
 CTEST_CASE(missing_required_option) {
-    CommandDescription rootCommand = build_sample_command();
+    Argparse_Command rootCommand = build_sample_command();
     char* argv[] = { "program" };
-    ArgumentPack pack = argparse_parse(1, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(1, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
 
@@ -244,9 +268,9 @@ CTEST_CASE(missing_required_option) {
 }
 
 CTEST_CASE(unrecognized_option) {
-    CommandDescription rootCommand = build_sample_command();
+    Argparse_Command rootCommand = build_sample_command();
     char* argv[] = { "program", "--number", "42", "--unknown" };
-    ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(4, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
 
@@ -255,9 +279,9 @@ CTEST_CASE(unrecognized_option) {
 }
 
 CTEST_CASE(invalid_option_value) {
-    CommandDescription rootCommand = build_sample_command();
+    Argparse_Command rootCommand = build_sample_command();
     char* argv[] = { "program", "--number", "not_an_integer" };
-    ArgumentPack pack = argparse_parse(3, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(3, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error != NULL);
 
@@ -266,9 +290,9 @@ CTEST_CASE(invalid_option_value) {
 }
 
 CTEST_CASE(successful_parse_separate_argument) {
-    CommandDescription rootCommand = build_sample_command();
+    Argparse_Command rootCommand = build_sample_command();
     char* argv[] = { "program", "--number", "42", "--flag" };
-    ArgumentPack pack = argparse_parse(4, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(4, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error == NULL);
     void* numberValue = argparse_get_value(&pack, "--number");
@@ -282,9 +306,9 @@ CTEST_CASE(successful_parse_separate_argument) {
 }
 
 CTEST_CASE(successful_parse_combined_argument) {
-    CommandDescription rootCommand = build_sample_command();
+    Argparse_Command rootCommand = build_sample_command();
     char* argv[] = { "program", "--number=42", "-f" };
-    ArgumentPack pack = argparse_parse(3, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(3, argv, &rootCommand);
 
     CTEST_ASSERT_TRUE(pack.error == NULL);
     void* numberValue = argparse_get_value(&pack, "--number");
