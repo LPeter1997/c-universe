@@ -13,7 +13,8 @@
  */
 
 // NOTE: We need this to get some extra non-portable functionality
-#if (defined(__linux__) || defined(__APPLE__)) && !defined(_GNU_SOURCE)
+// and apparently we need this before any includes
+#if defined(__linux__) && !defined(_GNU_SOURCE)
     #define _GNU_SOURCE
 #endif
 
@@ -185,7 +186,7 @@ static void* gc_compute_stack_bottom(void) {
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
     return (void*)high;
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__)
     pthread_t thread = pthread_self();
     pthread_attr_t attr;
     if (pthread_getattr_np(thread, &attr) != 0) return NULL;
@@ -193,6 +194,11 @@ static void* gc_compute_stack_bottom(void) {
     size_t stacksize;
     if (pthread_attr_getstack(&attr, &stackbottom, &stacksize) != 0) return NULL;
     return (void*)((uint8_t*)stackbottom + stacksize);
+#elif defined(__APPLE__)
+    pthread_t thread = pthread_self();
+    void *stackaddr = pthread_get_stackaddr_np(thread);
+    size_t stacksize = pthread_get_stacksize_np(thread);
+    return stackaddr;
 #else
     #error "unsupported platform"
 #endif
