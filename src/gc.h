@@ -1,13 +1,26 @@
 /**
  * gc.h is a single-header C mark-and-sweep garbage collection library.
  *
- * It is designed to be easily embeddable into applications.
+ * It is designed to be easily embeddable into applications. Importantly, this GC works by monitoring pointers
+ * that reside in the global section(s) and the stack. The library DOES NOT track internal pointers, a reference
+ * to the allocated base address must exist somewhere to not be collected. Since it's rare that the root address
+ * is not stored somewhere, this felt like a fair tradeoff for speed.
  *
  * Configuration:
- *  - TODO
+ *  - #define GC_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
+ *  - #define GC_STATIC before including this header to make all functions have internal linkage
+ *  - #define GC_REALLOC and GC_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define GC_LOG before including this header to define a custom logging function for internal GC logs (API is expected to be identical to printf)
+ *  - #define GC_SELF_TEST before including this header to compile a self-test that verifies the framework's functionality
+ *  - #define GC_EXAMPLE before including this header to compile a simple example that demonstrates how to use the framework
  *
  * API:
- *  - TODO
+ *  - Define a GC_World struct and optionally set a custom sweep_factor if needed
+ *  - Call gc_start to initialize the GC world, and gc_stop to clean up resources when done
+ *  - Use gc_alloc, gc_realloc and gc_free to allocate memory that should be managed by the GC
+ *  - Use gc_pin and gc_unpin to pin/unpin allocations that should be kept alive even without references
+ *  - Call gc_run to perform a GC cycle, either forced or non-forced (which respects the sweep limit)
+ *  - Use gc_pause and gc_resume to temporarily pause and resume the cycle
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -51,6 +64,9 @@ extern "C" {
 struct GC_HashBucket;
 struct GC_GlobalSection;
 
+/**
+ * The main struct representing the GC world, containing all necessary data structures and configuration for the GC to operate.
+ */
 typedef struct GC_World {
     double sweep_factor;
     size_t sweep_limit;
@@ -73,17 +89,77 @@ typedef struct GC_World {
     void* stack_bottom;
 } GC_World;
 
+/**
+ * Initializes the GC world, must be called before any other GC function.
+ * @param gc The GC world to initialize.
+ */
 GC_DEF void gc_start(GC_World* gc);
+
+/**
+ * Stops the GC world and frees any resources used by it, must be called when GC functionality is no longer needed.
+ * @param gc The GC world to stop.
+ */
 GC_DEF void gc_stop(GC_World* gc);
+
+/**
+ * Pauses the GC cycle, preventing @see gc_run from doing anything until resumed.
+ * @param gc The GC world to pause.
+ */
 GC_DEF void gc_pause(GC_World* gc);
+
+/**
+ * Resumes the GC cycle if it was paused.
+ * @param gc The GC world to resume.
+ */
 GC_DEF void gc_resume(GC_World* gc);
+
+/**
+ * Runs a GC cycle, performing mark-and-sweep collection.
+ * @param gc The GC world to run the cycle on.
+ * @param force If true, forces a collection regardless of the sweep limit; if false, only performs collection if the number of allocated items exceeds the sweep limit.
+ * @returns The freed memory size in bytes.
+ */
 GC_DEF size_t gc_run(GC_World* gc, bool force);
 
+/**
+ * Pins the given memory, preventing it from being collected even if no references to it exist.
+ * @param gc The GC world to pin the memory in.
+ * @param mem The memory to pin.
+ */
 GC_DEF void gc_pin(GC_World* gc, void* mem);
+
+/**
+ * Unpins the given memory, allowing it to be collected if no references to it exist.
+ * @param gc The GC world to unpin the memory in.
+ * @param mem The memory to unpin.
+ */
 GC_DEF void gc_unpin(GC_World* gc, void* mem);
 
+/**
+ * Allocates memory of the given size that is managed by the GC.
+ * Calls out to whatever GC_REALLOC is defined as, with a NULL pointer for the first argument.
+ * @param gc The GC world to allocate the memory in.
+ * @param size The size of the memory to allocate in bytes.
+ * @returns A pointer to the allocated memory, or NULL if allocation failed.
+ */
 GC_DEF void* gc_alloc(GC_World* gc, size_t size);
+
+/**
+ * Reallocates the given memory to the new size, updating the GC's internal data structures accordingly.
+ * Calls out to whatever GC_REALLOC is defined as.
+ * @param gc The GC world to reallocate the memory in.
+ * @param mem The memory to reallocate, must have been allocated by this GC.
+ * @param size The new size of the memory in bytes.
+ * @returns A pointer to the reallocated memory, or NULL if reallocation failed.
+ */
 GC_DEF void* gc_realloc(GC_World* gc, void* mem, size_t size);
+
+/**
+ * Frees the given memory, removing it from the GC's internal data structures.
+ * Calls out to whatever GC_FREE is defined as.
+ * @param gc The GC world to free the memory in.
+ * @param mem The memory to free, must have been allocated by this GC.
+ */
 GC_DEF void gc_free(GC_World* gc, void* mem);
 
 #ifdef __cplusplus

@@ -4,6 +4,7 @@
  * A fairly minimalistic single-header testing framework for C.
  *
  * Configuration:
+ *  - #define CTEST_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define CTEST_STATIC before including this header to make all functions have internal linkage
  *  - #define CTEST_REALLOC and CTEST_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
  *  - #define CTEST_MAIN before including this header to compile a default main program that runs all test cases defined with CTEST_CASE, and accepts optional command-line arguments to filter which cases to run
