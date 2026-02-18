@@ -197,7 +197,6 @@ static void* gc_compute_stack_bottom(void) {
 #elif defined(__APPLE__)
     pthread_t thread = pthread_self();
     void *stackaddr = pthread_get_stackaddr_np(thread);
-    size_t stacksize = pthread_get_stacksize_np(thread);
     return stackaddr;
 #else
     #error "unsupported platform"
