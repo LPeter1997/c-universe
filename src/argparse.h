@@ -379,6 +379,8 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
     // If we got to the end of the token, skip it so that we read a new token on the next call
     if (token->index >= token->length) {
         argparse_tokenizer_skip_current(tokenizer);
+        // Don't forget unwrapping
+        if (token->text != NULL) argparse_tokenizer_unwrap_current(pack, tokenizer);
     }
 }
 
