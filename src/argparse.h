@@ -152,7 +152,9 @@ ARGPARSE_DEF char* argparse_format(char const* format, ...);
 
 #include <assert.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -230,6 +232,7 @@ static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argp
 
 static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
     Argparse_Response* toPop = tokenizer->currentResponse;
+    ARGPARSE_ASSERT(toPop != NULL, "cannot pop response, response stack is empty");
     tokenizer->currentResponse = toPop->next;
     // Free the popped response's text and the response itself
     ARGPARSE_FREE(toPop->text);
@@ -274,6 +277,9 @@ start:
     token->length = length;
 }
 
+// Reads the current token from whatever the current active source is (argv or response stack)
+// Does not do any extra handling
+// If the source is exhausted, sets currentToken.text to NULL
 static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
     if (tokenizer->currentResponse == NULL) {
         Argparse_Token* token = &tokenizer->currentToken;
@@ -294,73 +300,115 @@ static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
     }
 }
 
+// Skips over the current token, moving the tokenizer forward to the next token
+// Does not read in the next token, merely advances the source (argv or response stack)
 static void argparse_tokenizer_skip_current(Argparse_Tokenizer* tokenizer) {
-    ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot skip current token, no current token present");
+    Argparse_Token* token = &tokenizer->currentToken;
+    ARGPARSE_ASSERT(token->text != NULL, "cannot skip current token, no current token present");
 
-retry:
     if (tokenizer->currentResponse == NULL) {
         // Easy, just move to the next argv
         ++tokenizer->argvIndex;
-        argparse_tokenizer_read_current(tokenizer);
     }
     else {
-        // We just move the index forward by the length of the current token, and read the next token
-        tokenizer->currentResponse->index = tokenizer->currentToken.index + tokenizer->currentToken.length;
-        argparse_tokenizer_read_current(tokenizer);
-        // If the current token became NULL, we need to pop the response and try again
-        if (tokenizer->currentToken.text == NULL) {
-            argparse_tokenizer_pop_response(tokenizer);
-            goto retry;
-        }
+        // We just move the index forward by the length of the current token
+        tokenizer->currentResponse->index += token->length;
     }
+
+    // Either way, we clear the currnet token's state, so that we read a new token on the next read
+    token->text = NULL;
+    token->length = 0;
+    token->index = 0;
 }
 
-static void argparse_tokenizer_unwrap_current(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
-    ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot unwrap current token, no current token present");
+// Handles the current token, unwrapping it if it's a response file token and pushing it on the stack if so
+// Returns true if the token was handled as a response file token, false otherwise
+static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+    ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot process current token, no current token present");
 
-retry:
     // If we are at the start of the token and it's a response, we need to push it onto the stack
-    if (tokenizer->currentToken.index == 0 && tokenizer->currentToken.text[0] == '@') {
-        // We interpret the entire token as a file path, read the file and push its content as a new response
-        char const* filePath = tokenizer->currentToken.text + 1;
-        FILE* file = fopen(filePath, "r");
-        if (file == NULL) {
-            // Failed to open file, report error and return
-            char* error = argparse_format("failed to open response file '%s'", filePath);
-            argparse_add_error(pack, error);
-            return;
-        }
-        fseek(file, 0, SEEK_END);
-        long fileSize = ftell(file);
-        fseek(file, 0, SEEK_SET);
-        char* fileContent = (char*)ARGPARSE_REALLOC(NULL, fileSize);
-        ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
-        fread(fileContent, 1, fileSize, file);
-        fclose(file);
+    // Not a response
+    if (tokenizer->currentToken.index != 0 || tokenizer->currentToken.text[0] != '@') return false;
+
+    Argparse_Token* token = &tokenizer->currentToken;
+    // We interpret the entire token as a file path
+    char const* filePath = token->text + 1;
+    // Clear out the token's state
+    token->text = NULL;
+    token->length = 0;
+    token->index = 0;
+    // Open file for reading
+    FILE* file = fopen(filePath, "r");
+    if (file == NULL) {
+        // Failed to open file, report error, we add a dummy response to the stack to allow processing to continue
+        char* error = argparse_format("failed to open response file '%s'", filePath);
+        argparse_add_error(pack, error);
         argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
-            .text = fileContent,
-            .length = fileSize,
+            .text = NULL,
+            .length = 0,
             .index = 0,
         });
-        // After pushing the new response, we need to read the current token again (which will now read from the new response)
-        argparse_tokenizer_read_current(tokenizer);
-        goto retry;
+        return true;
     }
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    // Read file content
+    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, fileSize);
+    ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
+    fread(fileContent, 1, fileSize, file);
+    fclose(file);
+    // Push content as new response
+    argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
+        .text = fileContent,
+        .length = fileSize,
+        .index = 0,
+    });
+    return true;
+}
 
-    // We are done unwrapping
+// Reads in the next full token, handling it as a response file if needed
+static bool argparse_tokenizer_next_internal(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+start:
+    if (tokenizer->currentToken.text == NULL) {
+        // Try to read the current token
+        argparse_tokenizer_read_current(tokenizer);
+        // If we still don't have a token and the response stack is empty, we are done
+        if (tokenizer->currentToken.text == NULL && tokenizer->currentResponse == NULL) return false;
+        // If we got a token, check if it's a response file token and handle it if so
+        if (tokenizer->currentToken.text != NULL) {
+            if (argparse_tokenizer_handle_current_as_response(pack, tokenizer)) {
+                // We handled it as a response file token, so we need to read the next token from the new response
+                goto start;
+            }
+            else {
+                // Not a response file token, ready to be parsed
+                return true;
+            }
+        }
+        // Response stack is not empty but we could not read from it, pop
+        argparse_tokenizer_pop_response(tokenizer);
+        // Try again with the next response
+        goto start;
+    }
+    // There is a current token, we need to skip it
+    argparse_tokenizer_skip_current(tokenizer);
+    // Retry
+    goto start;
 }
 
 static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
-    // If we haven't read a token yet, try to read it
     Argparse_Token* token = &tokenizer->currentToken;
-    if (token->text == NULL) {
-        argparse_tokenizer_read_current(tokenizer);
-        // If we still don't have a token, we are done
-        if (token->text == NULL) return false;
-        // Try to unwrap it
-        argparse_tokenizer_unwrap_current(pack, tokenizer);
-        // If we got an error reported, we are done
-        if (pack->errors.length > 0) return false;
+
+    if (token->index >= token->length) {
+        // End of previous token, try to read the next one
+        if (!argparse_tokenizer_next_internal(pack, tokenizer)) {
+            // No more tokens to read
+            *outToken = NULL;
+            *outLength = 0;
+            return false;
+        }
     }
 
     // We have a current token, parse until a value separator or the end of the token
@@ -375,17 +423,12 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
     *outToken = tokenText;
     *outLength = tokenLength;
     // Move forward in the token
-    tokenizer->currentToken.index += tokenLength;
+    token->index += tokenLength;
     // If we stopped at a value delimiter, skip over that
     if (token->index < token->length && argparse_is_value_delimiter(token->text[token->index])) {
         ++token->index;
     }
-    // If we got to the end of the token, skip it so that we read a new token on the next call
-    if (token->index >= token->length) {
-        argparse_tokenizer_skip_current(tokenizer);
-        // Don't forget unwrapping
-        if (token->text != NULL) argparse_tokenizer_unwrap_current(pack, tokenizer);
-    }
+    return true;
 }
 
 // Public API //////////////////////////////////////////////////////////////////
