@@ -297,10 +297,17 @@ retry:
     if (tokenizer->currentResponse == NULL) {
         // Easy, just move to the next argv
         ++tokenizer->argvIndex;
+        argparse_tokenizer_read_current(tokenizer);
     }
     else {
         // We just move the index forward by the length of the current token, and read the next token
         tokenizer->currentResponse->index = tokenizer->currentToken.index + tokenizer->currentToken.length;
+        argparse_tokenizer_read_current(tokenizer);
+        // If the current token became NULL, we need to pop the response and try again
+        if (tokenizer->currentToken.text == NULL) {
+            argparse_tokenizer_pop_response(tokenizer);
+            goto retry;
+        }
     }
 }
 
