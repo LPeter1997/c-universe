@@ -471,14 +471,15 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     size_t tokenLength;
     bool expectsValue = false;
     bool prevExpectsValue = false;
+    Argparse_Argument* currentArgument = NULL;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
         if (prevExpectsValue) {
             ARGPARSE_ASSERT(!expectsValue, "unexpected state: cannot have two consecutive value tokens");
 
-            // TODO
+            // TODO: can only parse a value for prev option
         }
         else {
-            // TODO
+            // TODO: parse an option/positional arg
         }
 
         // For next iteration
