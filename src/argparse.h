@@ -154,6 +154,17 @@ ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 #include <stdlib.h>
 
 #define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
+#define ARGPARSE_ADD_TO_ARRAY(array, length, capacity, element) \
+    do { \
+        if ((length) + 1 > (capacity)) { \
+            size_t newCapacity = ((capacity) == 0) ? 8 : ((capacity) * 2); \
+            void* newElements = ARGPARSE_REALLOC((array), newCapacity * sizeof(*(array))); \
+            ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for array"); \
+            (array) = newElements; \
+            (capacity) = newCapacity; \
+        } \
+        (array)[(length)++] = element; \
+    } while (false)
 
 #ifdef __cplusplus
 extern "C" {
@@ -162,6 +173,18 @@ extern "C" {
 static bool argparse_option_has_name(Argparse_Option* option, char const* name) {
     return (option->long_name != NULL && strcmp(option->long_name, name) == 0)
         || (option->short_name != NULL && strcmp(option->short_name, name) == 0);
+}
+
+static void argparse_add_error(Argparse_Pack* pack, char const* error) {
+    ARGPARSE_ADD_TO_ARRAY(pack->errors.elements, pack->errors.length, pack->errors.capacity, error);
+}
+
+static void argparse_add_argument(Argparse_Pack* pack, Argparse_Argument arg) {
+    ARGPARSE_ADD_TO_ARRAY(pack->arguments.elements, pack->arguments.length, pack->arguments.capacity, arg);
+}
+
+static void argparse_add_value_to_argument(Argparse_Argument* argument, void* value) {
+    ARGPARSE_ADD_TO_ARRAY(argument->values.elements, argument->values.length, argument->values.capacity, value);
 }
 
 // Public API //////////////////////////////////////////////////////////////////
@@ -197,25 +220,11 @@ void argparse_free_pack(Argparse_Pack* pack) {
 }
 
 void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
-    if (command->options.length == command->options.capacity) {
-        size_t newCapacity = command->options.capacity == 0 ? 8 : command->options.capacity * 2;
-        Argparse_Option* newElements = (Argparse_Option*)ARGPARSE_REALLOC(command->options.elements, newCapacity * sizeof(Argparse_Option));
-        ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for new option");
-        command->options.elements = newElements;
-        command->options.capacity = newCapacity;
-    }
-    command->options.elements[command->options.length++] = option;
+    ARGPARSE_ADD_TO_ARRAY(command->options.elements, command->options.length, command->options.capacity, option);
 }
 
 void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand) {
-    if (command->subcommands.length == command->subcommands.capacity) {
-        size_t newCapacity = command->subcommands.capacity == 0 ? 8 : command->subcommands.capacity * 2;
-        Argparse_Command* newElements = (Argparse_Command*)ARGPARSE_REALLOC(command->subcommands.elements, newCapacity * sizeof(Argparse_Command));
-        ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for new subcommand");
-        command->subcommands.elements = newElements;
-        command->subcommands.capacity = newCapacity;
-    }
-    command->subcommands.elements[command->subcommands.length++] = subcommand;
+    ARGPARSE_ADD_TO_ARRAY(command->subcommands.elements, command->subcommands.length, command->subcommands.capacity, subcommand);
 }
 
 void argparse_free_command(Argparse_Command* command) {
@@ -232,6 +241,7 @@ void argparse_free_command(Argparse_Command* command) {
 }
 #endif
 
+#undef ARGPARSE_ADD_TO_ARRAY
 #undef ARGPARSE_ASSERT
 
 #endif /* ARGPARSE_IMPLEMENTATION */
