@@ -43,6 +43,12 @@ if ($Action -eq "run" -and $Sources.Count -eq 0) {
     throw "for running, at least one source file must be provided via -Sources"
 }
 
+# On Windows we add _CRT_SECURE_NO_WARNINGS to the defines
+# This must be at script scope, not inside a function, to avoid PowerShell scoping issues with +=
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    $Defines += "_CRT_SECURE_NO_WARNINGS"
+}
+
 function Show-Version {
     if ($Style -eq "msvc") {
         & $Compiler
@@ -54,10 +60,6 @@ function Show-Version {
 function Compile {
     Write-Host "building with $Compiler ($Style)..."
 
-    # On Windows we add _CRT_SECURE_NO_WARNINGS to the defines
-    if ($IsWindows -or $env:OS -eq "Windows_NT") {
-        $Defines += "_CRT_SECURE_NO_WARNINGS"
-    }
     # Build flags
     $Args = @()
     if ($Style -eq "msvc") {
