@@ -1,0 +1,3 @@
+--first
+@test_inputs/argparse/nested_inner.txt
+--last

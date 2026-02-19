@@ -1,0 +1,3 @@
+--verbose
+--count 42
+--output result.txt

@@ -24,7 +24,10 @@ function Compile-And-Run {
         [string]$Output = "a.out",
 
         [Parameter(Mandatory=$false)]
-        [switch]$AllowUnusedParameters
+        [switch]$AllowUnusedParameters,
+
+        [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
+        [string[]]$RunArgs = @()
     )
 
     .\compile_and_run.ps1 `
@@ -35,7 +38,8 @@ function Compile-And-Run {
         -Sources $Sources `
         -Defines $Defines `
         -Output $Output `
-        -AllowUnusedParameters:$AllowUnusedParameters
+        -AllowUnusedParameters:$AllowUnusedParameters `
+        -RunArgs $RunArgs
 }
 
 # 1. ctest library
@@ -61,3 +65,16 @@ Compile-And-Run `
     -Sources @("../src/gc.h") `
     -Defines @("GC_EXAMPLE") `
     -AllowUnusedParameters
+
+# 3. Argparse library
+Write-Host "running self-test for Argparse library..."
+Compile-And-Run `
+    -Sources @("../src/argparse.h") `
+    -Defines @("ARGPARSE_STATIC", "ARGPARSE_IMPLEMENTATION", "ARGPARSE_SELF_TEST") `
+    -AllowUnusedParameters
+Write-Host "running example for Argparse library..."
+Compile-And-Run `
+    -Sources @("../src/argparse.h") `
+    -Defines @("ARGPARSE_EXAMPLE") `
+    -AllowUnusedParameters `
+    -RunArgs @("run", "--verbose", "--", "arg1", "arg2", "arg3")

@@ -24,7 +24,10 @@ param(
     [string]$Output = "a.out",
 
     [Parameter(Mandatory=$false)]
-    [switch]$AllowUnusedParameters
+    [switch]$AllowUnusedParameters,
+
+    [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
+    [string[]]$RunArgs = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,6 +41,12 @@ if ($IsWindows -or $env:OS -eq "Windows_NT") {
 
 if ($Action -eq "run" -and $Sources.Count -eq 0) {
     throw "for running, at least one source file must be provided via -Sources"
+}
+
+# On Windows we add _CRT_SECURE_NO_WARNINGS to the defines
+# This must be at script scope, not inside a function, to avoid PowerShell scoping issues with +=
+if ($IsWindows -or $env:OS -eq "Windows_NT") {
+    $Defines += "_CRT_SECURE_NO_WARNINGS"
 }
 
 function Show-Version {
@@ -127,11 +136,24 @@ function Run {
         throw "executable $Output not found, cannot run"
     }
 
-    Write-Host "running $Output..."
-    & "./$Output"
+    # Resolve output to absolute path before changing directories
+    $AbsOutput = Resolve-Path $Output
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "running $Output failed with exit code $LASTEXITCODE"
+    # Change to the directory of the first source file
+    $SourceDir = Split-Path -Parent (Resolve-Path $Sources[0])
+    $OriginalDir = Get-Location
+    Set-Location $SourceDir
+
+    try {
+        Write-Host "running $AbsOutput from $SourceDir..."
+        & $AbsOutput @RunArgs
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "running $Output failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        # Restore original working directory
+        Set-Location $OriginalDir
     }
 }
 
