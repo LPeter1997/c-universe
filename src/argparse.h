@@ -467,8 +467,12 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     char const* tokenText;
     size_t tokenLength;
     bool expectsValue = false;
+    bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
         // TODO
+
+        // For next iteration
+        prevExpectsValue = expectsValue;
     }
 }
 
