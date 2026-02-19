@@ -3,6 +3,17 @@
  *
  * The goal was to get something relatively extensible and similar to System.CommandLine in .NET.
  *
+ * Features:
+ *  - Root command, subcommands
+ *  - Options with or without names (latter being positional arguments) prefixed with '-', '--' or '/'
+ *  - Arguments with different arities
+ *  - Default values
+ *  - Custom parsing functions for options
+ *  - Double-dash (--) to escape options and treat all following arguments as positional
+ *  - Option-value delimiters with a space, '=' or ':'
+ *  - Option bundling for short-named options (e.g. '-abc' is equivalent to '-a -b -c')
+ *  - Response files (e.g. '@args.txt' to read additional arguments from a file)
+ *
  * Configuration:
  *  - TODO
  *
@@ -32,13 +43,33 @@
 #   define ARGPARSE_FREE free
 #endif
 
-#ifndef ARGPARSE_ARGUMENT_SEPARATORS
-#   define ARGPARSE_ARGUMENT_SEPARATORS "=", ":"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct Argparse_Command;
+struct Argparse_Argument;
+struct Argparse_Option;
+
+typedef struct Argparse_Pack {
+    char const* program_name;
+
+    struct Argparse_Command* command;
+
+    // Owned array of options that were parsed for the command
+    struct {
+        struct Argparse_Argument* elements;
+        size_t length;
+        size_t capacity;
+    } arguments;
+
+    // Owned list of errors
+    struct {
+        char const** elements;
+        size_t length;
+        size_t capacity;
+    } errors;
+} Argparse_Pack;
 
 typedef struct Argparse_ParseResult {
     // Owned pointer to the parsed value, which must be freed by the caller in case of a parsing success
@@ -48,21 +79,28 @@ typedef struct Argparse_ParseResult {
     char const* error;
 } Argparse_ParseResult;
 
+typedef enum Argparse_Arity {
+    ARGPARSE_ARITY_ZERO,
+    ARGPARSE_ARITY_ZERO_OR_ONE,
+    ARGPARSE_ARITY_EXACTLY_ONE,
+    ARGPARSE_ARITY_ZERO_OR_MORE,
+    ARGPARSE_ARITY_ONE_OR_MORE,
+} Argparse_Arity;
+
 typedef Argparse_ParseResult Argparse_ParseFn(char const* text, size_t length);
+typedef void* Argparse_ValueFn(struct Argparse_Option* option);
 
 typedef struct Argparse_Option {
     char const* long_name;
     char const* short_name;
     char const* description;
-    bool is_required;
-    bool takes_value;
+    Argparse_Arity arity;
     void* default_value;
-    bool allow_multiple;
     Argparse_ParseFn* parse_fn;
+    Argparse_ValueFn* default_value_fn;
 } Argparse_Option;
 
-struct Argparse_Pack;
-typedef int Argparse_HandlerFn(struct Argparse_Pack* pack);
+typedef int Argparse_HandlerFn(Argparse_Pack* pack);
 
 typedef struct Argparse_Command {
     char const* name;
@@ -84,37 +122,16 @@ typedef struct Argparse_Command {
 
 typedef struct Argparse_Argument {
     Argparse_Option* option;
-    void* value;
     struct {
         void** elements;
         size_t length;
         size_t capacity;
-    } multiple_values;
+    } values;
 } Argparse_Argument;
-
-typedef struct Argparse_Pack {
-    char const* program_name;
-
-    Argparse_Command* command;
-
-    // Owned array of options that were parsed for the command
-    struct {
-         Argparse_Argument* elements;
-         size_t length;
-         size_t capacity;
-    } arguments;
-
-    // Owned list of errors
-    struct {
-        char const** elements;
-        size_t length;
-        size_t capacity;
-    } errors;
-} Argparse_Pack;
 
 ARGPARSE_DEF Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root);
 ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name);
-ARGPARSE_DEF void argparse_free(Argparse_Pack* pack);
+ARGPARSE_DEF void argparse_free_pack(Argparse_Pack* pack);
 
 ARGPARSE_DEF void argparse_add_option(Argparse_Command* command, Argparse_Option option);
 ARGPARSE_DEF void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand);
@@ -132,6 +149,9 @@ ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 #ifdef ARGPARSE_IMPLEMENTATION
 
 #include <assert.h>
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
 
 #define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
 
@@ -159,20 +179,15 @@ Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) 
     return NULL;
 }
 
-void argparse_free(Argparse_Pack* pack) {
+void argparse_free_pack(Argparse_Pack* pack) {
     // Free all allocated memory for the parsed arguments
     // Do not deallocate the command or options, as they are owned by the command hierarchy
     for (size_t i = 0; i < pack->arguments.length; ++i) {
         Argparse_Argument* argument = &pack->arguments.elements[i];
-        if (argument->option->allow_multiple) {
-            for (size_t j = 0; j < argument->multiple_values.length; ++j) {
-                ARGPARSE_FREE(argument->multiple_values.elements[j]);
-            }
-            ARGPARSE_FREE(argument->multiple_values.elements);
+        for (size_t j = 0; j < argument->values.length; ++j) {
+            ARGPARSE_FREE(argument->values.elements[j]);
         }
-        else {
-            ARGPARSE_FREE(argument->value);
-        }
+        ARGPARSE_FREE(argument->values.elements);
     }
     ARGPARSE_FREE(pack->arguments.elements);
     for (size_t i = 0; i < pack->errors.length; ++i) {
