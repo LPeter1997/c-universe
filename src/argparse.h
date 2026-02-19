@@ -412,20 +412,32 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
     // We have a current token, parse until a value separator or the end of the token
     char* tokenText = token->text + token->index;
     size_t tokenLength = 0;
+    char currentQuote = '\0';
     while (token->index + tokenLength < token->length) {
         char c = token->text[token->index + tokenLength];
-        if (argparse_is_value_delimiter(c)) break;
+        if (currentQuote == '\0') {
+            if (argparse_is_quote(c)) currentQuote = c;
+        }
+        else if (c == currentQuote) {
+            currentQuote = '\0';
+        }
+        if (argparse_is_value_delimiter(c) && currentQuote == '\0') break;
         ++tokenLength;
     }
-    // Save result
-    *outToken = tokenText;
-    *outLength = tokenLength;
     // Move forward in the token
     token->index += tokenLength;
     // If we stopped at a value delimiter, skip over that
     if (token->index < token->length && argparse_is_value_delimiter(token->text[token->index])) {
         ++token->index;
     }
+    // Strip quotes, if present
+    if (tokenLength > 1 && argparse_is_quote(tokenText[0]) && tokenText[tokenLength - 1] == tokenText[0]) {
+        ++tokenText;
+        tokenLength -= 2;
+    }
+    // Save result
+    *outToken = tokenText;
+    *outLength = tokenLength;
     return true;
 }
 
