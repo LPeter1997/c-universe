@@ -507,7 +507,7 @@ static bool argparse_tokenizer_next(
 
 // Construction ////////////////////////////////////////////////////////////////
 
-static Argparse_Option* argparse_try_get_or_add_option_by_name(Argparse_Pack* pack, char* name, size_t nameLength) {
+static Argparse_Argument* argparse_try_get_or_add_option_by_name(Argparse_Pack* pack, char* name, size_t nameLength) {
     Argparse_Option* option = argparse_find_option_with_name_n(pack->command, name, nameLength);
     if (option == NULL) return NULL;
 
@@ -539,7 +539,7 @@ static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, 
         for (size_t i = 1; i < nameLength; ++i) {
             nameBuffer[1] = name[i];
             // NOTE: We don't add here yet, we first need to confirm a legal bundle
-            Argparse_Option* option = argparse_find_option_with_name_n(pack, nameBuffer, 2);
+            Argparse_Option* option = argparse_find_option_with_name_n(pack->command, nameBuffer, 2);
             if (option == NULL) {
                 // Illegal bundling, some character did not correspond to a short name
                 return NULL;
@@ -619,6 +619,54 @@ static Argparse_Argument* argparse_get_current_positional_argument_for_value(Arg
     return NULL;
 }
 
+static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option* option, Argparse_Argument* argument) {
+    size_t valueCount = (argument != NULL) ? argument->values.length : 0;
+    Argparse_Arity arity = option->arity;
+    bool valid = false;
+    switch (arity) {
+    case ARGPARSE_ARITY_ZERO:
+        valid = valueCount == 0;
+        break;
+    case ARGPARSE_ARITY_ZERO_OR_ONE:
+        valid = valueCount <= 1;
+        break;
+    case ARGPARSE_ARITY_EXACTLY_ONE:
+        valid = valueCount == 1;
+        break;
+    case ARGPARSE_ARITY_ZERO_OR_MORE:
+        valid = true;
+        break;
+    case ARGPARSE_ARITY_ONE_OR_MORE:
+        valid = valueCount >= 1;
+        break;
+    }
+    if (!valid) {
+        char const* optionName = option->long_name == NULL ? option->short_name : option->long_name;
+        char const* expectedAmountDesc =
+            (arity == ARGPARSE_ARITY_ZERO) ? "no" :
+            (arity == ARGPARSE_ARITY_ZERO_OR_ONE) ? "at most one" :
+            (arity == ARGPARSE_ARITY_EXACTLY_ONE) ? "exactly one" :
+            (arity == ARGPARSE_ARITY_ZERO_OR_MORE) ? "any number of" :
+            (arity == ARGPARSE_ARITY_ONE_OR_MORE) ? "at least one" : "unknown number of";
+        char* error = NULL;
+        if (optionName == NULL) {
+            // Positional argument, we report the index instead of the name
+            size_t positionalIndex = 0;
+            for (size_t i = 0; i < pack->command->options.length; ++i) {
+                if (&pack->command->options.elements[i] == option) {
+                    positionalIndex = i + 1;
+                    break;
+                }
+            }
+            error = argparse_format("positional argument %zu expects %s value(s), but got %zu", positionalIndex, expectedAmountDesc, valueCount);
+        }
+        else {
+            error = argparse_format("option '%s' expects %s value(s), but got %zu", optionName, expectedAmountDesc, valueCount);
+        }
+        argparse_add_error(pack, error);
+    }
+}
+
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
@@ -672,7 +720,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             // Has to be a value for prev. option
             if (currentArgument == NULL) {
                 // NOTE: We just throw it away, error should have been reported
-                ARGPARSE_ASSERT(pack->errors.length > 0, "an error was expected to be reported for throwaway value");
+                ARGPARSE_ASSERT(pack.errors.length > 0, "an error was expected to be reported for throwaway value");
                 continue;
             }
             else {
@@ -711,10 +759,6 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             }
             continue;
         }
-        if (argparse_argument_can_take_value(currentArgument)) {
-            argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
-            continue;
-        }
         // If the current argument can take more values, parse into that
         if (argparse_argument_can_take_value(currentArgument)) {
             argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
@@ -729,6 +773,19 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         // No argument could take this value, report error
         char* error = argparse_format("unexpected argument '%.*s'", (int)tokenLength, tokenText);
         argparse_add_error(&pack, error);
+    }
+
+    // Now we need to validate the arity of each option
+    for (size_t i = 0; i < pack.command->options.length; ++i) {
+        Argparse_Option* option = &pack.command->options.elements[i];
+        Argparse_Argument* argument = NULL;
+        for (size_t j = 0; j < pack.arguments.length; ++j) {
+            if (pack.arguments.elements[j].option == option) {
+                argument = &pack.arguments.elements[j];
+                break;
+            }
+        }
+        argparse_validate_option_arity(&pack, option, argument);
     }
 
     return pack;
