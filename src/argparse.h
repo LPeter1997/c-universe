@@ -485,7 +485,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool expectsValue = false;
     bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
-        if (prevExpectsValue || (!allowSubcommand && !allowOptions)) {
+        if (prevExpectsValue) {
             // We have to parse as value
             // TODO
         }
@@ -504,9 +504,9 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             }
             // Try to parse as option
             if (allowOptions) {
-                // TODO
+                // TODO: Try option
             }
-            // TODO
+            // TODO: Try value
         }
 
         // For next iteration
