@@ -51,34 +51,53 @@ struct Argparse_Command;
 struct Argparse_Argument;
 struct Argparse_Option;
 
+/**
+ * The result of parsing command-line arguments, containing the parsed values and any errors that were encountered during parsing.
+ */
 typedef struct Argparse_Pack {
+    // The name of the ran program, which is the first argument.
     char const* program_name;
 
+    // The resolved command.
     struct Argparse_Command* command;
 
     // Owned array of options that were parsed for the command
     struct {
+        // The arguments that were parsed for the command.
         struct Argparse_Argument* elements;
+        // The number of parsed arguments.
         size_t length;
+        // The capacity of the elements array.
         size_t capacity;
     } arguments;
 
     // Owned list of errors
     struct {
+        // The error messages that were produced.
         char const** elements;
+        // The number of error messages.
         size_t length;
+        // The capacity of the errors array.
         size_t capacity;
     } errors;
 } Argparse_Pack;
 
+/**
+ * The result of a custom parsing function.
+ */
 typedef struct Argparse_ParseResult {
-    // Owned pointer to the parsed value, which must be freed by the caller in case of a parsing success
+    // The value that was parsed, if parsing succeeded.
+    // The library will call ARGPARSE_FREE on this value when the pack is freed, so it must be heap-allocated if parsing succeeded.
     void* value;
-    // Owned error message in case of a parsing failure, must be freed by the caller
-    // A non-NULL value indicates a parsing failure, while a NULL value indicates a parsing success
+    // An error message if parsing failed, or NULL if parsing succeeded.
+    // The library will call ARGPARSE_FREE on this error message when the pack is freed, so it must be heap-allocated if parsing failed.
+    // Consider using @see argparse_format to create error messages for this.
     char const* error;
 } Argparse_ParseResult;
 
+/**
+ * The arity of an option or argument, indicating how many values it can accept.
+ */
 typedef enum Argparse_Arity {
     ARGPARSE_ARITY_ZERO,
     ARGPARSE_ARITY_ZERO_OR_ONE,
@@ -90,53 +109,124 @@ typedef enum Argparse_Arity {
 typedef Argparse_ParseResult Argparse_ParseFn(char const* text, size_t length);
 typedef void* Argparse_ValueFn(struct Argparse_Option* option);
 
+/**
+ * Describes an option that a command accepts, including its name(s), description, arity, default value and custom parsing function.
+ * If both long_name and short_name are NULL, this option is treated as a positional argument,
+ * and the order of declaration determines the expected position of the argument.
+ */
 typedef struct Argparse_Option {
+    // The long name of the option including its prefix, for example "--help". Can be NULL.
     char const* long_name;
+    // The short name of the option including its prefix, for example "-h". Can be NULL.
     char const* short_name;
+    // A description of the option, used for help messages. Can be NULL.
     char const* description;
+    // The arity of the option, indicating how many values it can accept.
     Argparse_Arity arity;
-    void* default_value;
+    // A custom parsing function for the option's values. If NULL, the raw text will be used as the value.
     Argparse_ParseFn* parse_fn;
+    // A function that provides the default value for this option if it is not specified in the command line. Can be NULL if no default value is needed.
     Argparse_ValueFn* default_value_fn;
 } Argparse_Option;
 
 typedef int Argparse_HandlerFn(Argparse_Pack* pack);
 
+/**
+ * Describes a command, including its name, description, handler function, options and subcommands.
+ */
 typedef struct Argparse_Command {
+    // The name of the command, used for matching and in help messages.
     char const* name;
+    // A description of the command, used for help messages. Can be NULL.
     char const* description;
+    // The handler function corresponding to this command. Can be NULL.
     Argparse_HandlerFn* handler_fn;
 
     struct {
+        // The options that this command accepts. This includes both named options and positional arguments.
         Argparse_Option* elements;
+        // The number of options.
         size_t length;
+        // The capacity of the options array.
         size_t capacity;
     } options;
 
     struct {
+        // The subcommands that this command accepts.
         struct Argparse_Command* elements;
+        // The number of subcommands.
         size_t length;
+        // The capacity of the subcommands array.
         size_t capacity;
     } subcommands;
 } Argparse_Command;
 
+/**
+ * A specified option that was parsed from the command line, along with the values that were provided for that option.
+ */
 typedef struct Argparse_Argument {
+    // The option that was parsed. This points to the corresponding option in the command's options array.
     Argparse_Option* option;
     struct {
+        // The values that were provided for the option.
         void** elements;
+        // The number of values provided.
         size_t length;
+        // The capacity of the values array.
         size_t capacity;
     } values;
 } Argparse_Argument;
 
+/**
+ * Parses the command-line arguments according to the specified root command,
+ * returning a pack containing the parsed values and any errors that were encountered.
+ * @param argc The number of command-line arguments, including the program name.
+ * @param argv The command-line arguments, where argv[0] is the program name.
+ * @param root The root command to parse against, which may contain subcommands and options.
+ * @returns A pack containing the parsed values and any errors that were encountered during parsing.
+ */
 ARGPARSE_DEF Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root);
+
+/**
+ * Retrieves the parsed argument corresponding to the specified option name from the pack.
+ * @param pack The pack returned by @see argparse_parse.
+ * @param name The long or short name of the option to retrieve, including its prefix (e.g. "--help" or "-h").
+ * @returns The parsed argument corresponding to the specified option name, or NULL if no such option was parsed.
+ */
 ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name);
+
+/**
+ * Frees the memory associated with the pack, including any parsed values and error messages.
+ */
 ARGPARSE_DEF void argparse_free_pack(Argparse_Pack* pack);
 
+/**
+ * Adds an option to the specified command.
+ * @param command The command to which the option will be added.
+ * @param option The option to add to the command.
+ */
 ARGPARSE_DEF void argparse_add_option(Argparse_Command* command, Argparse_Option option);
+
+/**
+ * Adds a subcommand to the specified command.
+ * @param command The command to which the subcommand will be added.
+ * @param subcommand The subcommand to add to the command.
+ */
 ARGPARSE_DEF void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand);
+
+/**
+ * Frees the memory associated with the command, including its options and subcommands.
+ * @param command The command to free.
+ */
 ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 
+/**
+ * Formats a string using printf-style formatting, returning a heap-allocated string that must be freed by the caller.
+ * This is a convenience function with the primary purpose of creating error messages for parser functions.
+ * @param format The format string, followed by any additional arguments needed for formatting.
+ * @param ... The additional arguments needed for formatting, as specified by the format string.
+ * @returns A heap-allocated string containing the formatted result, will be freed by the library using ARGPARSE_FREE.
+ */
 ARGPARSE_DEF char* argparse_format(char const* format, ...);
 
 #ifdef __cplusplus
@@ -839,6 +929,9 @@ void argparse_free_command(Argparse_Command* command) {
     }
     ARGPARSE_FREE(command->subcommands.elements);
     ARGPARSE_FREE(command->options.elements);
+    // We null out the pointers to avoid double-free, in case this command is shared in the hierarchy
+    command->subcommands.elements = NULL;
+    command->options.elements = NULL;
 }
 
 char* argparse_format(char const* format, ...) {
