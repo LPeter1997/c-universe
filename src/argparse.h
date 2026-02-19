@@ -180,6 +180,16 @@ static bool argparse_option_has_name(Argparse_Option* option, char const* name) 
         || (option->short_name != NULL && strcmp(option->short_name, name) == 0);
 }
 
+static Argparse_Command* argparse_find_subcommand_with_name_n(Argparse_Command* command, char const* name, size_t nameLength) {
+    for (size_t i = 0; i < command->subcommands.length; ++i) {
+        Argparse_Command* subcommand = &command->subcommands.elements[i];
+        if (strlen(subcommand->name) == nameLength && strncmp(subcommand->name, name, nameLength) == 0) {
+            return subcommand;
+        }
+    }
+    return NULL;
+}
+
 static void argparse_add_error(Argparse_Pack* pack, char const* error) {
     ARGPARSE_ADD_TO_ARRAY(pack->errors.elements, pack->errors.length, pack->errors.capacity, error);
 }
@@ -467,19 +477,36 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         .currentToken = { 0 },
     };
 
+    bool allowSubcommand = true;
+    bool allowOptions = true;
+    Argparse_Argument* currentArgument = NULL;
     char const* tokenText;
     size_t tokenLength;
     bool expectsValue = false;
     bool prevExpectsValue = false;
-    Argparse_Argument* currentArgument = NULL;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
-        if (prevExpectsValue) {
-            ARGPARSE_ASSERT(!expectsValue, "unexpected state: cannot have two consecutive value tokens");
-
-            // TODO: can only parse a value for prev option
+        if (prevExpectsValue || (!allowSubcommand && !allowOptions)) {
+            // We have to parse as value
+            // TODO
         }
         else {
-            // TODO: parse an option/positional arg
+            // Subcommands take priority
+            if (allowSubcommands) {
+                // Try to look up a subcommand first
+                Argparse_Command* sub = argparse_find_subcommand_with_name_n(currentCommand, tokenText, tokenLength);
+                if (sub != NULL) {
+                    // Step down, continue
+                    currentCommand = sub;
+                    continue;
+                }
+                // From here on out, subcommands are not allowed anymore, we have to parse options or arguments
+                allowSubcommands = false;
+            }
+            // Try to parse as option
+            if (allowOptions) {
+                // TODO
+            }
+            // TODO
         }
 
         // For next iteration
