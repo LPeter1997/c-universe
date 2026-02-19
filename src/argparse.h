@@ -505,7 +505,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             continue;
         }
         // Check for option escape (double-dash)
-        if (tokenLength == 2 && tokenText[0] == '-' && tokenText[1] == '-') {
+        if (allowOptions && tokenLength == 2 && tokenText[0] == '-' && tokenText[1] == '-') {
             allowSubcommands = false;
             allowOptions = false;
             currentArgument = NULL;
