@@ -506,7 +506,26 @@ static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, 
 
     // Try bundling
     if (argparse_is_legal_prefix_for_bundling(name, nameLength)) {
-        // TODO
+        char nameBuffer[2];
+        nameBuffer[0] = name[0];
+        // Check, if all characters correspond to a short name
+        for (size_t i = 1; i < nameLength; ++i) {
+            nameBuffer[1] = name[i];
+            argument = argparse_try_get_or_add_option_by_name(pack, nameBuffer, 2);
+            if (argument == NULL) {
+                // Illegal bundling, some character did not correspond to a short name
+                return NULL;
+            }
+        }
+        // Legal, add all arguments for the bundled options
+        for (size_t i = 1; i < nameLength; ++i) {
+            nameBuffer[1] = name[i];
+            argument = argparse_try_get_or_add_option_by_name(pack, nameBuffer, 2);
+            // We know this won't be NULL since we checked above
+            ARGPARSE_ASSERT(argument != NULL, "unexpectedly failed to get argument for bundled option");
+        }
+        // We return the last one to allow adding values to it
+        return argument;
     }
 
     // No luck
