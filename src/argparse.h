@@ -259,14 +259,14 @@ static bool argparse_argument_can_take_value(Argparse_Argument* argument) {
 }
 
 typedef struct Argparse_Response {
-    char const* text;
+    char* text;
     size_t length;
     size_t index;
     struct Argparse_Response* next;
 } Argparse_Response;
 
 typedef struct Argparse_Token {
-    char const* text;
+    char* text;
     size_t index;
     size_t length;
 } Argparse_Token;
@@ -380,6 +380,7 @@ static void argparse_tokenizer_skip_current(Argparse_Tokenizer* tokenizer) {
 // Handles the current token, unwrapping it if it's a response file token and pushing it on the stack if so
 // Returns true if the token was handled as a response file token, false otherwise
 static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+    char* error = NULL;
     ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot process current token, no current token present");
 
     // If we are at the start of the token and it's a response, we need to push it onto the stack
@@ -393,30 +394,32 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     argparse_tokenizer_skip_current(tokenizer);
     // Open file for reading
     FILE* file = fopen(filePath, "r");
-    if (file == NULL) {
-        // Failed to open file, report error, we add a dummy response to the stack to allow processing to continue
-        char* error = argparse_format("failed to open response file '%s'", filePath);
-        argparse_add_error(pack, error);
-        argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
-            .text = NULL,
-            .length = 0,
-            .index = 0,
-        });
-        return true;
-    }
+    if (file == NULL) goto io_fail;
     // Get file size
     fseek(file, 0, SEEK_END);
     long fileSize = ftell(file);
+    if (fileSize < 0) goto io_fail;
     fseek(file, 0, SEEK_SET);
     // Read file content
-    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, fileSize);
+    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, (size_t)fileSize);
     ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
-    fread(fileContent, 1, fileSize, file);
+    fread(fileContent, 1, (size_t)fileSize, file);
     fclose(file);
     // Push content as new response
     argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
         .text = fileContent,
-        .length = fileSize,
+        .length = (size_t)fileSize,
+        .index = 0,
+    });
+    return true;
+
+io_fail:
+    // Report error, we add a dummy response to the stack to allow processing to continue
+    error = argparse_format("failed to read response file '%s'", filePath);
+    argparse_add_error(pack, error);
+    argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
+        .text = NULL,
+        .length = 0,
         .index = 0,
     });
     return true;
@@ -692,7 +695,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool allowSubcommands = true;
     bool allowOptions = true;
     Argparse_Argument* currentArgument = NULL;
-    char const* tokenText;
+    char* tokenText;
     size_t tokenLength;
     bool endsInValueDelimiter = false;
     bool prevExpectsValue = false;
@@ -840,10 +843,10 @@ char* argparse_format(char const* format, ...) {
     va_start(args, format);
     int length = vsnprintf(NULL, 0, format, args);
     va_end(args);
-    char* buffer = (char*)ARGPARSE_REALLOC(NULL, length + 1);
+    char* buffer = (char*)ARGPARSE_REALLOC(NULL, (size_t)length + 1);
     ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
     va_start(args, format);
-    vsnprintf(buffer, length + 1, format, args);
+    vsnprintf(buffer, (size_t)length + 1, format, args);
     va_end(args);
     return buffer;
 }
