@@ -486,6 +486,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
         if (expectsValue) {
+            ARGPARSE_ASSERT(!prevExpectsValue, "cannot have two consecutive tokens that expect values");
             // A value specification bans subcommands
             allowSubcommands = false;
             // If we have already banned options, this is illegal
