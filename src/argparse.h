@@ -205,6 +205,11 @@ static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outTok
     if (tokenizer->argvIndex >= (size_t)tokenizer->argc) return false;
 
     char* currentArg = tokenizer->argv[tokenizer->argvIndex];
+    if (tokenizer->charIndex == 0 && currentArg[0] == '@') {
+        // TODO: Implement response file tokenization
+        ARGPARSE_ASSERT(false, "response file tokenization not implemented yet");
+    }
+
     // We eat the current token until either a value delimiter (for options) or the end of the argument
     size_t offset = 0;
     while (currentArg[tokenizer->charIndex] != '\0'
