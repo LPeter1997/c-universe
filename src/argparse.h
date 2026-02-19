@@ -180,6 +180,10 @@ static bool argparse_option_has_name(Argparse_Option* option, char const* name) 
         || (option->short_name != NULL && strcmp(option->short_name, name) == 0);
 }
 
+static bool argparse_is_positional_option(Argparse_Option* option) {
+    return option->long_name == NULL && option->short_name == NULL;
+}
+
 static Argparse_Command* argparse_find_subcommand_with_name_n(Argparse_Command* command, char const* name, size_t nameLength) {
     for (size_t i = 0; i < command->subcommands.length; ++i) {
         Argparse_Command* subcommand = &command->subcommands.elements[i];
@@ -582,6 +586,39 @@ static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argum
     argparse_add_value_to_argument(argument, resultValue);
 }
 
+static Argparse_Argument* argparse_get_current_positional_argument_for_value(Argparse_Pack* pack) {
+    // Look through the positional arguments in order they are declared in the command
+    for (size_t optionArgIndex = 0; optionArgIndex < pack->command->options.length; ++optionArgIndex) {
+        Argparse_Option* option = &pack->command->options.elements[optionArgIndex];
+        if (!argparse_is_positional_option(option)) continue;
+
+        // This is a positional argument, look for the corresponding argument in the pack
+        Argparse_Argument* argument = NULL;
+        for (size_t i = 0; i < pack->arguments.length; ++i) {
+            if (pack->arguments.elements[i].option == option) {
+                argument = &pack->arguments.elements[i];
+                break;
+            }
+        }
+        if (argument == NULL) {
+            // We want this argument next, but it hasn't been added to the pack yet, so we add it
+            Argparse_Argument newArgument = {
+                .option = option,
+                .values = { 0 },
+            };
+            argparse_add_argument(pack, newArgument);
+            return &pack->arguments.elements[pack->arguments.length - 1];
+        }
+        // This argument is already present, check if it can take more values
+        if (argparse_argument_can_take_value(argument)) {
+            return argument;
+        }
+        // This argument cannot take more values, continue to the next one
+    }
+
+    return NULL;
+}
+
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
@@ -678,7 +715,20 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
             continue;
         }
-        // TODO: Parse a positional argument
+        // If the current argument can take more values, parse into that
+        if (argparse_argument_can_take_value(currentArgument)) {
+            argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
+            continue;
+        }
+        // We have exhausted our options, look for the first positional argument that can take a value
+        currentArgument = argparse_get_current_positional_argument_for_value(&pack);
+        if (currentArgument != NULL) {
+            argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
+            continue;
+        }
+        // No argument could take this value, report error
+        char* error = argparse_format("unexpected argument '%.*s'", (int)tokenLength, tokenText);
+        argparse_add_error(&pack, error);
     }
 
     return pack;
