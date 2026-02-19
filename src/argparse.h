@@ -212,7 +212,7 @@ static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outTok
 
     // We eat the current token until either a value delimiter (for options) or the end of the argument
     size_t offset = 0;
-    while (currentArg[tokenizer->charIndex] != '\0'
+    while (currentArg[tokenizer->charIndex + offset] != '\0'
         && !argparse_is_value_delimiter(currentArg[tokenizer->charIndex + offset])) ++offset;
 
     // If we hit the end of the token, just report it as is
