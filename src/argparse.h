@@ -463,6 +463,7 @@ static bool argparse_tokenizer_next(
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     Argparse_Pack pack = { 0 };
+    pack.command = root;
 
     if (argc == 0) {
         // NOTE: We call argparse_format to move the error to the heap, we expect errors to be freeable
@@ -472,7 +473,6 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     }
 
     pack.program_name = argv[0];
-    Argparse_Command* currentCommand = root;
     Argparse_Tokenizer tokenizer = {
         .argc = argc,
         .argv = argv,
@@ -520,10 +520,10 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         // Subcommands take priority
         if (allowSubcommands) {
             // Try to look up a subcommand first
-            Argparse_Command* sub = argparse_find_subcommand_with_name_n(currentCommand, tokenText, tokenLength);
+            Argparse_Command* sub = argparse_find_subcommand_with_name_n(pack.command, tokenText, tokenLength);
             if (sub != NULL) {
                 // Step down, continue
-                currentCommand = sub;
+                pack.command = sub;
                 continue;
             }
             // From here on out, subcommands are not allowed anymore, we have to parse options or arguments
