@@ -485,9 +485,23 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool expectsValue = false;
     bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
-        if (prevExpectsValue) {
+        if (expectsValue) {
             // A value specification bans subcommands
             allowSubcommands = false;
+            // If we have already banned options, this is illegal
+            if (!allowOptions) {
+                char* error = argparse_format("unexpected option value '%.*s' after option escape", (int)tokenLength, tokenText);
+                argparse_add_error(&pack, error);
+                continue;
+            }
+            // TODO: We have to look up an option
+            continue;
+        }
+        // Check for option escape (double-dash)
+        if (tokenLength == 2 && tokenText[0] == '-' && tokenText[1] == '-') {
+            allowSubcommands = false;
+            allowOptions = false;
+            continue;
         }
         // Subcommands take priority
         if (allowSubcommands) {
@@ -505,7 +519,12 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         if (!prevExpectsValue && allowOptions) {
             // TODO: Try option
         }
-        // TODO: Try value
+        if (prevExpectsValue) {
+            // Has to be a value for prev. option
+        }
+        else {
+            // TODO: Can be a value for the prev option OR a positional arg
+        }
 
         // For next iteration
         prevExpectsValue = expectsValue;
