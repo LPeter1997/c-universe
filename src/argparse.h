@@ -396,7 +396,7 @@ start:
     goto start;
 }
 
-static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
+static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength, bool* outExpectsValue) {
     Argparse_Token* token = &tokenizer->currentToken;
 
     if (token->index >= token->length) {
@@ -405,6 +405,7 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
             // No more tokens to read
             *outToken = NULL;
             *outLength = 0;
+            *outExpectsValue = false;
             return false;
         }
     }
@@ -428,6 +429,8 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
     token->index += tokenLength;
     // If we stopped at a value delimiter, skip over that
     if (token->index < token->length && argparse_is_value_delimiter(token->text[token->index])) {
+        // A value delimiter indicates that the next part of the token is a value
+        *outExpectsValue = true;
         ++token->index;
     }
     // Strip quotes, if present
@@ -463,7 +466,8 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
 
     char const* tokenText;
     size_t tokenLength;
-    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength)) {
+    bool expectsValue = false;
+    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
         // TODO
     }
 }
