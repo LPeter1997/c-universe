@@ -223,9 +223,15 @@ static bool argparse_is_quote(char c) {
     return c == '"' || c == '\'';
 }
 
-static bool argparse_is_legal_prefix_for_bundling(char const* name, size_t length) {
+static bool argparse_is_legal_prefix_for_option(char const* name, size_t length) {
+    // We accept '-', '--' and '/'
     if (length == 0) return false;
+    return name[0] == '-' || name[0] == '/';
+}
 
+static bool argparse_is_legal_prefix_for_bundling(char const* name, size_t length) {
+    // We accept '-' and '/', explicitly disallow '--'
+    if (length == 0) return false;
     if (name[0] == '-') return length < 2 || name[1] != '-';
     if (name[0] == '/') return true;
     return false;
@@ -511,8 +517,9 @@ static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, 
         // Check, if all characters correspond to a short name
         for (size_t i = 1; i < nameLength; ++i) {
             nameBuffer[1] = name[i];
-            argument = argparse_try_get_or_add_option_by_name(pack, nameBuffer, 2);
-            if (argument == NULL) {
+            // NOTE: We don't add here yet, we first need to confirm a legal bundle
+            Argparse_Option* option = argparse_find_option_with_name_n(pack, nameBuffer, 2);
+            if (option == NULL) {
                 // Illegal bundling, some character did not correspond to a short name
                 return NULL;
             }
@@ -572,13 +579,23 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
                 argparse_add_error(&pack, error);
                 continue;
             }
-            // TODO: We have to look up an option
+            currentArgument = argparse_try_add_option_argument(&pack, tokenText, tokenLength);
+            if (currentArgument == NULL) {
+                char* error = argparse_format("unknown option '%.*s'", (int)tokenLength, tokenText);
+                argparse_add_error(&pack, error);
+                // NOTE: We allow fallthrough here, we still parse a value to match intent closer
+            }
             prevExpectsValue = true;
             continue;
         }
         if (prevExpectsValue) {
             // Has to be a value for prev. option
-            // TODO
+            if (currentArgument == NULL) {
+                // TODO: parse and throw away
+            }
+            else {
+                // TODO: parse and add to argument
+            }
             currentArgument = NULL;
             prevExpectsValue = false;
             continue;
@@ -604,7 +621,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             allowSubcommands = false;
         }
         // Try to parse as option
-        if (allowOptions) {
+        if (allowOptions && argparse_is_legal_prefix_for_option(tokenText, tokenLength)) {
             // TODO: Try option
         }
         // TODO: Can be a value for the prev option OR a positional arg
