@@ -54,6 +54,10 @@ function Show-Version {
 function Compile {
     Write-Host "building with $Compiler ($Style)..."
 
+    # On Windows we add _CRT_SECURE_NO_WARNINGS to the defines
+    if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        $Defines += "_CRT_SECURE_NO_WARNINGS"
+    }
     # Build flags
     $Args = @()
     if ($Style -eq "msvc") {
