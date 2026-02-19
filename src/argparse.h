@@ -1937,6 +1937,185 @@ CTEST_CASE(response_file_whitespace_only_is_ok) {
     argparse_free_pack(&pack);
 }
 
+// argparse_run tests //////////////////////////////////////////////////////////
+
+// Static variables to track handler invocation
+static int g_handler_called = 0;
+static int g_handler_verbose = 0;
+static int g_handler_count = 0;
+static char g_handler_output[256] = { 0 };
+static char g_handler_subcommand[64] = { 0 };
+
+static int test_main_handler(Argparse_Pack* pack) {
+    g_handler_called = 1;
+
+    if (has_option(pack, "--verbose")) {
+        g_handler_verbose = 1;
+    }
+
+    Argparse_Argument* countArg = argparse_get_argument(pack, "--count");
+    if (countArg != NULL && countArg->values.length > 0) {
+        g_handler_count = *(int*)countArg->values.elements[0];
+    }
+
+    char const* output = get_string_value(pack, "--output");
+    if (output != NULL) {
+        strncpy(g_handler_output, output, sizeof(g_handler_output) - 1);
+    }
+
+    return 0;
+}
+
+static int test_build_handler(Argparse_Pack* pack) {
+    g_handler_called = 1;
+    strncpy(g_handler_subcommand, "build", sizeof(g_handler_subcommand) - 1);
+
+    if (has_option(pack, "--release")) {
+        return 100; // Special return code to indicate release build
+    }
+    return 0;
+}
+
+static int test_run_handler(Argparse_Pack* pack) {
+    g_handler_called = 1;
+    strncpy(g_handler_subcommand, "run", sizeof(g_handler_subcommand) - 1);
+
+    Argparse_Argument* argsArg = argparse_get_argument(pack, NULL); // positional
+    if (argsArg != NULL) {
+        return (int)argsArg->values.length; // Return count of positional args
+    }
+    return 0;
+}
+
+static void reset_handler_state(void) {
+    g_handler_called = 0;
+    g_handler_verbose = 0;
+    g_handler_count = 0;
+    g_handler_output[0] = '\0';
+    g_handler_subcommand[0] = '\0';
+}
+
+CTEST_CASE(run_invokes_handler_with_parsed_args) {
+    reset_handler_state();
+
+    Argparse_Command cmd = { .name = "myapp", .handler_fn = test_main_handler };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--verbose",
+        .short_name = "-v",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .short_name = "-c",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--output",
+        .short_name = "-o",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "myapp", "--verbose", "--count", "42", "--output", "result.txt" };
+    int result = argparse_run(6, argv, &cmd);
+
+    CTEST_ASSERT_TRUE(result == 0);
+    CTEST_ASSERT_TRUE(g_handler_called == 1);
+    CTEST_ASSERT_TRUE(g_handler_verbose == 1);
+    CTEST_ASSERT_TRUE(g_handler_count == 42);
+    CTEST_ASSERT_TRUE(strcmp(g_handler_output, "result.txt") == 0);
+
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(run_returns_error_on_parse_failure) {
+    reset_handler_state();
+
+    Argparse_Command cmd = { .name = "myapp", .handler_fn = test_main_handler };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+
+    char* argv[] = { "myapp", "--count", "not_a_number" };
+    int result = argparse_run(3, argv, &cmd);
+
+    CTEST_ASSERT_TRUE(result == -1);
+    CTEST_ASSERT_TRUE(g_handler_called == 0); // Handler should not be called
+
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(run_returns_error_when_no_handler) {
+    reset_handler_state();
+
+    Argparse_Command cmd = { .name = "myapp", .handler_fn = NULL };
+
+    char* argv[] = { "myapp" };
+    int result = argparse_run(1, argv, &cmd);
+
+    CTEST_ASSERT_TRUE(result == -1);
+    CTEST_ASSERT_TRUE(g_handler_called == 0);
+}
+
+CTEST_CASE(run_routes_to_subcommand_handler) {
+    reset_handler_state();
+
+    Argparse_Command cmd = { .name = "tool" };
+    Argparse_Command buildCmd = { .name = "build", .handler_fn = test_build_handler };
+    argparse_add_option(&buildCmd, (Argparse_Option){
+        .long_name = "--release",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    Argparse_Command runCmd = { .name = "run", .handler_fn = test_run_handler };
+    argparse_add_subcommand(&cmd, buildCmd);
+    argparse_add_subcommand(&cmd, runCmd);
+
+    // Test build subcommand
+    char* argv1[] = { "tool", "build", "--release" };
+    int result1 = argparse_run(3, argv1, &cmd);
+
+    CTEST_ASSERT_TRUE(result1 == 100); // Special release return code
+    CTEST_ASSERT_TRUE(g_handler_called == 1);
+    CTEST_ASSERT_TRUE(strcmp(g_handler_subcommand, "build") == 0);
+
+    // Test run subcommand
+    reset_handler_state();
+    char* argv2[] = { "tool", "run" };
+    int result2 = argparse_run(2, argv2, &cmd);
+
+    CTEST_ASSERT_TRUE(result2 == 0);
+    CTEST_ASSERT_TRUE(g_handler_called == 1);
+    CTEST_ASSERT_TRUE(strcmp(g_handler_subcommand, "run") == 0);
+
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(run_handler_return_value_propagates) {
+    reset_handler_state();
+
+    Argparse_Command cmd = { .name = "tool" };
+    Argparse_Command buildCmd = { .name = "build", .handler_fn = test_build_handler };
+    argparse_add_option(&buildCmd, (Argparse_Option){
+        .long_name = "--release",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_subcommand(&cmd, buildCmd);
+
+    // Without --release, returns 0
+    char* argv1[] = { "tool", "build" };
+    int result1 = argparse_run(2, argv1, &cmd);
+    CTEST_ASSERT_TRUE(result1 == 0);
+
+    // With --release, returns 100
+    char* argv2[] = { "tool", "build", "--release" };
+    int result2 = argparse_run(3, argv2, &cmd);
+    CTEST_ASSERT_TRUE(result2 == 100);
+
+    argparse_free_command(&cmd);
+}
+
 #endif /* ARGPARSE_SELF_TEST */
 
 ////////////////////////////////////////////////////////////////////////////////
