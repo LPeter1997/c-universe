@@ -519,6 +519,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         }
         // Subcommands take priority
         if (allowSubcommands) {
+            ARGPARSE_ASSERT(currentArgument == NULL, "cannot have a subcommand token after an option value");
             // Try to look up a subcommand first
             Argparse_Command* sub = argparse_find_subcommand_with_name_n(pack.command, tokenText, tokenLength);
             if (sub != NULL) {
