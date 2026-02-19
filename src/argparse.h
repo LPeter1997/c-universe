@@ -406,7 +406,8 @@ start:
     goto start;
 }
 
-static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength, bool* outExpectsValue) {
+static bool argparse_tokenizer_next(
+    Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength, bool* outEndsInValueDelimiter) {
     Argparse_Token* token = &tokenizer->currentToken;
 
     if (token->index >= token->length) {
@@ -415,7 +416,7 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
             // No more tokens to read
             *outToken = NULL;
             *outLength = 0;
-            *outExpectsValue = false;
+            *outEndsInValueDelimiter = false;
             return false;
         }
     }
@@ -441,11 +442,11 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
     // If we stopped at a value delimiter, skip over that
     if (token->index < token->length && argparse_is_value_delimiter(token->text[token->index])) {
         // A value delimiter indicates that the next part of the token is a value
-        *outExpectsValue = true;
+        *outEndsInValueDelimiter = true;
         ++token->index;
     }
     else {
-        *outExpectsValue = false;
+        *outEndsInValueDelimiter = false;
     }
     // Strip quotes, if present
     if (tokenLength > 1 && argparse_is_quote(tokenText[0]) && tokenText[tokenLength - 1] == tokenText[0]) {
@@ -485,11 +486,11 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     Argparse_Argument* currentArgument = NULL;
     char const* tokenText;
     size_t tokenLength;
-    bool expectsValue = false;
+    bool endsInValueDelimiter = false;
     bool prevExpectsValue = false;
-    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
-        if (expectsValue) {
-            ARGPARSE_ASSERT(!prevExpectsValue, "cannot have two consecutive tokens that expect values");
+    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &endsInValueDelimiter)) {
+        if (endsInValueDelimiter) {
+            ARGPARSE_ASSERT(!prevExpectsValue, "cannot have two consecutive tokens that end with value delimiters");
             // A value specification bans subcommands
             allowSubcommands = false;
             // If we have already banned options, this is illegal
