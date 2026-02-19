@@ -190,6 +190,17 @@ static Argparse_Command* argparse_find_subcommand_with_name_n(Argparse_Command* 
     return NULL;
 }
 
+static Argparse_Option* argparse_find_option_with_name_n(Argparse_Command* command, char const* name, size_t nameLength) {
+    for (size_t i = 0; i < command->options.length; ++i) {
+        Argparse_Option* option = &command->options.elements[i];
+        if ((option->long_name != NULL && strlen(option->long_name) == nameLength && strncmp(option->long_name, name, nameLength) == 0)
+         || (option->short_name != NULL && strlen(option->short_name) == nameLength && strncmp(option->short_name, name, nameLength) == 0)) {
+            return option;
+        }
+    }
+    return NULL;
+}
+
 static void argparse_add_error(Argparse_Pack* pack, char const* error) {
     ARGPARSE_ADD_TO_ARRAY(pack->errors.elements, pack->errors.length, pack->errors.capacity, error);
 }
@@ -210,6 +221,14 @@ static bool argparse_is_value_delimiter(char c) {
 
 static bool argparse_is_quote(char c) {
     return c == '"' || c == '\'';
+}
+
+static bool argparse_is_legal_prefix_for_bundling(char const* name, size_t length) {
+    if (length == 0) return false;
+
+    if (name[0] == '-') return length < 2 || name[1] != '-';
+    if (name[0] == '/') return true;
+    return false;
 }
 
 typedef struct Argparse_Response {
@@ -457,6 +476,41 @@ static bool argparse_tokenizer_next(
     *outToken = tokenText;
     *outLength = tokenLength;
     return true;
+}
+
+// Construction ////////////////////////////////////////////////////////////////
+
+static Argparse_Option* argparse_try_get_or_add_option_by_name(Argparse_Pack* pack, char* name, size_t nameLength) {
+    Argparse_Option* option = argparse_find_option_with_name_n(pack->command, name, nameLength);
+    if (option == NULL) return NULL;
+
+    // The command accepts such argument, check if we already added it, if so, return that
+    for (size_t i = 0; i < pack->arguments.length; ++i) {
+        if (pack->arguments.elements[i].option == option) {
+            return &pack->arguments.elements[i];
+        }
+    }
+    // No match, we need to add a new argument for this option
+    Argparse_Argument argument = {
+        .option = option,
+        .values = { 0 },
+    };
+    argparse_add_argument(pack, argument);
+    return &pack->arguments.elements[pack->arguments.length - 1];
+}
+
+static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, char* name, size_t nameLength) {
+    // First, try a full option name match
+    Argparse_Argument* argument = argparse_try_get_or_add_option_by_name(pack, name, nameLength);
+    if (argument != NULL) return argument;
+
+    // Try bundling
+    if (argparse_is_legal_prefix_for_bundling(name, nameLength)) {
+        // TODO
+    }
+
+    // No luck
+    return NULL;
 }
 
 // Public API //////////////////////////////////////////////////////////////////
