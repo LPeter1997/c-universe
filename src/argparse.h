@@ -219,6 +219,14 @@ ARGPARSE_DEF Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Comman
 ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name);
 
 /**
+ * Retrieves the parsed argument corresponding to the specified positional argument index from the pack.
+ * @param pack The pack returned by @see argparse_parse.
+ * @param position The index of the positional argument to retrieve.
+ * @returns The parsed argument corresponding to the specified positional argument index, or NULL if no such argument was parsed.
+ */
+ARGPARSE_DEF Argparse_Argument* argparse_get_positional(Argparse_Pack* pack, size_t position);
+
+/**
  * Frees the memory associated with the pack, including any parsed values and error messages.
  * @param pack The pack to free.
  */
@@ -981,6 +989,27 @@ Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) 
     return NULL;
 }
 
+Argparse_Argument* argparse_get_positional(Argparse_Pack* pack, size_t position) {
+    size_t positionalIndex = 0;
+    for (size_t i = 0; i < pack->command->options.length; ++i) {
+        Argparse_Option* option = &pack->command->options.elements[i];
+        if (!argparse_is_positional_option(option)) continue;
+        if (positionalIndex == position) {
+            // Found the right positional index, look for the corresponding argument
+            for (size_t j = 0; j < pack->arguments.length; ++j) {
+                if (pack->arguments.elements[j].option == option) {
+                    return &pack->arguments.elements[j];
+                }
+            }
+            // No argument found, this means this positional was not provided, we return NULL
+            return NULL;
+        }
+        ++positionalIndex;
+    }
+    // No such positional index
+    return NULL;
+}
+
 void argparse_free_pack(Argparse_Pack* pack) {
     // Free all allocated memory for the parsed arguments
     // Do not deallocate the command or options, as they are owned by the command hierarchy
@@ -1110,6 +1139,13 @@ static int get_int_value(Argparse_Pack* pack, char const* name) {
 // Helper to check if an option was specified (for zero-arity flags)
 static bool has_option(Argparse_Pack* pack, char const* name) {
     return argparse_get_argument(pack, name) != NULL;
+}
+
+// Helper to get first value as string from a positional argument
+static char const* get_positional_string(Argparse_Pack* pack, size_t position) {
+    Argparse_Argument* arg = argparse_get_positional(pack, position);
+    if (arg == NULL || arg->values.length == 0) return NULL;
+    return (char const*)arg->values.elements[0];
 }
 
 // Basic parsing tests /////////////////////////////////////////////////////////
@@ -1437,6 +1473,8 @@ CTEST_CASE(double_dash_treats_remaining_as_positional) {
     ASSERT_NO_ERRORS(pack);
     // --flag should NOT be parsed as option, but as positional
     CTEST_ASSERT_TRUE(!has_option(&pack, "--flag"));
+    // Verify it was captured as a positional value
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 0), "--flag") == 0);
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
@@ -1453,6 +1491,7 @@ CTEST_CASE(double_dash_allows_dash_prefixed_values) {
     Argparse_Pack pack = argparse_parse(3, argv, &cmd);
 
     ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 0), "-negative") == 0);
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
@@ -1471,8 +1510,8 @@ CTEST_CASE(parse_single_positional_argument) {
     Argparse_Pack pack = argparse_parse(2, argv, &cmd);
 
     ASSERT_NO_ERRORS(pack);
-    CTEST_ASSERT_TRUE(pack.arguments.length == 1);
-    CTEST_ASSERT_TRUE(strcmp((char*)pack.arguments.elements[0].values.elements[0], "file.txt") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 0), "file.txt") == 0);
+    CTEST_ASSERT_TRUE(argparse_get_positional(&pack, 1) == NULL);
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
@@ -1493,7 +1532,9 @@ CTEST_CASE(parse_multiple_positional_arguments) {
     Argparse_Pack pack = argparse_parse(3, argv, &cmd);
 
     ASSERT_NO_ERRORS(pack);
-    CTEST_ASSERT_TRUE(pack.arguments.length == 2);
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 0), "src.txt") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 1), "dst.txt") == 0);
+    CTEST_ASSERT_TRUE(argparse_get_positional(&pack, 2) == NULL);
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
@@ -1516,7 +1557,7 @@ CTEST_CASE(mixed_options_and_positional) {
 
     ASSERT_NO_ERRORS(pack);
     CTEST_ASSERT_TRUE(has_option(&pack, "-v"));
-    CTEST_ASSERT_TRUE(pack.arguments.length == 2);
+    CTEST_ASSERT_TRUE(strcmp(get_positional_string(&pack, 0), "file.txt") == 0);
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
@@ -2124,12 +2165,175 @@ CTEST_CASE(run_handler_return_value_propagates) {
 #ifdef ARGPARSE_EXAMPLE
 #undef ARGPARSE_EXAMPLE
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define ARGPARSE_IMPLEMENTATION
 #define ARGPARSE_STATIC
 #include "argparse.h"
 
-int main(int argv) {
+// Example: A simple "project" CLI tool with subcommands
+// Usage:
+//   project build [--release] [--output FILE]
+//   project run [--verbose] [ARGS...]
+//   project clean [--all]
 
+// Custom parser for integers
+static Argparse_ParseResult parse_int(char const* text, size_t length) {
+    char* temp = (char*)malloc(length + 1);
+    memcpy(temp, text, length);
+    temp[length] = '\0';
+    int* value = (int*)malloc(sizeof(int));
+    *value = atoi(temp);
+    free(temp);
+    return (Argparse_ParseResult){ .value = value, .error = NULL };
 }
+
+// Handler for 'build' subcommand
+static int handle_build(Argparse_Pack* pack) {
+    printf("Building project...\n");
+
+    Argparse_Argument* releaseArg = argparse_get_argument(pack, "--release");
+    if (releaseArg != NULL) {
+        printf("  Mode: Release\n");
+    } else {
+        printf("  Mode: Debug\n");
+    }
+
+    Argparse_Argument* outputArg = argparse_get_argument(pack, "--output");
+    if (outputArg != NULL && outputArg->values.length > 0) {
+        printf("  Output: %s\n", (char*)outputArg->values.elements[0]);
+    } else {
+        printf("  Output: ./a.out\n");
+    }
+
+    Argparse_Argument* jobsArg = argparse_get_argument(pack, "--jobs");
+    if (jobsArg != NULL && jobsArg->values.length > 0) {
+        printf("  Jobs: %d\n", *(int*)jobsArg->values.elements[0]);
+    }
+
+    printf("Build complete!\n");
+    return 0;
+}
+
+// Handler for 'run' subcommand
+static int handle_run(Argparse_Pack* pack) {
+    printf("Running project...\n");
+
+    Argparse_Argument* verboseArg = argparse_get_argument(pack, "--verbose");
+    if (verboseArg != NULL) {
+        printf("  Verbose mode enabled\n");
+    }
+
+    // Get positional arguments (program args) using argparse_get_positional
+    Argparse_Argument* argsArg = argparse_get_positional(pack, 0);
+    if (argsArg != NULL && argsArg->values.length > 0) {
+        printf("  Program arguments:\n");
+        for (size_t j = 0; j < argsArg->values.length; ++j) {
+            printf("    [%zu]: %s\n", j, (char*)argsArg->values.elements[j]);
+        }
+    }
+
+    printf("Run complete!\n");
+    return 0;
+}
+
+// Handler for 'clean' subcommand
+static int handle_clean(Argparse_Pack* pack) {
+    Argparse_Argument* allArg = argparse_get_argument(pack, "--all");
+
+    if (allArg != NULL) {
+        printf("Cleaning all build artifacts and caches...\n");
+    } else {
+        printf("Cleaning build artifacts...\n");
+    }
+
+    printf("Clean complete!\n");
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    // Build the command hierarchy
+    Argparse_Command rootCmd = {
+        .name = "project",
+        .description = "A simple project management tool",
+    };
+
+    // 'build' subcommand
+    Argparse_Command buildCmd = {
+        .name = "build",
+        .description = "Build the project",
+        .handler_fn = handle_build,
+    };
+    argparse_add_option(&buildCmd, (Argparse_Option){
+        .long_name = "--release",
+        .short_name = "-r",
+        .description = "Build in release mode",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_option(&buildCmd, (Argparse_Option){
+        .long_name = "--output",
+        .short_name = "-o",
+        .description = "Output file path",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&buildCmd, (Argparse_Option){
+        .long_name = "--jobs",
+        .short_name = "-j",
+        .description = "Number of parallel jobs",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+    argparse_add_subcommand(&rootCmd, buildCmd);
+
+    // 'run' subcommand
+    Argparse_Command runCmd = {
+        .name = "run",
+        .description = "Run the project",
+        .handler_fn = handle_run,
+    };
+    argparse_add_option(&runCmd, (Argparse_Option){
+        .long_name = "--verbose",
+        .short_name = "-v",
+        .description = "Enable verbose output",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    // Positional arguments for the program being run
+    argparse_add_option(&runCmd, (Argparse_Option){
+        .description = "Arguments to pass to the program",
+        .arity = ARGPARSE_ARITY_ZERO_OR_MORE,
+    });
+    argparse_add_subcommand(&rootCmd, runCmd);
+
+    // 'clean' subcommand
+    Argparse_Command cleanCmd = {
+        .name = "clean",
+        .description = "Clean build artifacts",
+        .handler_fn = handle_clean,
+    };
+    argparse_add_option(&cleanCmd, (Argparse_Option){
+        .long_name = "--all",
+        .short_name = "-a",
+        .description = "Remove all artifacts including caches",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_subcommand(&rootCmd, cleanCmd);
+
+    // Parse and run
+    int result = argparse_run(argc, argv, &rootCmd);
+
+    // Cleanup
+    argparse_free_command(&rootCmd);
+
+    return result;
+}
+
+// Example invocations:
+//   project build --release -o myapp
+//   project build -j 4
+//   project run --verbose -- arg1 arg2 arg3
+//   project run -v foo bar baz
+//   project clean --all
 
 #endif /* ARGPARSE_EXAMPLE */

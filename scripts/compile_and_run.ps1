@@ -24,7 +24,10 @@ param(
     [string]$Output = "a.out",
 
     [Parameter(Mandatory=$false)]
-    [switch]$AllowUnusedParameters
+    [switch]$AllowUnusedParameters,
+
+    [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
+    [string[]]$RunArgs = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,7 +140,7 @@ function Run {
 
     try {
         Write-Host "running $AbsOutput from $SourceDir..."
-        & $AbsOutput
+        & $AbsOutput @RunArgs
 
         if ($LASTEXITCODE -ne 0) {
             throw "running $Output failed with exit code $LASTEXITCODE"
