@@ -61,3 +61,10 @@ Compile-And-Run `
     -Sources @("../src/gc.h") `
     -Defines @("GC_EXAMPLE") `
     -AllowUnusedParameters
+
+# 3. Argparse library
+Write-Host "running self-test for Argparse library..."
+Compile-And-Run `
+    -Sources @("../src/argparse.h") `
+    -Defines @("ARGPARSE_STATIC", "ARGPARSE_IMPLEMENTATION", "ARGPARSE_SELF_TEST") `
+    -AllowUnusedParameters

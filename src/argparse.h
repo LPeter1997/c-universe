@@ -755,12 +755,13 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         }
         // Try to parse as option
         if (allowOptions && argparse_is_legal_prefix_for_option(tokenText, tokenLength)) {
-            currentArgument = argparse_try_add_option_argument(&pack, tokenText, tokenLength);
-            if (currentArgument == NULL) {
-                char* error = argparse_format("unknown option '%.*s'", (int)tokenLength, tokenText);
-                argparse_add_error(&pack, error);
+            Argparse_Argument* asOption = argparse_try_add_option_argument(&pack, tokenText, tokenLength);
+            // If we failed, that's not an error here yet, we can still attempt to parse it as a value
+            if (asOption != NULL) {
+                // But if we succeeded, save it
+                currentArgument = asOption;
+                continue;
             }
-            continue;
         }
         // If the current argument can take more values, parse into that
         if (argparse_argument_can_take_value(currentArgument)) {
@@ -867,147 +868,694 @@ char* argparse_format(char const* format, ...) {
 
 #include <ctype.h>
 #include <stdio.h>
+#include <string.h>
 
-// Let's use our own test framework
+// Use our own test framework
 #define CTEST_STATIC
 #define CTEST_IMPLEMENTATION
 #define CTEST_MAIN
 #include "ctest.h"
 
-static Argparse_ParseResult parse_int_option(char const* text, size_t length) {
-    // Just check, if it's all digits
-    for (size_t i = 0; i < length; ++i) {
+// Helper macros for common assertions
+#define ASSERT_NO_ERRORS(pack) CTEST_ASSERT_TRUE((pack).errors.length == 0)
+#define ASSERT_HAS_ERRORS(pack) CTEST_ASSERT_TRUE((pack).errors.length > 0)
+#define ASSERT_ERROR_COUNT(pack, n) CTEST_ASSERT_TRUE((pack).errors.length == (n))
+
+// Custom parse function for integers
+static Argparse_ParseResult parse_int(char const* text, size_t length) {
+    // Check for optional leading minus sign
+    size_t start = 0;
+    bool negate = false;
+    if (length > 0 && text[0] == '-') {
+        start = 1;
+        negate = true;
+    }
+    // Check remaining characters are digits
+    for (size_t i = start; i < length; ++i) {
         if (!isdigit((unsigned char)text[i])) {
             return (Argparse_ParseResult){
                 .value = NULL,
-                // TODO: We shouldn't leak internal API like this
-                // But we should also provide the user with a nicer API to report errors...
-                .error = __argparse_snprintf("expected an integer value, but got '%s'", text),
+                .error = argparse_format("expected integer, got '%.*s'", (int)length, text),
             };
         }
     }
-    // It is a valid integer, so we parse it and return the value
-    int* value = (int*)ARGPARSE_REALLOC(NULL, sizeof(int));
-    ARGPARSE_ASSERT(value != NULL, "failed to allocate memory for parsed integer value");
-    *value = atoi(text);
+    // Parse and return
+    int* value = (int*)malloc(sizeof(int));
+    // Simple string to int conversion
+    *value = 0;
+    for (size_t i = start; i < length; ++i) {
+        *value = *value * 10 + (text[i] - '0');
+    }
+    if (negate) *value = -*value;
     return (Argparse_ParseResult){
         .value = value,
         .error = NULL,
     };
 }
 
-// We build a command-tree like so:
-// <root>: two options, --number/-n that takes an integer value (required) and --flag/-f that is a simple bool (optional)
-static Argparse_Command build_sample_command(void) {
-    Argparse_Command rootCommand = { 0 };
-    rootCommand.name = "<root>";
-    rootCommand.description = "Root command";
-
-    argparse_add_option(&rootCommand, (Argparse_Option){
-        .long_name = "--number",
-        .short_name = "-n",
-        .description = "A required option that takes an integer value",
-        .is_required = true,
-        .takes_value = true,
-        .default_value = NULL,
-        .allow_multiple = false,
-        .parse_fn = parse_int_option,
-    });
-    argparse_add_option(&rootCommand, (Argparse_Option){
-        .long_name = "--flag",
-        .short_name = "-f",
-        .description = "An optional flag that doesn't take a value",
-        .is_required = false,
-        .takes_value = false,
-        .default_value = NULL,
-        .allow_multiple = false,
-        .parse_fn = NULL,
-    });
-
-    // TODO: To suppress error
-    if (false) {
-        argparse_add_subcommand(&rootCommand, (Argparse_Command){
-            .name = "subcommand",
-            .description = "A subcommand that doesn't do anything",
-        });
-    }
-
-    return rootCommand;
+// Helper to get first value as string from an argument
+static char const* get_string_value(Argparse_Pack* pack, char const* name) {
+    Argparse_Argument* arg = argparse_get_argument(pack, name);
+    if (arg == NULL || arg->values.length == 0) return NULL;
+    return (char const*)arg->values.elements[0];
 }
 
-CTEST_CASE(empty_argument_list) {
-    Argparse_Command rootCommand = build_sample_command();
-    Argparse_Pack pack = argparse_parse(0, NULL, &rootCommand);
-
-    CTEST_ASSERT_TRUE(pack.error != NULL);
-
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+// Helper to get first value as int from an argument
+static int get_int_value(Argparse_Pack* pack, char const* name) {
+    Argparse_Argument* arg = argparse_get_argument(pack, name);
+    if (arg == NULL || arg->values.length == 0) return 0;
+    return *(int*)arg->values.elements[0];
 }
 
-CTEST_CASE(missing_required_option) {
-    Argparse_Command rootCommand = build_sample_command();
+// Helper to check if an option was specified (for zero-arity flags)
+static bool has_option(Argparse_Pack* pack, char const* name) {
+    return argparse_get_argument(pack, name) != NULL;
+}
+
+// Basic parsing tests /////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_empty_argc_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    Argparse_Pack pack = argparse_parse(0, NULL, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+}
+
+CTEST_CASE(parse_program_name_only_succeeds) {
+    Argparse_Command cmd = { .name = "test" };
     char* argv[] = { "program" };
-    Argparse_Pack pack = argparse_parse(1, argv, &rootCommand);
+    Argparse_Pack pack = argparse_parse(1, argv, &cmd);
 
-    CTEST_ASSERT_TRUE(pack.error != NULL);
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(pack.program_name, "program") == 0);
 
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+    argparse_free_pack(&pack);
 }
 
-CTEST_CASE(unrecognized_option) {
-    Argparse_Command rootCommand = build_sample_command();
-    char* argv[] = { "program", "--number", "42", "--unknown" };
-    Argparse_Pack pack = argparse_parse(4, argv, &rootCommand);
+// Option long name tests //////////////////////////////////////////////////////
 
-    CTEST_ASSERT_TRUE(pack.error != NULL);
+CTEST_CASE(parse_long_option_with_space_delimiter) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
 
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+    char* argv[] = { "program", "--name", "value" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--name"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
 }
 
-CTEST_CASE(invalid_option_value) {
-    Argparse_Command rootCommand = build_sample_command();
-    char* argv[] = { "program", "--number", "not_an_integer" };
-    Argparse_Pack pack = argparse_parse(3, argv, &rootCommand);
+CTEST_CASE(parse_long_option_with_equals_delimiter) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
 
-    CTEST_ASSERT_TRUE(pack.error != NULL);
+    char* argv[] = { "program", "--name=value" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
 
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--name"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
 }
 
-CTEST_CASE(successful_parse_separate_argument) {
-    Argparse_Command rootCommand = build_sample_command();
-    char* argv[] = { "program", "--number", "42", "--flag" };
-    Argparse_Pack pack = argparse_parse(4, argv, &rootCommand);
+CTEST_CASE(parse_long_option_with_colon_delimiter) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
 
-    CTEST_ASSERT_TRUE(pack.error == NULL);
-    void* numberValue = argparse_get_value(&pack, "--number");
-    CTEST_ASSERT_TRUE(numberValue != NULL);
-    CTEST_ASSERT_TRUE(*(int*)numberValue == 42);
-    bool hasFlag = argparse_has_option(&pack, "--flag");
-    CTEST_ASSERT_TRUE(hasFlag);
+    char* argv[] = { "program", "--name:value" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
 
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--name"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
 }
 
-CTEST_CASE(successful_parse_combined_argument) {
-    Argparse_Command rootCommand = build_sample_command();
-    char* argv[] = { "program", "--number=42", "-f" };
-    Argparse_Pack pack = argparse_parse(3, argv, &rootCommand);
+// Option short name tests /////////////////////////////////////////////////////
 
-    CTEST_ASSERT_TRUE(pack.error == NULL);
-    void* numberValue = argparse_get_value(&pack, "--number");
-    CTEST_ASSERT_TRUE(numberValue != NULL);
-    CTEST_ASSERT_TRUE(*(int*)numberValue == 42);
-    bool hasFlag = argparse_has_option(&pack, "--flag");
-    CTEST_ASSERT_TRUE(hasFlag);
+CTEST_CASE(parse_short_option_with_space_delimiter) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .short_name = "-n",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
 
-    argparse_free(&pack);
-    argparse_free_command(&rootCommand);
+    char* argv[] = { "program", "-n", "value" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "-n"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_short_option_with_equals_delimiter) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .short_name = "-n",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "-n=value" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "-n"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_option_by_either_name) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--verbose",
+        .short_name = "-v",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+
+    char* argv[] = { "program", "-v" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--verbose"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-v"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Option bundling tests ///////////////////////////////////////////////////////
+
+CTEST_CASE(parse_bundled_short_options) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-a", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-b", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-c", .arity = ARGPARSE_ARITY_ZERO });
+
+    char* argv[] = { "program", "-abc" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "-a"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-b"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-c"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_bundled_options_last_takes_value) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-a", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-b", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-c", .arity = ARGPARSE_ARITY_EXACTLY_ONE });
+
+    char* argv[] = { "program", "-abc", "value" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "-a"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-b"));
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "-c"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_invalid_bundle_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-a", .arity = ARGPARSE_ARITY_ZERO });
+    // -x is not defined
+
+    char* argv[] = { "program", "-ax" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Arity tests /////////////////////////////////////////////////////////////////
+
+CTEST_CASE(arity_zero_accepts_no_value) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--flag",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+
+    char* argv[] = { "program", "--flag" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--flag"));
+    Argparse_Argument* arg = argparse_get_argument(&pack, "--flag");
+    CTEST_ASSERT_TRUE(arg->values.length == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_exactly_one_missing_value_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "--name" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_zero_or_one_accepts_zero) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--opt",
+        .arity = ARGPARSE_ARITY_ZERO_OR_ONE,
+    });
+
+    char* argv[] = { "program", "--opt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--opt"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_zero_or_one_accepts_one) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--opt",
+        .arity = ARGPARSE_ARITY_ZERO_OR_ONE,
+    });
+
+    char* argv[] = { "program", "--opt", "value" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--opt"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_one_or_more_missing_value_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--items",
+        .arity = ARGPARSE_ARITY_ONE_OR_MORE,
+    });
+
+    char* argv[] = { "program", "--items" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_one_or_more_accepts_multiple) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--items",
+        .arity = ARGPARSE_ARITY_ONE_OR_MORE,
+    });
+
+    char* argv[] = { "program", "--items", "a", "b", "c" };
+    Argparse_Pack pack = argparse_parse(5, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    Argparse_Argument* arg = argparse_get_argument(&pack, "--items");
+    CTEST_ASSERT_TRUE(arg != NULL);
+    CTEST_ASSERT_TRUE(arg->values.length == 3);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(arity_zero_or_more_accepts_zero) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--items",
+        .arity = ARGPARSE_ARITY_ZERO_OR_MORE,
+    });
+
+    char* argv[] = { "program", "--items" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Double-dash escape tests ////////////////////////////////////////////////////
+
+CTEST_CASE(double_dash_treats_remaining_as_positional) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--flag",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    // Positional argument
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = NULL,
+        .short_name = NULL,
+        .arity = ARGPARSE_ARITY_ZERO_OR_MORE,
+    });
+
+    char* argv[] = { "program", "--", "--flag" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    // --flag should NOT be parsed as option, but as positional
+    CTEST_ASSERT_TRUE(!has_option(&pack, "--flag"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(double_dash_allows_dash_prefixed_values) {
+    Argparse_Command cmd = { .name = "test" };
+    // Positional argument
+    argparse_add_option(&cmd, (Argparse_Option){
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "--", "-negative" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Positional argument tests ///////////////////////////////////////////////////
+
+CTEST_CASE(parse_single_positional_argument) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .description = "input file",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "file.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(pack.arguments.length == 1);
+    CTEST_ASSERT_TRUE(strcmp((char*)pack.arguments.elements[0].values.elements[0], "file.txt") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_multiple_positional_arguments) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .description = "source",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .description = "destination",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "src.txt", "dst.txt" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(pack.arguments.length == 2);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(mixed_options_and_positional) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--verbose",
+        .short_name = "-v",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .description = "file",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "-v", "file.txt" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "-v"));
+    CTEST_ASSERT_TRUE(pack.arguments.length == 2);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Subcommand tests ////////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_subcommand) {
+    Argparse_Command cmd = { .name = "git" };
+    Argparse_Command commitCmd = { .name = "commit" };
+    argparse_add_option(&commitCmd, (Argparse_Option){
+        .long_name = "--message",
+        .short_name = "-m",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_subcommand(&cmd, commitCmd);
+
+    char* argv[] = { "git", "commit", "-m", "Initial commit" };
+    Argparse_Pack pack = argparse_parse(4, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(pack.command->name, "commit") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "-m"), "Initial commit") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_nested_subcommands) {
+    Argparse_Command root = { .name = "tool" };
+    Argparse_Command sub1 = { .name = "remote" };
+    Argparse_Command sub2 = { .name = "add" };
+    argparse_add_option(&sub2, (Argparse_Option){
+        .description = "name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_subcommand(&sub1, sub2);
+    argparse_add_subcommand(&root, sub1);
+
+    char* argv[] = { "tool", "remote", "add", "origin" };
+    Argparse_Pack pack = argparse_parse(4, argv, &root);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(pack.command->name, "add") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&root);
+}
+
+CTEST_CASE(unknown_subcommand_treated_as_positional) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_subcommand(&cmd, (Argparse_Command){ .name = "run" });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .description = "args",
+        .arity = ARGPARSE_ARITY_ZERO_OR_MORE,
+    });
+
+    char* argv[] = { "test", "unknown" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    // Should stay at root command since "unknown" is not a subcommand
+    CTEST_ASSERT_TRUE(strcmp(pack.command->name, "test") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Custom parse function tests /////////////////////////////////////////////////
+
+CTEST_CASE(custom_parse_function_success) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+
+    char* argv[] = { "program", "--count", "42" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(get_int_value(&pack, "--count") == 42);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(custom_parse_function_failure_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+
+    char* argv[] = { "program", "--count", "not_a_number" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(custom_parse_negative_integer) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--offset",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+
+    char* argv[] = { "program", "--offset", "-10" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(get_int_value(&pack, "--offset") == -10);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Error handling tests ////////////////////////////////////////////////////////
+
+CTEST_CASE(unknown_option_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+
+    char* argv[] = { "program", "--unknown" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+}
+
+CTEST_CASE(unexpected_argument_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    // No positional arguments defined
+
+    char* argv[] = { "program", "unexpected" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+}
+
+CTEST_CASE(option_after_escape_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--opt",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "--", "--opt=value" };
+    Argparse_Pack pack = argparse_parse(3, argv, &cmd);
+
+    // Should error because --opt=value is treated as positional after --
+    // and no positional arguments are defined
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Slash prefix tests (Windows-style) //////////////////////////////////////////
+
+CTEST_CASE(parse_slash_prefixed_option) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "/help",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+
+    char* argv[] = { "program", "/help" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "/help"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(parse_slash_prefixed_bundled_options) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "/a", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "/b", .arity = ARGPARSE_ARITY_ZERO });
+
+    char* argv[] = { "program", "/ab" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "/a"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "/b"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+// Quoted value tests (in response files context, tokenizer-level) /////////////
+
+CTEST_CASE(parse_value_with_spaces_via_equals) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--message",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    // Shell would normally handle quoting, but with = the value is part of the same argv
+    char* argv[] = { "program", "--message=hello world" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--message"), "hello world") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
 }
 
 #endif /* ARGPARSE_SELF_TEST */
