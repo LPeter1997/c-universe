@@ -388,12 +388,12 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     if (tokenizer->currentToken.index != 0 || tokenizer->currentToken.text[0] != '@') return false;
 
     Argparse_Token* token = &tokenizer->currentToken;
-    // We interpret the entire token as a file path
-    char const* filePath = token->text + 1;
+    // We interpret the token (minus the @) as a file path
+    char* filePath = argparse_format("%.*s", (int)(token->length - 1), token->text + 1);
     // Skip this token to not re-read it when the response is processed
     argparse_tokenizer_skip_current(tokenizer);
-    // Open file for reading
-    FILE* file = fopen(filePath, "r");
+    // Open file for reading in binary mode to avoid CRLF translation issues
+    FILE* file = fopen(filePath, "rb");
     if (file == NULL) goto io_fail;
     // Get file size
     fseek(file, 0, SEEK_END);
@@ -403,12 +403,13 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     // Read file content
     char* fileContent = (char*)ARGPARSE_REALLOC(NULL, (size_t)fileSize);
     ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
-    fread(fileContent, 1, (size_t)fileSize, file);
+    size_t bytesRead = fread(fileContent, 1, (size_t)fileSize, file);
     fclose(file);
+    ARGPARSE_FREE(filePath);
     // Push content as new response
     argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
         .text = fileContent,
-        .length = (size_t)fileSize,
+        .length = bytesRead,
         .index = 0,
     });
     return true;
@@ -416,6 +417,7 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
 io_fail:
     // Report error, we add a dummy response to the stack to allow processing to continue
     error = argparse_format("failed to read response file '%s'", filePath);
+    ARGPARSE_FREE(filePath);
     argparse_add_error(pack, error);
     argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
         .text = NULL,
@@ -1556,6 +1558,207 @@ CTEST_CASE(parse_value_with_spaces_via_equals) {
 
     argparse_free_pack(&pack);
     argparse_free_command(&cmd);
+}
+
+// Response file tests /////////////////////////////////////////////////////////
+
+CTEST_CASE(response_file_basic) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "@test_inputs/argparse/basic_args.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--name"), "value") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_multiple_options) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--verbose",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--output",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "@test_inputs/argparse/multiple_args.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--verbose"));
+    CTEST_ASSERT_TRUE(get_int_value(&pack, "--count") == 42);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--output"), "result.txt") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_quoted_values) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--message",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--path",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "@test_inputs/argparse/quoted_args.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--message"), "hello world") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--path"), "C:\\Program Files\\App") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_nested) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--first",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--middle",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--last",
+        .arity = ARGPARSE_ARITY_ZERO,
+    });
+
+    char* argv[] = { "program", "@test_inputs/argparse/nested_outer.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    printf("First error: %s\n", pack.errors.length > 0 ? pack.errors.elements[0] : "none");
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--first"));
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--middle"), "value") == 0);
+    CTEST_ASSERT_TRUE(has_option(&pack, "--last"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_with_equals_delimiters) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--name",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--count",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+        .parse_fn = parse_int,
+    });
+
+    char* argv[] = { "program", "@test_inputs/argparse/equals_delimiter.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--name"), "john") == 0);
+    CTEST_ASSERT_TRUE(get_int_value(&pack, "--count") == 99);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_bundled_options) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-a", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-b", .arity = ARGPARSE_ARITY_ZERO });
+    argparse_add_option(&cmd, (Argparse_Option){ .short_name = "-c", .arity = ARGPARSE_ARITY_ZERO });
+
+    char* argv[] = { "program", "@test_inputs/argparse/bundled_options.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(has_option(&pack, "-a"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-b"));
+    CTEST_ASSERT_TRUE(has_option(&pack, "-c"));
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_mixed_with_argv) {
+    Argparse_Command cmd = { .name = "test" };
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--first",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--second",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+    argparse_add_option(&cmd, (Argparse_Option){
+        .long_name = "--third",
+        .arity = ARGPARSE_ARITY_EXACTLY_ONE,
+    });
+
+    char* argv[] = { "program", "--first", "one", "@test_inputs/argparse/mixed_with_argv.txt", "--third", "three" };
+    Argparse_Pack pack = argparse_parse(6, argv, &cmd);
+
+    ASSERT_NO_ERRORS(pack);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--first"), "one") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--second"), "two") == 0);
+    CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--third"), "three") == 0);
+
+    argparse_free_pack(&pack);
+    argparse_free_command(&cmd);
+}
+
+CTEST_CASE(response_file_not_found_reports_error) {
+    Argparse_Command cmd = { .name = "test" };
+
+    char* argv[] = { "program", "@test_inputs/argparse/nonexistent.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    ASSERT_HAS_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+}
+
+CTEST_CASE(response_file_empty_is_ok) {
+    Argparse_Command cmd = { .name = "test" };
+
+    char* argv[] = { "program", "@test_inputs/argparse/empty.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    // Empty response file should not cause errors
+    ASSERT_NO_ERRORS(pack);
+
+    argparse_free_pack(&pack);
+}
+
+CTEST_CASE(response_file_whitespace_only_is_ok) {
+    Argparse_Command cmd = { .name = "test" };
+
+    char* argv[] = { "program", "@test_inputs/argparse/whitespace_only.txt" };
+    Argparse_Pack pack = argparse_parse(2, argv, &cmd);
+
+    // Whitespace-only response file should not cause errors
+    ASSERT_NO_ERRORS(pack);
+
+    argparse_free_pack(&pack);
 }
 
 #endif /* ARGPARSE_SELF_TEST */

@@ -127,11 +127,24 @@ function Run {
         throw "executable $Output not found, cannot run"
     }
 
-    Write-Host "running $Output..."
-    & "./$Output"
+    # Resolve output to absolute path before changing directories
+    $AbsOutput = Resolve-Path $Output
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "running $Output failed with exit code $LASTEXITCODE"
+    # Change to the directory of the first source file
+    $SourceDir = Split-Path -Parent (Resolve-Path $Sources[0])
+    $OriginalDir = Get-Location
+    Set-Location $SourceDir
+
+    try {
+        Write-Host "running $AbsOutput from $SourceDir..."
+        & $AbsOutput
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "running $Output failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        # Restore original working directory
+        Set-Location $OriginalDir
     }
 }
 
