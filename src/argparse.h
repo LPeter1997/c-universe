@@ -256,7 +256,7 @@ static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* to
 
 start:
     // End of response
-    if (response->index >= response->length) {
+    if (response->text == NULL || response->index >= response->length) {
         token->text = NULL;
         token->length = 0;
         token->index = 0;
@@ -444,6 +444,9 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
         *outExpectsValue = true;
         ++token->index;
     }
+    else {
+        *outExpectsValue = false;
+    }
     // Strip quotes, if present
     if (tokenLength > 1 && argparse_is_quote(tokenText[0]) && tokenText[tokenLength - 1] == tokenText[0]) {
         ++tokenText;
@@ -477,7 +480,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         .currentToken = { 0 },
     };
 
-    bool allowSubcommand = true;
+    bool allowSubcommands = true;
     bool allowOptions = true;
     Argparse_Argument* currentArgument = NULL;
     char const* tokenText;
@@ -496,12 +499,14 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
                 continue;
             }
             // TODO: We have to look up an option
+            prevExpectsValue = true;
             continue;
         }
         if (prevExpectsValue) {
             // Has to be a value for prev. option
             // TODO
             currentArgument = NULL;
+            prevExpectsValue = false;
             continue;
         }
         // Check for option escape (double-dash)
@@ -524,14 +529,13 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             allowSubcommands = false;
         }
         // Try to parse as option
-        if (!prevExpectsValue && allowOptions) {
+        if (allowOptions) {
             // TODO: Try option
         }
         // TODO: Can be a value for the prev option OR a positional arg
-
-        // For next iteration
-        prevExpectsValue = expectsValue;
     }
+
+    return pack;
 }
 
 Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
