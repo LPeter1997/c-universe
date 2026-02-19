@@ -231,19 +231,22 @@ static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argp
 static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
     Argparse_Response* toPop = tokenizer->currentResponse;
     tokenizer->currentResponse = toPop->next;
+    // Free the popped response's text and the response itself
+    ARGPARSE_FREE(toPop->text);
     ARGPARSE_FREE(toPop);
 }
 
 static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* tokenizer) {
     ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "cannot read from response, no current response present");
     Argparse_Response* response = tokenizer->currentResponse;
+    Argparse_Token* token = &tokenizer->currentToken;
 
 start:
     // End of response
     if (response->index >= response->length) {
-        tokenizer->currentToken.text = NULL;
-        tokenizer->currentToken.length = 0;
-        tokenizer->currentToken.index = 0;
+        token->text = NULL;
+        token->length = 0;
+        token->index = 0;
         return;
     }
     // Whitespace, skip
@@ -252,8 +255,8 @@ start:
         goto start;
     }
     // Token start
-    tokenizer->currentToken.text = response->text + response->index;
-    tokenizer->currentToken.index = 0;
+    token->text = response->text + response->index;
+    token->index = 0;
     // We determine the length by looking for the next whitespace that's NOT between quotes
     char currentQuote = '\0';
     size_t length = 0;
@@ -268,22 +271,23 @@ start:
         }
         ++length;
     }
-    tokenizer->currentToken.length = length;
+    token->length = length;
 }
 
 static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
     if (tokenizer->currentResponse == NULL) {
+        Argparse_Token* token = &tokenizer->currentToken;
         // Easy, read from argv
         if (tokenizer->argvIndex >= (size_t)tokenizer->argc) {
             // No more tokens to read
-            tokenizer->currentToken.text = NULL;
-            tokenizer->currentToken.length = 0;
+            token->text = NULL;
+            token->length = 0;
         }
         else {
-            tokenizer->currentToken.text = tokenizer->argv[tokenizer->argvIndex];
-            tokenizer->currentToken.length = strlen(tokenizer->currentToken.text);
+            token->text = tokenizer->argv[tokenizer->argvIndex];
+            token->length = strlen(token->text);
         }
-        tokenizer->currentToken.index = 0;
+        token->index = 0;
     }
     else {
         argparse_tokenizer_read_current_from_response(tokenizer);
