@@ -486,28 +486,26 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
         if (prevExpectsValue) {
-            // We have to parse as value
-            // TODO
+            // A value specification bans subcommands
+            allowSubcommands = false;
         }
-        else {
-            // Subcommands take priority
-            if (allowSubcommands) {
-                // Try to look up a subcommand first
-                Argparse_Command* sub = argparse_find_subcommand_with_name_n(currentCommand, tokenText, tokenLength);
-                if (sub != NULL) {
-                    // Step down, continue
-                    currentCommand = sub;
-                    continue;
-                }
-                // From here on out, subcommands are not allowed anymore, we have to parse options or arguments
-                allowSubcommands = false;
+        // Subcommands take priority
+        if (allowSubcommands) {
+            // Try to look up a subcommand first
+            Argparse_Command* sub = argparse_find_subcommand_with_name_n(currentCommand, tokenText, tokenLength);
+            if (sub != NULL) {
+                // Step down, continue
+                currentCommand = sub;
+                continue;
             }
-            // Try to parse as option
-            if (allowOptions) {
-                // TODO: Try option
-            }
-            // TODO: Try value
+            // From here on out, subcommands are not allowed anymore, we have to parse options or arguments
+            allowSubcommands = false;
         }
+        // Try to parse as option
+        if (!prevExpectsValue && allowOptions) {
+            // TODO: Try option
+        }
+        // TODO: Try value
 
         // For next iteration
         prevExpectsValue = expectsValue;
