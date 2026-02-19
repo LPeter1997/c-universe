@@ -187,6 +187,45 @@ static void argparse_add_value_to_argument(Argparse_Argument* argument, void* va
     ARGPARSE_ADD_TO_ARRAY(argument->values.elements, argument->values.length, argument->values.capacity, value);
 }
 
+// Tokenization logic //////////////////////////////////////////////////////////
+
+static bool argparse_is_value_delimiter(char c) {
+    return c == '=' || c == ':';
+}
+
+typedef struct Argparse_Tokenizer {
+    int argc;
+    char** argv;
+    size_t argvIndex;
+    size_t charIndex;
+} Argparse_Tokenizer;
+
+static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
+    // End of arguments
+    if (tokenizer->argvIndex >= (size_t)tokenizer->argc) return false;
+
+    char* currentArg = tokenizer->argv[tokenizer->argvIndex];
+    // We eat the current token until either a value delimiter (for options) or the end of the argument
+    size_t offset = 0;
+    while (currentArg[tokenizer->charIndex] != '\0'
+        && !argparse_is_value_delimiter(currentArg[tokenizer->charIndex + offset])) ++offset;
+
+    // If we hit the end of the token, just report it as is
+    if (currentArg[tokenizer->charIndex + offset] == '\0') {
+        *outToken = &currentArg[tokenizer->charIndex];
+        *outLength = offset;
+        ++tokenizer->argvIndex;
+        tokenizer->charIndex = 0;
+        return true;
+    }
+
+    // If we hit a value delimiter, we skip that and report the token until that point, and we will report the value in the next call
+    *outToken = &currentArg[tokenizer->charIndex];
+    *outLength = offset;
+    tokenizer->charIndex += offset + 1;
+    return true;
+}
+
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
