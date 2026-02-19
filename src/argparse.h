@@ -137,6 +137,8 @@ ARGPARSE_DEF void argparse_add_option(Argparse_Command* command, Argparse_Option
 ARGPARSE_DEF void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand);
 ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 
+ARGPARSE_DEF char* argparse_format(char const* format, ...);
+
 #ifdef __cplusplus
 }
 #endif
@@ -149,6 +151,7 @@ ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 #ifdef ARGPARSE_IMPLEMENTATION
 
 #include <assert.h>
+#include <ctype.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
@@ -193,6 +196,10 @@ static bool argparse_is_value_delimiter(char c) {
     return c == '=' || c == ':';
 }
 
+static bool argparse_is_quote(char c) {
+    return c == '"' || c == '\'';
+}
+
 typedef struct Argparse_Response {
     char const* text;
     size_t length;
@@ -200,12 +207,18 @@ typedef struct Argparse_Response {
     struct Argparse_Response* next;
 } Argparse_Response;
 
+typedef struct Argparse_Token {
+    char const* text;
+    size_t index;
+    size_t length;
+} Argparse_Token;
+
 typedef struct Argparse_Tokenizer {
     int argc;
     char** argv;
     size_t argvIndex;
-    size_t charIndex;
     Argparse_Response* currentResponse;
+    Argparse_Token currentToken;
 } Argparse_Tokenizer;
 
 static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
@@ -221,41 +234,145 @@ static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
     ARGPARSE_FREE(toPop);
 }
 
-static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
-    if (tokenizer->currentResponse != NULL) {
-        // We need to parse from the response file
-        // TODO
-        ARGPARSE_ASSERT(false, "response file tokenization not implemented yet");
+static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* tokenizer) {
+    ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "cannot read from response, no current response present");
+    Argparse_Response* response = tokenizer->currentResponse;
+
+start:
+    // End of response
+    if (response->index >= response->length) {
+        tokenizer->currentToken.text = NULL;
+        tokenizer->currentToken.length = 0;
+        tokenizer->currentToken.index = 0;
+        return;
     }
-
-    // End of arguments
-    if (tokenizer->argvIndex >= (size_t)tokenizer->argc) return false;
-
-    char* currentArg = tokenizer->argv[tokenizer->argvIndex];
-    if (tokenizer->charIndex == 0 && currentArg[0] == '@') {
-        // TODO: Implement response file tokenization
-        ARGPARSE_ASSERT(false, "response file tokenization not implemented yet");
+    // Whitespace, skip
+    if (isspace(response->text[response->index])) {
+        ++response->index;
+        goto start;
     }
+    // Token start
+    tokenizer->currentToken.text = response->text + response->index;
+    tokenizer->currentToken.index = 0;
+    // We determine the length by looking for the next whitespace that's NOT between quotes
+    char currentQuote = '\0';
+    size_t length = 0;
+    while (response->index + length < response->length) {
+        char c = response->text[response->index + length];
+        if (currentQuote == '\0') {
+            if (isspace(c)) break;
+            if (argparse_is_quote(c)) currentQuote = c;
+        }
+        else if (c == currentQuote) {
+            currentQuote = '\0';
+        }
+        ++length;
+    }
+    tokenizer->currentToken.length = length;
+}
 
-    // We eat the current token until either a value delimiter (for options) or the end of the argument
-    size_t offset = 0;
-    while (currentArg[tokenizer->charIndex + offset] != '\0'
-        && !argparse_is_value_delimiter(currentArg[tokenizer->charIndex + offset])) ++offset;
+static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
+    if (tokenizer->currentResponse == NULL) {
+        // Easy, read from argv
+        if (tokenizer->argvIndex >= (size_t)tokenizer->argc) {
+            // No more tokens to read
+            tokenizer->currentToken.text = NULL;
+            tokenizer->currentToken.length = 0;
+        }
+        else {
+            tokenizer->currentToken.text = tokenizer->argv[tokenizer->argvIndex];
+            tokenizer->currentToken.length = strlen(tokenizer->currentToken.text);
+        }
+        tokenizer->currentToken.index = 0;
+    }
+    else {
+        argparse_tokenizer_read_current_from_response(tokenizer);
+    }
+}
 
-    // If we hit the end of the token, just report it as is
-    if (currentArg[tokenizer->charIndex + offset] == '\0') {
-        *outToken = &currentArg[tokenizer->charIndex];
-        *outLength = offset;
+static void argparse_tokenizer_skip_current(Argparse_Tokenizer* tokenizer) {
+    ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot skip current token, no current token present");
+
+retry:
+    if (tokenizer->currentResponse == NULL) {
+        // Easy, just move to the next argv
         ++tokenizer->argvIndex;
-        tokenizer->charIndex = 0;
-        return true;
+    }
+    else {
+        // We just move the index forward by the length of the current token, and read the next token
+        tokenizer->currentResponse->index = tokenizer->currentToken.index + tokenizer->currentToken.length;
+    }
+}
+
+static void argparse_tokenizer_unwrap_current(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+    ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot unwrap current token, no current token present");
+
+retry:
+    // If we are at the start of the token and it's a response, we need to push it onto the stack
+    if (tokenizer->currentToken.index == 0 && tokenizer->currentToken.text[0] == '@') {
+        // We interpret the entire token as a file path, read the file and push its content as a new response
+        char const* filePath = tokenizer->currentToken.text + 1;
+        FILE* file = fopen(filePath, "r");
+        if (file == NULL) {
+            // Failed to open file, report error and return
+            char* error = argparse_format("failed to open response file '%s'", filePath);
+            argparse_add_error(pack, error);
+            return;
+        }
+        fseek(file, 0, SEEK_END);
+        long fileSize = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        char* fileContent = (char*)ARGPARSE_REALLOC(NULL, fileSize);
+        ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
+        fread(fileContent, 1, fileSize, file);
+        fclose(file);
+        argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
+            .text = fileContent,
+            .length = fileSize,
+            .index = 0,
+        });
+        // After pushing the new response, we need to read the current token again (which will now read from the new response)
+        argparse_tokenizer_read_current(tokenizer);
+        goto retry;
     }
 
-    // If we hit a value delimiter, we skip that and report the token until that point, and we will report the value in the next call
-    *outToken = &currentArg[tokenizer->charIndex];
-    *outLength = offset;
-    tokenizer->charIndex += offset + 1;
-    return true;
+    // We are done unwrapping
+}
+
+static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
+    // If we haven't read a token yet, try to read it
+    Argparse_Token* token = &tokenizer->currentToken;
+    if (token->text == NULL) {
+        argparse_tokenizer_read_current(tokenizer);
+        // If we still don't have a token, we are done
+        if (token->text == NULL) return false;
+        // Try to unwrap it
+        argparse_tokenizer_unwrap_current(pack, tokenizer);
+        // If we got an error reported, we are done
+        if (pack->errors.length > 0) return false;
+    }
+
+    // We have a current token, parse until a value separator or the end of the token
+    char* tokenText = token->text + token->index;
+    size_t tokenLength = 0;
+    while (token->index + tokenLength < token->length) {
+        char c = token->text[token->index + tokenLength];
+        if (argparse_is_value_delimiter(c)) break;
+        ++tokenLength;
+    }
+    // Save result
+    *outToken = tokenText;
+    *outLength = tokenLength;
+    // Move forward in the token
+    tokenizer->currentToken.index += tokenLength;
+    // If we stopped at a value delimiter, skip over that
+    if (token->index < token->length && argparse_is_value_delimiter(token->text[token->index])) {
+        ++token->index;
+    }
+    // If we got to the end of the token, skip it so that we read a new token on the next call
+    if (token->index >= token->length) {
+        argparse_tokenizer_skip_current(tokenizer);
+    }
 }
 
 // Public API //////////////////////////////////////////////////////////////////
@@ -306,6 +423,19 @@ void argparse_free_command(Argparse_Command* command) {
     }
     ARGPARSE_FREE(command->subcommands.elements);
     ARGPARSE_FREE(command->options.elements);
+}
+
+char* argparse_format(char const* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int length = vsnprintf(NULL, 0, format, args);
+    va_end(args);
+    char* buffer = (char*)ARGPARSE_REALLOC(NULL, length + 1);
+    ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
+    va_start(args, format);
+    vsnprintf(buffer, length + 1, format, args);
+    va_end(args);
+    return buffer;
 }
 
 #ifdef __cplusplus
