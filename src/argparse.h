@@ -193,14 +193,41 @@ static bool argparse_is_value_delimiter(char c) {
     return c == '=' || c == ':';
 }
 
+typedef struct Argparse_Response {
+    char const* text;
+    size_t length;
+    size_t index;
+    struct Argparse_Response* next;
+} Argparse_Response;
+
 typedef struct Argparse_Tokenizer {
     int argc;
     char** argv;
     size_t argvIndex;
     size_t charIndex;
+    Argparse_Response* currentResponse;
 } Argparse_Tokenizer;
 
+static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
+    response.next = tokenizer->currentResponse;
+    tokenizer->currentResponse = (Argparse_Response*)ARGPARSE_REALLOC(NULL, sizeof(Argparse_Response));
+    ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "failed to allocate memory for tokenizer response");
+    *tokenizer->currentResponse = response;
+}
+
+static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
+    Argparse_Response* toPop = tokenizer->currentResponse;
+    tokenizer->currentResponse = toPop->next;
+    ARGPARSE_FREE(toPop);
+}
+
 static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength) {
+    if (tokenizer->currentResponse != NULL) {
+        // We need to parse from the response file
+        // TODO
+        ARGPARSE_ASSERT(false, "response file tokenization not implemented yet");
+    }
+
     // End of arguments
     if (tokenizer->argvIndex >= (size_t)tokenizer->argc) return false;
 
