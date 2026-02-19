@@ -497,10 +497,17 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             // TODO: We have to look up an option
             continue;
         }
+        if (prevExpectsValue) {
+            // Has to be a value for prev. option
+            // TODO
+            currentArgument = NULL;
+            continue;
+        }
         // Check for option escape (double-dash)
         if (tokenLength == 2 && tokenText[0] == '-' && tokenText[1] == '-') {
             allowSubcommands = false;
             allowOptions = false;
+            currentArgument = NULL;
             continue;
         }
         // Subcommands take priority
@@ -519,12 +526,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         if (!prevExpectsValue && allowOptions) {
             // TODO: Try option
         }
-        if (prevExpectsValue) {
-            // Has to be a value for prev. option
-        }
-        else {
-            // TODO: Can be a value for the prev option OR a positional arg
-        }
+        // TODO: Can be a value for the prev option OR a positional arg
 
         // For next iteration
         prevExpectsValue = expectsValue;
