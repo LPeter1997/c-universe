@@ -422,7 +422,8 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
         else if (c == currentQuote) {
             currentQuote = '\0';
         }
-        if (argparse_is_value_delimiter(c) && currentQuote == '\0') break;
+        // A value delimiter is only legal when not between quotes and this is the start of the token
+        if (argparse_is_value_delimiter(c) && currentQuote == '\0' && token->index == 0) break;
         ++tokenLength;
     }
     // Move forward in the token
@@ -450,7 +451,9 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     Argparse_Pack pack = { 0 };
 
     if (argc == 0) {
-        argparse_add_error(&pack, "no arguments provided");
+        // NOTE: We call argparse_format to move the error to the heap, we expect errors to be freeable
+        char* error = argparse_format("no arguments provided");
+        argparse_add_error(&pack, error);
         return pack;
     }
 
@@ -469,7 +472,14 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     bool expectsValue = false;
     bool prevExpectsValue = false;
     while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &expectsValue)) {
-        // TODO
+        if (prevExpectsValue) {
+            ARGPARSE_ASSERT(!expectsValue, "unexpected state: cannot have two consecutive value tokens");
+
+            // TODO
+        }
+        else {
+            // TODO
+        }
 
         // For next iteration
         prevExpectsValue = expectsValue;
