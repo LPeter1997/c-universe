@@ -15,7 +15,11 @@
  *  - Response files (e.g. '@args.txt' to read additional arguments from a file)
  *
  * Configuration:
- *  - TODO
+ *  - #define ARGPARSE_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
+ *  - #define ARGPARSE_STATIC before including this header to make all functions have internal linkage
+ *  - #define ARGPARSE_REALLOC and ARGPARSE_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define ARGPARSE_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
+ *  - #define ARGPARSE_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * API:
  *  - TODO
@@ -178,6 +182,25 @@ typedef struct Argparse_Argument {
 } Argparse_Argument;
 
 /**
+ * Parses the specified command-line arguments according to the specified root command,
+ * and executes the corresponding handler function if parsing was successful.
+ * If parsing failed, the errors are printed to stderr and the usage of the command is printed.
+ * @param argc The number of command-line arguments, including the program name.
+ * @param argv The command-line arguments, where argv[0] is the program name.
+ * @param root The root command to parse against, which may contain subcommands and options.
+ * @returns The return value of the executed handler function if parsing was successful and a handler was executed,
+ * or -1 if parsing failed or no handler was executed.
+ */
+ARGPARSE_DEF int argparse_run(int argc, char** argv, Argparse_Command* root);
+
+/**
+ * Prints usage information for the specified command, including its description, options and subcommands.
+ * The text is printed to stderr.
+ * @param command The command to print usage information for.
+ */
+ARGPARSE_DEF void argparse_print_usage(Argparse_Command* command);
+
+/**
  * Parses the command-line arguments according to the specified root command,
  * returning a pack containing the parsed values and any errors that were encountered.
  * @param argc The number of command-line arguments, including the program name.
@@ -197,6 +220,7 @@ ARGPARSE_DEF Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char 
 
 /**
  * Frees the memory associated with the pack, including any parsed values and error messages.
+ * @param pack The pack to free.
  */
 ARGPARSE_DEF void argparse_free_pack(Argparse_Pack* pack);
 
@@ -763,6 +787,67 @@ static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option*
 }
 
 // Public API //////////////////////////////////////////////////////////////////
+
+int argparse_run(int argc, char** argv, Argparse_Command* root) {
+    Argparse_Pack pack = argparse_parse(argc, argv, root);
+    if (pack.errors.length > 0) {
+        // Print errors
+        for (size_t i = 0; i < pack.errors.length; ++i) {
+            fprintf(stderr, "Error: %s\n", pack.errors.elements[i]);
+        }
+        // Print usage
+        argparse_print_usage(root);
+        argparse_free_pack(&pack);
+        return -1;
+    }
+    if (pack.command->handler_fn == NULL) {
+        fprintf(stderr, "Error: no handler specified for command '%s'\n", pack.command->name);
+        argparse_print_usage(root);
+        argparse_free_pack(&pack);
+        return -1;
+    }
+    int result = pack.command->handler_fn(&pack);
+    argparse_free_pack(&pack);
+    return result;
+}
+
+void argparse_print_usage(Argparse_Command* command) {
+    fprintf(stderr, "Usage: %s", command->name);
+    if (command->options.length > 0) {
+        fprintf(stderr, " [options]");
+    }
+    if (command->subcommands.length > 0) {
+        fprintf(stderr, " <subcommand>");
+    }
+    fprintf(stderr, "\n");
+    if (command->description != NULL) {
+        fprintf(stderr, "%s\n", command->description);
+    }
+    if (command->options.length > 0) {
+        fprintf(stderr, "Options:\n");
+        for (size_t i = 0; i < command->options.length; ++i) {
+            Argparse_Option* option = &command->options.elements[i];
+            char optionNames[128] = { 0 };
+            if (option->short_name != NULL) {
+                strcat(optionNames, option->short_name);
+                if (option->long_name != NULL) {
+                    strcat(optionNames, ", ");
+                }
+            }
+            if (option->long_name != NULL) {
+                strcat(optionNames, option->long_name);
+            }
+            fprintf(stderr, "  %-20s %s\n", optionNames, option->description != NULL ? option->description : "");
+        }
+    }
+    if (command->subcommands.length > 0) {
+        fprintf(stderr, "Subcommands:\n");
+        for (size_t i = 0; i < command->subcommands.length; ++i) {
+            Argparse_Command* subcommand = &command->subcommands.elements[i];
+            fprintf(stderr, "  %-20s %s\n", subcommand->name, subcommand->description != NULL ? subcommand->description : "");
+        }
+    }
+}
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     Argparse_Pack pack = { 0 };
@@ -1740,8 +1825,6 @@ CTEST_CASE(response_file_nested) {
     char* argv[] = { "program", "@test_inputs/argparse/nested_outer.txt" };
     Argparse_Pack pack = argparse_parse(2, argv, &cmd);
 
-    printf("First error: %s\n", pack.errors.length > 0 ? pack.errors.elements[0] : "none");
-
     ASSERT_NO_ERRORS(pack);
     CTEST_ASSERT_TRUE(has_option(&pack, "--first"));
     CTEST_ASSERT_TRUE(strcmp(get_string_value(&pack, "--middle"), "value") == 0);
@@ -1855,3 +1938,19 @@ CTEST_CASE(response_file_whitespace_only_is_ok) {
 }
 
 #endif /* ARGPARSE_SELF_TEST */
+
+////////////////////////////////////////////////////////////////////////////////
+// Example section                                                            //
+////////////////////////////////////////////////////////////////////////////////
+#ifdef ARGPARSE_EXAMPLE
+#undef ARGPARSE_EXAMPLE
+
+#define ARGPARSE_IMPLEMENTATION
+#define ARGPARSE_STATIC
+#include "argparse.h"
+
+int main(int argv) {
+
+}
+
+#endif /* ARGPARSE_EXAMPLE */
