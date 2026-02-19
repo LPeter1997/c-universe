@@ -333,10 +333,8 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     Argparse_Token* token = &tokenizer->currentToken;
     // We interpret the entire token as a file path
     char const* filePath = token->text + 1;
-    // Clear out the token's state
-    token->text = NULL;
-    token->length = 0;
-    token->index = 0;
+    // Skip this token to not re-read it when the response is processed
+    argparse_tokenizer_skip_current(tokenizer);
     // Open file for reading
     FILE* file = fopen(filePath, "r");
     if (file == NULL) {
