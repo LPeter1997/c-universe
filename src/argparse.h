@@ -237,6 +237,23 @@ static bool argparse_is_legal_prefix_for_bundling(char const* name, size_t lengt
     return false;
 }
 
+static bool argparse_argument_can_take_value(Argparse_Argument* argument) {
+    if (argument == NULL) return false;
+
+    Argparse_Arity arity = argument->option->arity;
+    switch (arity) {
+    case ARGPARSE_ARITY_ZERO:
+        return false;
+    case ARGPARSE_ARITY_ZERO_OR_ONE:
+    case ARGPARSE_ARITY_EXACTLY_ONE:
+        return argument->values.length < 1;
+    case ARGPARSE_ARITY_ZERO_OR_MORE:
+    case ARGPARSE_ARITY_ONE_OR_MORE:
+        return true;
+    }
+    return false;
+}
+
 typedef struct Argparse_Response {
     char const* text;
     size_t length;
@@ -622,7 +639,12 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         }
         // Try to parse as option
         if (allowOptions && argparse_is_legal_prefix_for_option(tokenText, tokenLength)) {
-            // TODO: Try option
+            currentArgument = argparse_try_add_option_argument(&pack, tokenText, tokenLength);
+            if (currentArgument == NULL) {
+                char* error = argparse_format("unknown option '%.*s'", (int)tokenLength, tokenText);
+                argparse_add_error(&pack, error);
+            }
+            continue;
         }
         // TODO: Can be a value for the prev option OR a positional arg
     }
