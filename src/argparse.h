@@ -444,7 +444,28 @@ static bool argparse_tokenizer_next(Argparse_Pack* pack, Argparse_Tokenizer* tok
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
-    ARGPARSE_ASSERT(false, "not implemented yet");
+    Argparse_Pack pack = { 0 };
+
+    if (argc == 0) {
+        argparse_add_error(&pack, "no arguments provided");
+        return pack;
+    }
+
+    pack.program_name = argv[0];
+    Argparse_Command* currentCommand = root;
+    Argparse_Tokenizer tokenizer = {
+        .argc = argc,
+        .argv = argv,
+        .argvIndex = 1,
+        .currentResponse = NULL,
+        .currentToken = { 0 },
+    };
+
+    char const* tokenText;
+    size_t tokenLength;
+    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength)) {
+        // TODO
+    }
 }
 
 Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
