@@ -22,7 +22,14 @@
  *  - #define ARGPARSE_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * API:
- *  - TODO
+ *  - Define commands and options using the Argparse_Command and Argparse_Option structs, including custom parsing functions and default value functions if needed
+ *  - Use argparse_add_option and argparse_add_subcommand to build the command hierarchy as needed
+ *  - Call argparse_run to parse the command-line arguments and execute the corresponding handler function
+ *  - Alternatively use argparse_parse to get a pack containing the parsed values and any errors, and call handlers manually
+ *  - Use argparse_get_argument and argparse_get_positional to retrieve parsed arguments from the pack by name or position
+ *  - Use argparse_print_usage to print usage information for a command
+ *  - Use argparse_free_pack and argparse_free_command to free the memory associated with packs and commands when they are no longer needed
+ *  - Use argparse_format to create formatted strings for error messages
  */
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -130,6 +137,7 @@ typedef struct Argparse_Option {
     // A custom parsing function for the option's values. If NULL, the raw text will be used as the value.
     Argparse_ParseFn* parse_fn;
     // A function that provides the default value for this option if it is not specified in the command line. Can be NULL if no default value is needed.
+    // Note, that the library currently does not call this at all, merely here for future extensibility.
     Argparse_ValueFn* default_value_fn;
 } Argparse_Option;
 
