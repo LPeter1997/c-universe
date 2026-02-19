@@ -556,6 +556,32 @@ static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, 
     return NULL;
 }
 
+static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argument* argument, char const* value, size_t valueLength) {
+    // If there is a parser function, invoke it
+    void* resultValue = NULL;
+    if (argument->option->parse_fn == NULL) {
+        // Paste the raw text as the value
+        char* valueCopy = (char*)ARGPARSE_REALLOC(NULL, valueLength + 1);
+        ARGPARSE_ASSERT(valueCopy != NULL, "failed to allocate memory for option value");
+        memcpy(valueCopy, value, valueLength);
+        valueCopy[valueLength] = '\0';
+        resultValue = valueCopy;
+    }
+    else {
+        // Use the specified parser function
+        Argparse_ParseResult parseResult = argument->option->parse_fn(value, valueLength);
+        if (parseResult.error != NULL) {
+            // Parsing failed, report error
+            // This error is already expected to be heap-allocated, so we can just add it directly
+            argparse_add_error(pack, parseResult.error);
+            return;
+        }
+        resultValue = parseResult.value;
+    }
+    // Add the value to the argument
+    argparse_add_value_to_argument(argument, resultValue);
+}
+
 // Public API //////////////////////////////////////////////////////////////////
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
@@ -608,10 +634,12 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
         if (prevExpectsValue) {
             // Has to be a value for prev. option
             if (currentArgument == NULL) {
-                // TODO: parse and throw away
+                // NOTE: We just throw it away, error should have been reported
+                ARGPARSE_ASSERT(pack->errors.length > 0, "an error was expected to be reported for throwaway value");
+                continue;
             }
             else {
-                // TODO: parse and add to argument
+                argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
             }
             currentArgument = NULL;
             prevExpectsValue = false;
@@ -646,7 +674,11 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             }
             continue;
         }
-        // TODO: Can be a value for the prev option OR a positional arg
+        if (argparse_argument_can_take_value(currentArgument)) {
+            argparse_parse_value_to_argument(&pack, currentArgument, tokenText, tokenLength);
+            continue;
+        }
+        // TODO: Parse a positional argument
     }
 
     return pack;
