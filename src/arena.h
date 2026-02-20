@@ -81,7 +81,12 @@ ARENA_DEF void arena_reset(Arena* arena, Arena_Mark mark);
 extern "C" {
 #endif
 
-// TODO
+typedef struct Arena_Block {
+    void* memory;
+    size_t size;
+    size_t offset;
+    struct Arena_Block* next;
+} Arena_Block;
 
 #ifdef __cplusplus
 }
