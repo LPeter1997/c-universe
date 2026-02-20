@@ -14,6 +14,7 @@
 #ifndef ARENA_H
 #define ARENA_H
 
+#include <cstddef>
 #include <stddef.h>
 
 #ifdef ARENA_STATIC
@@ -44,6 +45,7 @@ typedef enum Area_Growth {
 
 typedef struct Arena {
     struct Arena_Block* block;
+    size_t version;
     size_t block_count;
     size_t block_size;
     size_t max_block_size;
@@ -53,6 +55,7 @@ typedef struct Arena {
 
 typedef struct Arena_Mark {
     struct Arena_Block* block;
+    size_t version;
     size_t block_count;
     size_t offset;
 } Arena_Mark;
