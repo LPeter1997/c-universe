@@ -95,7 +95,6 @@ typedef struct Arena_Block {
     void* memory;
     size_t size;
     size_t offset;
-    struct Arena_Block* next;
 } Arena_Block;
 
 static void arena_push_block(Arena* arena, Arena_Block* block) {
