@@ -77,6 +77,11 @@ ARENA_DEF void arena_reset(Arena* arena, Arena_Mark mark);
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef ARENA_IMPLEMENTATION
 
+#include <assert.h>
+#include <stdint.h>
+
+#define ARENA_ASSERT(condition, message) assert(((void)message, condition))
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -88,8 +93,55 @@ typedef struct Arena_Block {
     struct Arena_Block* next;
 } Arena_Block;
 
+static void arena_push_block(Arena* arena, Arena_Block* block) {
+    block->next = arena->block;
+    arena->block = block;
+    ++arena->block_count;
+}
+
+void* arena_alloc(Arena* arena, size_t size) {
+    // NOTE: alignmax_t is C11, for C99 this is good enough
+    return arena_alloc_aligned(arena, size, alignof(intmax_t));
+}
+
+void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
+    // If the requested size is larger than the large threshold, we allocate a separate block for it
+    if (arena->large_threshold != 0 && size >= arena->large_threshold) {
+        // For a large block we do not fragment or care about growth strategy, it's gonna be an "exact fit" block
+        // We also don't worry about alignment requirements, we assume the underlying allocator will give us maximum alignment
+        void* memory = ARENA_REALLOC(NULL, size);
+        if (memory == NULL) return NULL;
+
+        Arena_Block* block = (Arena_Block*)ARENA_REALLOC(NULL, sizeof(Arena_Block));
+        ARENA_ASSERT(block != NULL, "failed to allocate memory for arena block");
+
+        block->memory = memory;
+        block->size = size;
+        // We mark the block as fully used, so it won't be used for future allocations
+        block->offset = size;
+        arena_push_block(arena, block);
+        return memory;
+    }
+
+    // TODO
+}
+
+void arena_destroy(Arena* arena) {
+    // TODO
+}
+
+Arena_Mark arena_mark(Arena* arena) {
+    // TODO
+}
+
+void arena_reset(Arena* arena, Arena_Mark mark) {
+    // TODO
+}
+
 #ifdef __cplusplus
 }
 #endif
+
+#undef ARENA_ASSERT
 
 #endif /* ARENA_IMPLEMENTATION */
