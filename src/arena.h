@@ -44,9 +44,13 @@ typedef enum Area_Growth {
 } Area_Growth;
 
 typedef struct Arena {
-    struct Arena_Block* block;
     size_t version;
-    size_t block_count;
+    struct {
+        struct Arena_Block* elements;
+        size_t length;
+        size_t capacity;
+    } blocks;
+    size_t current_block_index;
     size_t block_size;
     size_t max_block_size;
     size_t large_threshold;
@@ -54,9 +58,9 @@ typedef struct Arena {
 } Arena;
 
 typedef struct Arena_Mark {
-    struct Arena_Block* block;
     size_t version;
-    size_t block_count;
+    size_t block_index;
+    size_t block_size;
     size_t offset;
 } Arena_Mark;
 
