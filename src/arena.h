@@ -79,6 +79,7 @@ ARENA_DEF void arena_reset(Arena* arena, Arena_Mark mark);
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define ARENA_ASSERT(condition, message) assert(((void)message, condition))
 
