@@ -501,11 +501,23 @@ CTEST_CASE(case3) {
     ++expectedCases[2].runCount;
 }
 
+CTEST_CASE(case4, .should_fail = true) {
+    ++expectedCases[3].runCount;
+    CTEST_ASSERT_FAIL("needs to fail");
+}
+
+CTEST_CASE(case5, .should_fail = true) {
+    ++expectedCases[4].runCount;
+    // Should fail but we won't fail it
+}
+
 ExpectedTestCase expectedCases[] = {
 #define EXPECTED_CASE(n, s) { .runCount = 0, .shouldPass = s, .name = #n, .test_fn = n }
     EXPECTED_CASE(case1, true),
     EXPECTED_CASE(case2, false),
     EXPECTED_CASE(case3, true),
+    EXPECTED_CASE(case4, true),
+    EXPECTED_CASE(case5, false),
 #undef EXPECTED_CASE
 };
 
