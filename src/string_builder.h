@@ -2,10 +2,19 @@
  * string_builder.h is a single-header string building library for C.
  *
  * Configuration:
- *  - TODO
+ *  - #define STRING_BUILDER_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
+ *  - #define STRING_BUILDER_STATIC before including this header to make all functions have internal linkage
+ *  - #define STRING_BUILDER_REALLOC and STRING_BUILDER_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define STRING_BUILDER_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
+ *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * API:
- *  - TODO
+ *  - Use string_builder_puts, string_builder_putsn, string_builder_putc and string_builder_format to build the string as needed
+ *  - Use string_builder_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
+ *  - Use string_builder_clear to clear the content of the builder without freeing the allocated buffer
+ *  - Use string_builder_free to free the memory allocated for the builder when it is no longer needed
+ *
+ * Check the example section at the end of this file for a full example.
  */
 
 ////////////////////////////////////////////////////////////////////////////////
