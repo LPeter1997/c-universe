@@ -10,15 +10,16 @@
  *
  * StringBuilder API:
  *  - Use string_builder_puts, string_builder_putsn, string_builder_putc and string_builder_format to build the string as needed
- *  - Use string_buildes interpreted as 24 spaces2r_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
+ *  - Use string_builder_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
  *  - Use string_builder_clear to clear the content of the builder without freeing the allocated buffer
  *  - Use string_builder_free to free the memory allocated for the builder when it is no longer needed
  *
  * CodeBuilder API:
- *  - Initialize with { .indent_str = "    " } or similar to set the indentation string (default is NULL, which is interpreted as 4 spaces)
+ *  - Similar to StringBuilder but with automatic indentation at the start of lines, useful for code generation
  *  - Use code_builder_puts, code_builder_putc and code_builder_format just like StringBuilder, but with automatic indentation at line starts
  *  - Use code_builder_indent and code_builder_dedent to increase/decrease the indentation level
  *  - Use code_builder_to_cstr and code_builder_free to get the result and clean up
+ *  - Customize the indentation string by setting the indent_str field of CodeBuilder (defaults to 4 spaces if NULL)
  *
  * Check the example section at the end of this file for a full example.
  */
