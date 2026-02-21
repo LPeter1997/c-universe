@@ -159,7 +159,63 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 extern "C" {
 #endif
 
+static char* json_strdup(char const* str) {
+    size_t length = strlen(str);
+    char* copy = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
+    JSON_ASSERT(copy != NULL, "failed to allocate memory for string duplication");
+    memcpy(copy, str, length * sizeof(char));
+    copy[length] = '\0';
+    return copy;
+}
 
+// Value constructors //////////////////////////////////////////////////////////
+
+Json_Value json_object(void) {
+    return (Json_Value){
+        .type = JSON_VALUE_OBJECT,
+        .object_value = { 0 },
+    };
+}
+
+Json_Value json_array(void) {
+    return (Json_Value){
+        .type = JSON_VALUE_ARRAY,
+        .array_value = { 0 },
+    };
+}
+
+Json_Value json_string(char const* str) {
+    return (Json_Value){
+        .type = JSON_VALUE_STRING,
+        .string_value = json_strdup(str),
+    };
+}
+
+Json_Value json_int(long long value) {
+    return (Json_Value){
+        .type = JSON_VALUE_INT,
+        .int_value = value,
+    };
+}
+Json_Value json_double(double value) {
+    return (Json_Value){
+        .type = JSON_VALUE_DOUBLE,
+        .double_value = value,
+    };
+}
+
+Json_Value json_bool(bool value) {
+    return (Json_Value){
+        .type = JSON_VALUE_BOOL,
+        .bool_value = value,
+    };
+}
+
+Json_Value json_null(void) {
+    return (Json_Value){
+        .type = JSON_VALUE_NULL,
+    };
+}
 
 #ifdef __cplusplus
 }
