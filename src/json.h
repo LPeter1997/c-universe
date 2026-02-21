@@ -162,7 +162,25 @@ JSON_DEF char* json_vformat(char const* format, va_list args);
 extern "C" {
 #endif
 
-// TODO: Implementation goes here
+char* json_format(char const* format, ...) {
+    va_list args;
+    va_start(args, format);
+    char* result = json_vformat(format, args);
+    va_end(args);
+    return result;
+}
+
+char* json_vformat(char const* format, va_list args) {
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int length = vsnprintf(NULL, 0, format, args_copy);
+    JSON_ASSERT(length >= 0, "failed to compute length of formatted string");
+    va_end(args_copy);
+    char* buffer = (char*)JSON_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
+    JSON_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
+    vsnprintf(buffer, (size_t)length + 1, format, args);
+    return buffer;
+}
 
 #ifdef __cplusplus
 }
