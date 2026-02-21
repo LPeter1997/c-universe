@@ -168,6 +168,11 @@ extern CTest_Execution* __ctest_ctx;
         } \
     } while (false)
 
+#ifdef __clang__
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#endif
+
 /**
  * Defines a test case with the given identifier as a name.
  * @param n The identifier to use as the test case name.
@@ -175,14 +180,14 @@ extern CTest_Execution* __ctest_ctx;
  */
 #define CTEST_CASE(n, ...) \
 static void n(void); \
-__CTEST_AUTOREGISTER_CASE(n, __VA_ARGS__) \
+__CTEST_AUTOREGISTER_CASE(n, ##__VA_ARGS__) \
 void n(void)
 
 #if defined(__GNUC__) || defined(__clang__)
     #define __CTEST_AUTOREGISTER_CASE(n, ...) \
     __attribute__((constructor)) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, __VA_ARGS__ }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, ##__VA_ARGS__ }); \
     }
 #elif defined(_MSC_VER)
     #ifdef _WIN64
@@ -197,10 +202,13 @@ void n(void)
     __declspec(allocate(".CRT$XCU")) void (*__ctest_register_ ## n ## _)(void) = __ctest_register_ ## n; \
     __pragma(comment(linker,"/include:" __CTEST_LINKER_PREFIX "__ctest_register_" #n "_")) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, __VA_ARGS__ }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, ##__VA_ARGS__ }); \
     }
 #else
     #error "unsupported C compiler"
+#endif
+#ifdef __clang__
+    #pragma clang diagnostic pop
 #endif
 
 /**
