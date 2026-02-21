@@ -8,11 +8,17 @@
  *  - #define STRING_BUILDER_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
- * API:
+ * StringBuilder API:
  *  - Use string_builder_puts, string_builder_putsn, string_builder_putc and string_builder_format to build the string as needed
- *  - Use string_builder_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
+ *  - Use string_buildes interpreted as 24 spaces2r_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
  *  - Use string_builder_clear to clear the content of the builder without freeing the allocated buffer
  *  - Use string_builder_free to free the memory allocated for the builder when it is no longer needed
+ *
+ * CodeBuilder API:
+ *  - Initialize with { .indent_str = "    " } or similar to set the indentation string (default is NULL, which is interpreted as 4 spaces)
+ *  - Use code_builder_puts, code_builder_putc and code_builder_format just like StringBuilder, but with automatic indentation at line starts
+ *  - Use code_builder_indent and code_builder_dedent to increase/decrease the indentation level
+ *  - Use code_builder_to_cstr and code_builder_free to get the result and clean up
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -236,8 +242,9 @@ void string_builder_vformat(StringBuilder* sb, char const* format, va_list args)
 static void code_builder_indent_if_needed(CodeBuilder* cb) {
     StringBuilder* sb = &cb->builder;
     if (sb->length == 0 || sb->buffer[sb->length - 1] == '\n' || sb->buffer[sb->length - 1] == '\r') {
+        char const* indent = cb->indent_str == NULL ? "    " : cb->indent_str;
         for (size_t i = 0; i < cb->indent_level; ++i) {
-            string_builder_puts(sb, cb->indent_str);
+            string_builder_puts(sb, indent);
         }
     }
 }
@@ -657,17 +664,29 @@ CTEST_CASE(string_builder_repeated_clear_and_build) {
 #include "string_builder.h"
 
 int main(void) {
+    // StringBuilder: simple string concatenation
     StringBuilder sb = { 0 };
-
     string_builder_puts(&sb, "Hello, ");
     string_builder_puts(&sb, "World!");
     string_builder_format(&sb, " The answer is %d.", 42);
-
-    char* result = string_builder_to_cstr(&sb);
-    printf("%s\n", result);
-
-    free(result);
+    char* msg = string_builder_to_cstr(&sb);
+    printf("%s\n\n", msg);
+    free(msg);
     string_builder_free(&sb);
+
+    // CodeBuilder: code generation with automatic indentation
+    CodeBuilder cb = { 0 };
+    code_builder_puts(&cb, "int main(void) {\n");
+    code_builder_indent(&cb);
+    code_builder_format(&cb, "printf(\"%s\");\n", "Hello");
+    code_builder_puts(&cb, "return 0;\n");
+    code_builder_dedent(&cb);
+    code_builder_puts(&cb, "}\n");
+    char* code = code_builder_to_cstr(&cb);
+    printf("%s", code);
+    free(code);
+    code_builder_free(&cb);
+
     return 0;
 }
 
