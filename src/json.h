@@ -50,6 +50,7 @@ typedef struct Json_Options {
 } Json_Options;
 
 typedef struct Json_Error {
+    // Owned string
     char const* message;
     size_t line;
     size_t column;
@@ -88,6 +89,7 @@ typedef struct Json_Value {
         bool bool_value;
         long long int_value;
         double double_value;
+        // Owned string
         char const* string_value;
         struct {
             Json_Value* elements;
