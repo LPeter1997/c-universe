@@ -16,7 +16,18 @@
 
 // TODO: Includes
 
-// TODO: Configuration macros
+#ifdef STRING_BUILDER_STATIC
+    #define STRING_BUILDER_DEF static
+#else
+    #define STRING_BUILDER_DEF extern
+#endif
+
+#ifndef STRING_BUILDER_REALLOC
+    #define STRING_BUILDER_REALLOC realloc
+#endif
+#ifndef STRING_BUILDER_FREE
+    #define STRING_BUILDER_FREE free
+#endif
 
 #ifdef __cplusplus
 extern "C" {

@@ -41,20 +41,20 @@
 #include <stddef.h>
 
 #ifdef GC_STATIC
-#   define GC_DEF static
+    #define GC_DEF static
 #else
-#   define GC_DEF extern
+    #define GC_DEF extern
 #endif
 
 #ifndef GC_REALLOC
-#   define GC_REALLOC realloc
+    #define GC_REALLOC realloc
 #endif
 #ifndef GC_FREE
-#   define GC_FREE free
+    #define GC_FREE free
 #endif
 
 #ifndef GC_LOG
-#   define GC_LOG(...)
+    #define GC_LOG(...)
 #endif
 
 #ifdef __cplusplus
@@ -829,11 +829,11 @@ void gc_free(GC_World* gc, void* mem) {
 #include "ctest.h"
 
 #if defined(_MSC_VER)
-#   define GC_TEST_NOINLINE __declspec(noinline)
+    #define GC_TEST_NOINLINE __declspec(noinline)
 #elif defined(__GNUC__) || defined(__clang__)
-#   define GC_TEST_NOINLINE __attribute__((noinline))
+    #define GC_TEST_NOINLINE __attribute__((noinline))
 #else
-#   define GC_TEST_NOINLINE
+    #define GC_TEST_NOINLINE
 #endif
 
 // NOTE: Maybe CTEST should ship with utilities like this?
