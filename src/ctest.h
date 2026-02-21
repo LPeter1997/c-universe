@@ -28,6 +28,7 @@
 #ifndef CTEST_H
 #define CTEST_H
 
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -57,7 +58,7 @@ typedef struct CTest_Case {
     // The name of the test case
     char const* name;
     // The test function that gets executed when this case is ran
-    void(*test_fn)(struct CTest_Execution*);
+    void(*test_fn)(void);
 } CTest_Case;
 
 /**
@@ -80,12 +81,19 @@ typedef struct CTest_Execution {
     CTest_Case const* test_case;
     // True, if the test case passed, false if it failed
     bool passed;
-    // An optional message describing the failure, if the test case failed
-    char const* fail_message;
-    // An optional file path to the file where the failure happened
-    char const* fail_file;
-    // An optional line number where the failure happened
-    int fail_line;
+    // Information about failure
+    struct {
+        // An optional message describing the failure, if the test case failed
+        char const* message;
+        // An optional file path to the file where the failure happened
+        char const* file;
+        // An optional function name where the failure happened
+        char const* function;
+        // An optional line number where the failure happened
+        int line;
+    } fail_info;
+    // Used internally to be able to catch assertions from within the test functions and even across the SUT code, if necessary
+    jmp_buf jmp_env;
 } CTest_Execution;
 
 /**
@@ -126,24 +134,14 @@ typedef struct CTest_Report {
 // Used as a target to automatically register the cases
 extern CTest_Suite __ctest_default_suite;
 
-/**
- * The name to refer to for the current test execution context.
- * When calling an assertion macro from a non-test-case function, make sure to pass this as a parameter to it.
- */
-#define CTEST_CONTEXT __ctest_ctx
+// The context for the currently running test case
+extern CTest_Execution* __ctest_ctx;
 
 /**
  * Fails the current test case with the given message.
  * @param message The message to fail with.
  */
-#define CTEST_ASSERT_FAIL(message) \
-    do { \
-        CTEST_CONTEXT->passed = false; \
-        CTEST_CONTEXT->fail_message = message; \
-        CTEST_CONTEXT->fail_file = __FILE__; \
-        CTEST_CONTEXT->fail_line = __LINE__; \
-        return; \
-    } while (false)
+#define CTEST_ASSERT_FAIL(message) ctest_fail(message, __FILE__, __func__, __LINE__)
 
 /**
  * Asserts that the given condition is true, and fails the current test case with a message containing the condition if it is false.
@@ -160,9 +158,9 @@ extern CTest_Suite __ctest_default_suite;
  * @param n The identifier to use as the test case name.
  */
 #define CTEST_CASE(n) \
-static void n(CTest_Execution* CTEST_CONTEXT); \
+static void n(void); \
 __CTEST_AUTOREGISTER_CASE(n) \
-void n(CTest_Execution* CTEST_CONTEXT)
+void n(void)
 
 #if defined(__GNUC__) || defined(__clang__)
     #define __CTEST_AUTOREGISTER_CASE(n) \
@@ -188,6 +186,17 @@ void n(CTest_Execution* CTEST_CONTEXT)
 #else
     #error "unsupported C compiler"
 #endif
+
+/**
+ * Fails the current test case with the given message, file, function and line information.
+ * Can be used to fail from outside of the test functions, if necessary.
+ * The tested library can override the assertion macro to use this function to seamlessly integrate with the test framework.
+ * @param message The message to fail with.
+ * @param file The file where the failure happened.
+ * @param function The function where the failure happened.
+ * @param line The line number where the failure happened.
+ */
+CTEST_DEF void ctest_fail(char const* message, char const* file, char const* function, int line);
 
 /**
  * Registers the given test case in the given test suite.
@@ -257,6 +266,16 @@ extern "C" {
 #endif
 
 CTest_Suite __ctest_default_suite;
+CTest_Execution* __ctest_ctx;
+
+void ctest_fail(char const* message, char const* file, char const* function, int line) {
+    __ctest_ctx->passed = false;
+    __ctest_ctx->fail_info.message = message;
+    __ctest_ctx->fail_info.file = file;
+    __ctest_ctx->fail_info.function = function;
+    __ctest_ctx->fail_info.line = line;
+    longjmp(__ctest_ctx->jmp_env, 1);
+}
 
 void ctest_register_case(CTest_Suite* suite, CTest_Case testCase) {
     if (suite->length + 1 > suite->capacity) {
@@ -319,8 +338,12 @@ CTest_Execution ctest_run_case(CTest_Case const* testCase) {
         // By default, tests are passing until an assertion fail happens
         .passed = true,
     };
-    // Actually run it
-    testCase->test_fn(&execution);
+    if (setjmp(execution.jmp_env) == 0) {
+        // Set up environment
+        __ctest_ctx = &execution;
+        // Actually run it
+        testCase->test_fn();
+    }
     return execution;
 }
 
@@ -351,7 +374,7 @@ void ctest_print_report(CTest_Report report) {
     printf("  Failing cases (%zu):\n", report.failing.length);
     for (size_t i = 0; i < report.failing.length; ++i) {
         CTest_Execution execution = report.failing.cases[i];
-        printf("    - %s: %s (file: %s, line: %d)\n", execution.test_case->name, execution.fail_message, execution.fail_file, execution.fail_line);
+        printf("    - %s: %s (file: %s, function: %s, line: %d)\n", execution.test_case->name, execution.fail_info.message, execution.fail_info.file, execution.fail_info.function, execution.fail_info.line);
     }
     if (report.failing.length == 0) {
         printf(" Success!\n");
@@ -427,7 +450,7 @@ int main(int argc, char* argv[]) {
 typedef struct ExpectedTestCase {
     size_t runCount;
     bool shouldPass;
-    void(*test_fn)(CTest_Execution*);
+    void(*test_fn)(void);
     char const* name;
 } ExpectedTestCase;
 
@@ -454,14 +477,14 @@ ExpectedTestCase expectedCases[] = {
 #undef EXPECTED_CASE
 };
 
-CTest_Case const* find_test_case_in_suite_by_function(CTest_Suite suite, void(*testFn)(CTest_Execution*)) {
+CTest_Case const* find_test_case_in_suite_by_function(CTest_Suite suite, void(*testFn)(void)) {
     for (size_t i = 0; i < suite.length; ++i) {
         if (suite.cases[i].test_fn == testFn) return &suite.cases[i];
     }
     return NULL;
 }
 
-CTest_Execution* find_test_execution_in_report_by_function(CTest_Report report, void(*testFn)(CTest_Execution*)) {
+CTest_Execution* find_test_execution_in_report_by_function(CTest_Report report, void(*testFn)(void)) {
     for (size_t i = 0; i < report.passing.length; ++i) {
         if (report.passing.cases[i].test_case->test_fn == testFn) {
             return &report.passing.cases[i];
