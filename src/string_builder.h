@@ -14,7 +14,7 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
-// TODO: Includes
+#include <stddef.h>
 
 #ifdef STRING_BUILDER_STATIC
     #define STRING_BUILDER_DEF static
@@ -33,7 +33,21 @@
 extern "C" {
 #endif
 
-// TODO: API declarations
+typedef struct StringBuilder {
+    char* buffer;
+    size_t length;
+    size_t capacity;
+} StringBuilder;
+
+STRING_BUILDER_DEF void string_builder_ensure_capacity(StringBuilder* sb, size_t capacity);
+STRING_BUILDER_DEF char* string_builder_build(StringBuilder* sb);
+STRING_BUILDER_DEF void string_builder_free(StringBuilder* sb);
+STRING_BUILDER_DEF void string_builder_clear(StringBuilder* sb);
+
+STRING_BUILDER_DEF void string_builder_puts(StringBuilder* sb, char const* str);
+STRING_BUILDER_DEF void string_builder_putsn(StringBuilder* sb, char const* str, size_t n);
+STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
+STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* format, ...);
 
 #ifdef __cplusplus
 }
