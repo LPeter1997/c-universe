@@ -316,7 +316,8 @@ void code_builder_format(CodeBuilder* cb, char const* format, ...) {
 void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     // Each line is indented separately, so we format into a temporary buffer first, then putsn that buffer
     int formattedLength = vsnprintf(NULL, 0, format, args);
-    char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (formattedLength + 1));
+    STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
+    char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * ((size_t)formattedLength + 1));
     STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
     code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
@@ -646,6 +647,95 @@ CTEST_CASE(string_builder_repeated_clear_and_build) {
     string_builder_puts(&sb, "final");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "final"));
     string_builder_free(&sb);
+}
+
+// Code builder tests //////////////////////////////////////////////////////////
+
+CTEST_CASE(code_builder_no_indent_at_level_zero) {
+    CodeBuilder cb = { 0 };
+    code_builder_puts(&cb, "hello");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "hello") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_indents_on_fresh_buffer) {
+    CodeBuilder cb = { 0 };
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "line1\nline2");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "    line1\n    line2") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_nested_indentation) {
+    CodeBuilder cb = { 0 };
+    code_builder_puts(&cb, "func {\n");
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "body;\n");
+    code_builder_dedent(&cb);
+    code_builder_puts(&cb, "}");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "func {\n    body;\n}") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_format_with_indent) {
+    CodeBuilder cb = { 0 };
+    code_builder_indent(&cb);
+    code_builder_format(&cb, "x = %d;\ny = %d;", 1, 2);
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "    x = 1;\n    y = 2;") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_multiple_indent_levels) {
+    CodeBuilder cb = { 0 };
+    code_builder_puts(&cb, "a\n");
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "b\n");
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "c");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "a\n    b\n        c") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_custom_indent_string) {
+    CodeBuilder cb = { .indent_str = "\t" };
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "a\nb");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "\ta\n\tb") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_crlf_handling) {
+    CodeBuilder cb = { 0 };
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "line1\r\nline2");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "    line1\r\n    line2") == 0);
+    free(result);
+    code_builder_free(&cb);
+}
+
+CTEST_CASE(code_builder_clear_preserves_indent_level) {
+    CodeBuilder cb = { 0 };
+    code_builder_indent(&cb);
+    code_builder_puts(&cb, "test");
+    code_builder_clear(&cb);
+    code_builder_puts(&cb, "new\nline");
+    char* result = code_builder_to_cstr(&cb);
+    CTEST_ASSERT_TRUE(strcmp(result, "    new\n    line") == 0);
+    free(result);
+    code_builder_free(&cb);
 }
 
 #endif /* STRING_BUILDER_SELF_TEST */
