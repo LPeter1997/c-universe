@@ -582,6 +582,8 @@ int main(void) {
 #ifdef CTEST_EXAMPLE
 #undef CTEST_EXAMPLE
 
+#include <assert.h>
+
 // This example relies on the built-in main program provided by the library to implement a very simple test runner.
 
 #define CTEST_IMPLEMENTATION
@@ -589,10 +591,22 @@ int main(void) {
 #define CTEST_MAIN
 #include "ctest.h"
 
+// Library code ////////////////////////////////////////////////////////////////
+
+// Let's say the library is aware that it can be tested and we want to seamlessly integrate its native assertions
+// with the test framework's, this is how we could do that
+#ifdef CTEST_H
+    #undef assert
+    #define assert CTEST_NATIVE_ASSERT
+#endif
+
 int factorial(int n) {
+    assert(n >= 0);
     if (n == 0) return 1;
     return n * factorial(n - 1);
 }
+
+// Test code ///////////////////////////////////////////////////////////////////
 
 CTEST_CASE(factorial_of_zero) {
     CTEST_ASSERT_TRUE(factorial(0) == 1);
@@ -600,6 +614,11 @@ CTEST_CASE(factorial_of_zero) {
 
 CTEST_CASE(factorial_of_positive) {
     CTEST_ASSERT_TRUE(factorial(5) == 120);
+}
+
+CTEST_CASE(factorial_of_negative) {
+    // This will cause an assertion failure in the factorial function, which will be caught by the test framework and reported as a test failure
+    factorial(-1);
 }
 
 #endif /* CTEST_EXAMPLE */
