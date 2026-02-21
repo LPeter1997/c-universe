@@ -1074,7 +1074,11 @@ char* argparse_format(char const* format, ...) {
 }
 
 char* argparse_vformat(char const* format, va_list args) {
-    int length = vsnprintf(NULL, 0, format, args);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int length = vsnprintf(NULL, 0, format, args_copy);
+    ARGPARSE_ASSERT(length >= 0, "failed to compute length of formatted string");
+    va_end(args_copy);
     char* buffer = (char*)ARGPARSE_REALLOC(NULL, (size_t)length + 1);
     ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
     vsnprintf(buffer, (size_t)length + 1, format, args);

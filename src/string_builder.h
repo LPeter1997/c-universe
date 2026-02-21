@@ -232,7 +232,10 @@ void string_builder_format(StringBuilder* sb, char const* format, ...) {
 }
 
 void string_builder_vformat(StringBuilder* sb, char const* format, va_list args) {
-    int formattedLength = vsnprintf(NULL, 0, format, args);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int formattedLength = vsnprintf(NULL, 0, format, args_copy);
+    va_end(args_copy);
     string_builder_reserve(sb, sb->length + (size_t)formattedLength);
     vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
     sb->length += (size_t)formattedLength;
@@ -316,7 +319,10 @@ void code_builder_format(CodeBuilder* cb, char const* format, ...) {
 
 void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     // Each line is indented separately, so we format into a temporary buffer first, then putsn that buffer
-    int formattedLength = vsnprintf(NULL, 0, format, args);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int formattedLength = vsnprintf(NULL, 0, format, args_copy);
+    va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
     char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * ((size_t)formattedLength + 1));
     STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
