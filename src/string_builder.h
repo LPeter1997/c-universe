@@ -60,21 +60,50 @@ STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* for
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef STRING_BUILDER_IMPLEMENTATION
 
-// TODO: Includes
+#include <assert.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-// TODO: Local helper macro definitions
+#define STRING_BUILDER_ASSERT(condition, message) assert(((void)message, condition))
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// TODO: implementation
+void string_builder_reserve(StringBuilder* sb, size_t capacity) {
+    if (capacity <= sb->capacity) return;
+
+    size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
+    while (newCapacity < capacity) newCapacity *= 2;
+    char* newBuffer = (char*)STRING_BUILDER_REALLOC(sb->buffer, sizeof(char) * newCapacity);
+    STRING_BUILDER_ASSERT(newBuffer != NULL, "failed to allocate memory for string builder");
+    sb->buffer = newBuffer;
+    sb->capacity = newCapacity;
+}
+
+char* string_builder_to_cstr(StringBuilder* sb) {
+    char* cstr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (sb->length + 1));
+    STRING_BUILDER_ASSERT(cstr != NULL, "failed to allocate memory for cstring from string builder");
+    memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
+    cstr[sb->length] = '\0';
+    return cstr;
+}
+
+void string_builder_free(StringBuilder* sb);
+void string_builder_clear(StringBuilder* sb);
+
+void string_builder_puts(StringBuilder* sb, char const* str);
+void string_builder_putsn(StringBuilder* sb, char const* str, size_t n);
+void string_builder_putc(StringBuilder* sb, char c);
+void string_builder_format(StringBuilder* sb, char const* format, ...);
 
 #ifdef __cplusplus
 }
 #endif
 
-// TODO: Cleanup local helper macro definitions
+#undef STRING_BUILDER_ASSERT
 
 #endif /* STRING_BUILDER_IMPLEMENTATION */
 
