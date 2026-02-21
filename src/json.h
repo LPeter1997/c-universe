@@ -152,12 +152,17 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 #ifdef JSON_IMPLEMENTATION
 
 #include <assert.h>
+#include <ctype.h>
 
 #define JSON_ASSERT(condition, message) assert(((void)message, condition))
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+static bool json_isident(char c) {
+    return isalpha(c) || isdigit(c) || c == '_';
+}
 
 static char* json_strdup(char const* str) {
     size_t length = strlen(str);
@@ -166,6 +171,112 @@ static char* json_strdup(char const* str) {
     memcpy(copy, str, length * sizeof(char));
     copy[length] = '\0';
     return copy;
+}
+
+static char* json_format(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int length = vsnprintf(NULL, 0, format, args_copy);
+    JSON_ASSERT(length >= 0, "failed to compute length of formatted string");
+    va_end(args_copy);
+    char* buffer = (char*)JSON_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
+    JSON_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
+    vsnprintf(buffer, (size_t)length + 1, format, args);
+    va_end(args);
+    return buffer;
+}
+
+// Parsing /////////////////////////////////////////////////////////////////////
+
+typedef struct Json_Parser {
+    char const* text;
+    size_t length;
+    size_t index;
+    size_t line;
+    size_t column;
+    Json_Sax sax;
+    Json_Options options;
+    void* user_data;
+} Json_Parser;
+
+static void json_parser_report_error(Json_Parser* parser, char const* message) {
+    if (parser->sax.on_error == NULL) {
+        JSON_FREE(message);
+        return;
+    }
+    Json_Error error = {
+        .message = message,
+        .line = parser->line,
+        .column = parser->column,
+        .index = parser->index,
+    };
+    parser->sax.on_error(parser->user_data, error);
+}
+
+static char json_parser_peek(Json_Parser* parser, size_t offset, char def) {
+    if (parser->index + offset >= parser->length) return def;
+    return parser->text[parser->index + offset];
+}
+
+static void json_parser_skip_whitespace(Json_Parser* parser) {
+    while (parser->index < parser->length) {
+        char c = parser->text[parser->index];
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+
+        if (c == '\r') {
+            if (json_parser_peek(parser, 1, '\0') == '\n') {
+                // Windows-style newline
+                parser->index += 2;
+            }
+            else {
+                // OSX-style newline
+                ++parser->index;
+            }
+            ++parser->line;
+            parser->column = 0;
+        }
+        else if (c == '\n') {
+            // Unix-style newline
+            ++parser->index;
+            ++parser->line;
+            parser->column = 0;
+        }
+        else {
+            ++parser->index;
+            ++parser->column;
+        }
+    }
+}
+
+static Json_Value json_parse_value(Json_Parser* parser) {
+    json_parser_skip_whitespace(parser);
+    char c = json_parser_peek(parser, 0, '\0');
+    if (c == '{') {
+
+    }
+    else if (c == '[') {
+
+    }
+    else if (c == '"') {
+
+    }
+    else if (isdigit(c) || c == '-') {
+
+    }
+    else if (json_isident(c)) {
+
+    }
+    else {
+        char* message = json_format("unexpected character '%c' while parsing value", c);
+        json_parser_report_error(parser, message);
+        return json_null();
+    }
+}
+
+void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* user_data) {
+
 }
 
 // Value constructors //////////////////////////////////////////////////////////
