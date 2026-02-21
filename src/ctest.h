@@ -61,6 +61,8 @@ typedef struct CTest_Case {
     char const* name;
     // The test function that gets executed when this case is ran
     void(*test_fn)(void);
+    // If true, the test case is expected to fail
+    bool should_fail;
 } CTest_Case;
 
 /**
@@ -169,17 +171,18 @@ extern CTest_Execution* __ctest_ctx;
 /**
  * Defines a test case with the given identifier as a name.
  * @param n The identifier to use as the test case name.
+ * @param ... Any extra configuration passed onto the test case.
  */
-#define CTEST_CASE(n) \
+#define CTEST_CASE(n, ...) \
 static void n(void); \
-__CTEST_AUTOREGISTER_CASE(n) \
+__CTEST_AUTOREGISTER_CASE(n, __VA_ARGS__) \
 void n(void)
 
 #if defined(__GNUC__) || defined(__clang__)
-    #define __CTEST_AUTOREGISTER_CASE(n) \
+    #define __CTEST_AUTOREGISTER_CASE(n, ...) \
     __attribute__((constructor)) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, __VA_ARGS__ }); \
     }
 #elif defined(_MSC_VER)
     #ifdef _WIN64
@@ -189,12 +192,12 @@ void n(void)
     #endif
 
     #pragma section(".CRT$XCU",read)
-    #define __CTEST_AUTOREGISTER_CASE(n) \
+    #define __CTEST_AUTOREGISTER_CASE(n, ...) \
     static void __ctest_register_ ## n(void); \
     __declspec(allocate(".CRT$XCU")) void (*__ctest_register_ ## n ## _)(void) = __ctest_register_ ## n; \
     __pragma(comment(linker,"/include:" __CTEST_LINKER_PREFIX "__ctest_register_" #n "_")) \
     static void __ctest_register_ ## n(void) { \
-        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n }); \
+        ctest_register_case(&__ctest_default_suite, (CTest_Case){ .name = #n, .test_fn = n, __VA_ARGS__ }); \
     }
 #else
     #error "unsupported C compiler"
@@ -356,6 +359,22 @@ CTest_Execution ctest_run_case(CTest_Case const* testCase) {
         __ctest_ctx = &execution;
         // Actually run it
         testCase->test_fn();
+        // If we got here but the test case was expected to fail, it means that it didn't fail as expected, so we mark it as a failure
+        if (testCase->should_fail) {
+            execution.passed = false;
+            execution.fail_info.message = "test case was expected to fail, but it passed";
+            execution.fail_info.function = testCase->name;
+        }
+    }
+    else {
+        // If we are here, it means that a failure happened and longjmp was called to jump back to the setjmp point
+        if (testCase->should_fail) {
+            // If the test case was expected to fail, we consider it a pass instead, since it failed as expected
+            execution.passed = true;
+        }
+        else {
+            // Actual failure
+        }
     }
     return execution;
 }
@@ -616,7 +635,7 @@ CTEST_CASE(factorial_of_positive) {
     CTEST_ASSERT_TRUE(factorial(5) == 120);
 }
 
-CTEST_CASE(factorial_of_negative) {
+CTEST_CASE(factorial_of_negative, .should_fail = true) {
     // This will cause an assertion failure in the factorial function, which will be caught by the test framework and reported as a test failure
     factorial(-1);
 }
