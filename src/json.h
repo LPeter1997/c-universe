@@ -164,6 +164,22 @@ static bool json_isident(char c) {
     return isalpha(c) || isdigit(c) || c == '_';
 }
 
+static bool json_isxdigit(char ch, int* out_value) {
+    if (ch >= '0' && ch <= '9') {
+        *out_value = ch - '0';
+        return true;
+    }
+    else if (ch >= 'a' && ch <= 'f') {
+        *out_value = 10 + (ch - 'a');
+        return true;
+    }
+    else if (ch >= 'A' && ch <= 'F') {
+        *out_value = 10 + (ch - 'A');
+        return true;
+    }
+    return false;
+}
+
 static char* json_strdup(char const* str) {
     size_t length = strlen(str);
     char* copy = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
@@ -299,24 +315,39 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
     }
 }
 
+// TODO: RETHINK THIS METHOD, IT'S AN ABSOLUTE CATASTROPHE
 // NOTE: Does not actually advance the parser, when buffer is NULL
 // This is so the user of this call can first compute the required buffer size, then allocate, then call again to fill the buffer
 static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, size_t bufferSize) {
+    size_t parserOffset = 0;
     // Skip opening quote
-    if (!json_parser_expect_char(parser, '"')) return 0;
+    if (json_parser_peek(parser, parserOffset, '\0') != '"') {
+        char* message = json_format("expected '\"' at the start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+        json_parser_report_error(parser, message);
+        return 0;
+    }
+
+    // Only advance, if buffer is not NULL
+    if (buffer != NULL) {
+        json_parser_advance(parser, 1);
+    }
+    else {
+        ++parserOffset;
+    }
 
     size_t bufferIndex = 0;
-    while (parser->index < parser->length) {
-        char ch = parser->text[parser->index];
+    while (parser->index + parserOffset < parser->length) {
+        char ch = parser->text[parser->index + parserOffset];
         if (ch == '"') break;
         if (ch != '\\') {
             // Normal character
             if (buffer != NULL) {
                 JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
+                json_parser_advance(parser, 1);
                 buffer[bufferIndex] = ch;
             }
+            ++parserOffset;
             ++bufferIndex;
-            json_parser_advance(parser, 1);
             continue;
         }
         // Escape sequence
