@@ -188,6 +188,37 @@ static char* json_format(const char* format, ...) {
     return buffer;
 }
 
+static size_t json_utf8_encode(uint32_t cp, char out[4]) {
+    if (cp <= 0x7F) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    else if (cp <= 0x7FF) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    else if (cp <= 0xFFFF) {
+        // exclude UTF-16 surrogate range
+        if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    else if (cp <= 0x10FFFF) {
+        out[0] = (char)(0xF0 | (cp >> 18));
+        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+
+    // invalid Unicode code point
+    return 0;
+}
+
 // Parsing /////////////////////////////////////////////////////////////////////
 
 typedef struct Json_Parser {
