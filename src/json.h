@@ -16,6 +16,7 @@
 #ifndef JSON_H
 #define JSON_H
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -136,6 +137,9 @@ JSON_DEF void json_array_append(Json_Value* array, Json_Value value);
 JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
 JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
 JSON_DEF void json_array_remove(Json_Value* array, size_t index);
+
+JSON_DEF char* json_format(char const* format, ...);
+JSON_DEF char* json_vformat(char const* format, va_list args);
 
 #ifdef __cplusplus
 }
