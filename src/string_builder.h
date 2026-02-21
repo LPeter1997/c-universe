@@ -39,8 +39,8 @@ typedef struct StringBuilder {
     size_t capacity;
 } StringBuilder;
 
-STRING_BUILDER_DEF void string_builder_ensure_capacity(StringBuilder* sb, size_t capacity);
-STRING_BUILDER_DEF char* string_builder_build(StringBuilder* sb);
+STRING_BUILDER_DEF void string_builder_reserve(StringBuilder* sb, size_t capacity);
+STRING_BUILDER_DEF char* string_builder_to_cstr(StringBuilder* sb);
 STRING_BUILDER_DEF void string_builder_free(StringBuilder* sb);
 STRING_BUILDER_DEF void string_builder_clear(StringBuilder* sb);
 
