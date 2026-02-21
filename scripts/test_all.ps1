@@ -26,6 +26,9 @@ function Compile-And-Run {
         [Parameter(Mandatory=$false)]
         [switch]$AllowUnusedParameters,
 
+        [Parameter(Mandatory=$false)]
+        [switch]$AllowUnusedFunctions,
+
         [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
         [string[]]$RunArgs = @()
     )
@@ -39,6 +42,7 @@ function Compile-And-Run {
         -Defines $Defines `
         -Output $Output `
         -AllowUnusedParameters:$AllowUnusedParameters `
+        -AllowUnusedFunctions:$AllowUnusedFunctions `
         -RunArgs $RunArgs
 }
 
@@ -84,7 +88,8 @@ Write-Host "running self-test for StringBuilder library..."
 Compile-And-Run `
     -Sources @("../src/string_builder.h") `
     -Defines @("STRING_BUILDER_STATIC", "STRING_BUILDER_IMPLEMENTATION", "STRING_BUILDER_SELF_TEST") `
-    -AllowUnusedParameters
+    -AllowUnusedParameters `
+    -AllowUnusedFunctions
 Write-Host "running example for StringBuilder library..."
 Compile-And-Run `
     -Sources @("../src/string_builder.h") `

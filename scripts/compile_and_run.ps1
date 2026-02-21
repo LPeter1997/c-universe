@@ -26,6 +26,9 @@ param(
     [Parameter(Mandatory=$false)]
     [switch]$AllowUnusedParameters,
 
+    [Parameter(Mandatory=$false)]
+    [switch]$AllowUnusedFunctions,
+
     [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
     [string[]]$RunArgs = @()
 )
@@ -74,6 +77,10 @@ function Compile {
         if ($AllowUnusedParameters) {
             $Args += "/wd4100"
         }
+        # Disable unused functions warnings if requested
+        if ($AllowUnusedFunctions) {
+            $Args += "/wd4505"
+        }
         # Add each define as a separate /D flag
         foreach ($def in $Defines) {
             $Args += "/D$def"
@@ -98,6 +105,10 @@ function Compile {
         # Disable unused params warnings if requested
         if ($AllowUnusedParameters) {
             $Args += "-Wno-unused-parameter"
+        }
+        # Disable unused functions warnings if requested
+        if ($AllowUnusedFunctions) {
+            $Args += "-Wno-unused-function"
         }
         # Add each define as a separate -D flag
         foreach ($def in $Defines) {
