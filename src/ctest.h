@@ -170,8 +170,7 @@ extern CTest_Execution* __ctest_ctx;
 
 /**
  * Defines a test case with the given identifier as a name.
- * @param n The identifier to use as the test case name.
- * @param ... Any extra configuration passed onto the test case.
+ * @param ... First the function identifier, followed by any extra configuration passed onto the test case.
  */
 #define CTEST_CASE(...) __CTEST_CASE_IMPL(__VA_ARGS__,)
 #define __CTEST_CASE_IMPL(n, ...) \
