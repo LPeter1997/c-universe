@@ -79,6 +79,8 @@ typedef enum Json_ValueType {
     JSON_VALUE_OBJECT,
 } Json_ValueType;
 
+struct Json_HashBucket;
+
 typedef struct Json_Value {
     Json_ValueType type;
     union {
@@ -92,10 +94,10 @@ typedef struct Json_Value {
             size_t capacity;
         } array_value;
         struct {
-            char const** keys;
-            Json_Value* values;
+            struct Json_HashBucket* buckets;
             size_t length;
             size_t capacity;
+            size_t entry_count;
         } object_value;
     };
 } Json_Value;
