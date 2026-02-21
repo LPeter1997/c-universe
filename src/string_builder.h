@@ -42,20 +42,70 @@
 extern "C" {
 #endif
 
+/**
+ * A simple dynamic string builder.
+ */
 typedef struct StringBuilder {
     char* buffer;
     size_t length;
     size_t capacity;
 } StringBuilder;
 
+/**
+ * Ensures the builder has at least the given capacity, growing it if needed.
+ * @param sb The string builder to reserve capacity for.
+ * @param capacity The minimum capacity to ensure.
+ */
 STRING_BUILDER_DEF void string_builder_reserve(StringBuilder* sb, size_t capacity);
+
+/**
+ * Converts the current content of the builder to a null-terminated C string.
+ * The returned string is heap-allocated and must be freed by the caller.
+ * @param sb The string builder to convert.
+ * @return A null-terminated C string with the current content of the builder.
+ */
 STRING_BUILDER_DEF char* string_builder_to_cstr(StringBuilder* sb);
+
+/**
+ * Frees the memory allocated for the builder and resets its state.
+ * @param sb The string builder to free.
+ */
 STRING_BUILDER_DEF void string_builder_free(StringBuilder* sb);
+
+/**
+ * Clears the content of the builder without freeing the allocated buffer.
+ * @param sb The string builder to clear.
+ */
 STRING_BUILDER_DEF void string_builder_clear(StringBuilder* sb);
 
+/**
+ * Appends a null-terminated string to the builder.
+ * @param sb The string builder to append to.
+ * @param str The null-terminated string to append.
+ */
 STRING_BUILDER_DEF void string_builder_puts(StringBuilder* sb, char const* str);
+
+/**
+ * Appends a string with the given length to the builder.
+ * @param sb The string builder to append to.
+ * @param str The string to append, not necessarily null-terminated.
+ * @param n The length of the string to append.
+ */
 STRING_BUILDER_DEF void string_builder_putsn(StringBuilder* sb, char const* str, size_t n);
+
+/**
+ * Appends a single character to the builder.
+ * @param sb The string builder to append to.
+ * @param c The character to append.
+ */
 STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
+
+/**
+ * Appends formatted content to the builder, similar to printf.
+ * @param sb The string builder to append to.
+ * @param format The format string, similar to printf.
+ * @param ... The arguments for the format string.
+ */
 STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* format, ...);
 
 #ifdef __cplusplus
