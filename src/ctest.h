@@ -174,6 +174,7 @@ extern CTest_Execution* __ctest_ctx;
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+#pragma GCC diagnostic ignored "-Werror"
 #endif
 
 /**
