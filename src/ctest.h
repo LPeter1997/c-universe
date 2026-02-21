@@ -146,6 +146,17 @@ extern CTest_Execution* __ctest_ctx;
 #define CTEST_ASSERT_FAIL(message) ctest_fail(message, __FILE__, __func__, __LINE__)
 
 /**
+ * An assert that can be used to override the tested library's assertion macro to seamlessly integrate with the test framework,
+ * and fail the current test case with a message containing the failed assertion if the condition is false.
+ */
+#define CTEST_NATIVE_ASSERT(...) \
+    do { \
+        if (!(__VA_ARGS__)) { \
+            CTEST_ASSERT_FAIL("native assertion " #__VA_ARGS__ " failed"); \
+        } \
+    } while (false)
+
+/**
  * Asserts that the given condition is true, and fails the current test case with a message containing the condition if it is false.
  */
 #define CTEST_ASSERT_TRUE(...) \
