@@ -254,19 +254,19 @@ static Json_Value json_parse_value(Json_Parser* parser) {
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
     if (c == '{') {
-
+        // TODO: Parse object
     }
     else if (c == '[') {
-
+        // TODO: Parse array
     }
     else if (c == '"') {
-
+        // TODO: Parse string
     }
     else if (isdigit(c) || c == '-') {
-
+        // TODO: Parse number (int or double)
     }
     else if (json_isident(c)) {
-
+        // TODO: Parse an identifier, match to true/false/null
     }
     else {
         char* message = json_format("unexpected character '%c' while parsing value", c);
