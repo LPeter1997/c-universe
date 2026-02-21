@@ -250,6 +250,101 @@ static void json_parser_skip_whitespace(Json_Parser* parser) {
     }
 }
 
+static void json_parser_advance(Json_Parser* parser, size_t count) {
+    parser->index += count;
+    parser->column += count;
+}
+
+static bool json_parser_expect_char(Json_Parser* parser, char expected) {
+    char c = json_parser_peek(parser, 0, '\0');
+    if (c == expected) {
+        json_parser_advance(parser, 1);
+        return true;
+    }
+    else {
+        char* message = json_format("expected character '%c', but got '%c'", expected, c);
+        json_parser_report_error(parser, message);
+        return false;
+    }
+}
+
+// NOTE: Does not actually advance the parser, when buffer is NULL
+// This is so the user of this call can first compute the required buffer size, then allocate, then call again to fill the buffer
+static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, size_t bufferSize) {
+    // Skip opening quote
+    if (!json_parser_expect_char(parser, '"')) return 0;
+
+    size_t bufferIndex = 0;
+    while (parser->index < parser->length) {
+        char ch = parser->text[parser->index];
+        if (ch == '"') break;
+        if (ch != '\\') {
+            // Normal character
+            if (buffer != NULL) {
+                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
+                buffer[bufferIndex] = ch;
+            }
+            ++bufferIndex;
+            json_parser_advance(parser, 1);
+            continue;
+        }
+        // Escape sequence
+        json_parser_advance(parser, 1);
+        char escaped = json_parser_peek(parser, 0, '\0');
+        char unescaped = '\0';
+        switch (escaped) {
+        case '"': unescaped = '"'; break;
+        case '\\': unescaped = '\\'; break;
+        case '/': unescaped = '/'; break;
+        case 'b': unescaped = '\b'; break;
+        case 'f': unescaped = '\f'; break;
+        case 'n': unescaped = '\n'; break;
+        case 'r': unescaped = '\r'; break;
+        case 't': unescaped = '\t'; break;
+        }
+        if (unescaped != '\0') {
+            // Simple escape sequence
+            if (buffer != NULL) {
+                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
+                buffer[bufferIndex] = unescaped;
+            }
+            ++bufferIndex;
+            continue;
+        }
+        // Unicode codepoint escape sequence
+        if (escaped == 'u') {
+            // TODO
+            continue;
+        }
+        // Invalid escape sequence
+        char* message = json_format("invalid escape sequence '\\%c' in string value", escaped);
+        json_parser_report_error(parser, message);
+        // We add the unescaped substring to best approximate the error
+        if (buffer != NULL) {
+            JSON_ASSERT(bufferIndex + 1 < bufferSize, "buffer overflow while parsing string value");
+            buffer[bufferIndex] = '\\';
+            buffer[bufferIndex + 1] = escaped;
+        }
+        bufferIndex += 2;
+    }
+
+    return bufferIndex;
+}
+
+static Json_Value json_parse_string_value(Json_Parser* parser) {
+    size_t bufferSize = json_parse_string_value_impl(parser, NULL, 0);
+    if (bufferSize == 0) return json_string("");
+    char* buffer = (char*)JSON_REALLOC(NULL, (bufferSize + 1) * sizeof(char));
+    JSON_ASSERT(buffer != NULL, "failed to allocate memory for parsed string value");
+    json_parse_string_value_impl(parser, buffer, bufferSize);
+    buffer[bufferSize] = '\0';
+    // NOTE: we don't use json_string here as we already have an owned string
+    return (Json_Value){
+        .type = JSON_VALUE_STRING,
+        .string_value = buffer,
+    };
+}
+
 static Json_Value json_parse_value(Json_Parser* parser) {
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
@@ -260,7 +355,7 @@ static Json_Value json_parse_value(Json_Parser* parser) {
         // TODO: Parse array
     }
     else if (c == '"') {
-        // TODO: Parse string
+        return json_parse_string_value(parser);
     }
     else if (isdigit(c) || c == '-') {
         // TODO: Parse number (int or double)
