@@ -171,6 +171,9 @@ extern CTest_Execution* __ctest_ctx;
 #ifdef __clang__
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#elif defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wvariadic-macros"
 #endif
 
 /**
@@ -207,8 +210,11 @@ void n(void)
 #else
     #error "unsupported C compiler"
 #endif
+
 #ifdef __clang__
     #pragma clang diagnostic pop
+#elif defined(__GNUC__)
+    #pragma GCC diagnostic pop
 #endif
 
 /**
