@@ -46,8 +46,11 @@ extern "C" {
  * A simple dynamic string builder.
  */
 typedef struct StringBuilder {
+    // The buffer containing the string content, not necessarily null-terminated
     char* buffer;
+    // The current length of the string content in the buffer
     size_t length;
+    // The total capacity of the buffer
     size_t capacity;
 } StringBuilder;
 
@@ -108,6 +111,30 @@ STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
  */
 STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* format, ...);
 
+/**
+ * Utility for building code with indentation, using an underlying string builder.
+ * Useful for code generation where the goal is producing a somewhat nicely formatted output.
+ */
+typedef struct CodeBuilder {
+    // The underlying string builder for the code content
+    StringBuilder builder;
+    // The current indentation level
+    size_t indent_level;
+    // The indentation string
+    char const* indent_str;
+} CodeBuilder;
+
+STRING_BUILDER_DEF void code_builder_reserve(CodeBuilder* cb, size_t capacity);
+STRING_BUILDER_DEF char* code_builder_to_cstr(CodeBuilder* cb);
+STRING_BUILDER_DEF void code_builder_free(CodeBuilder* cb);
+STRING_BUILDER_DEF void code_builder_clear(CodeBuilder* cb);
+STRING_BUILDER_DEF void code_builder_puts(CodeBuilder* cb, char const* str);
+STRING_BUILDER_DEF void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n);
+STRING_BUILDER_DEF void code_builder_putc(CodeBuilder* cb, char c);
+STRING_BUILDER_DEF void code_builder_format(CodeBuilder* cb, char const* format, ...);
+STRING_BUILDER_DEF void code_builder_indent(CodeBuilder* cb);
+STRING_BUILDER_DEF void code_builder_dedent(CodeBuilder* cb);
+
 #ifdef __cplusplus
 }
 #endif
@@ -130,6 +157,8 @@ STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* for
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// String builder //////////////////////////////////////////////////////////////
 
 void string_builder_reserve(StringBuilder* sb, size_t capacity) {
     if (capacity <= sb->capacity) return;
@@ -190,6 +219,19 @@ void string_builder_format(StringBuilder* sb, char const* format, ...) {
     va_end(args);
     sb->length += (size_t)formattedLength;
 }
+
+// Code builder ////////////////////////////////////////////////////////////////
+
+void code_builder_reserve(CodeBuilder* cb, size_t capacity);
+char* code_builder_to_cstr(CodeBuilder* cb);
+void code_builder_free(CodeBuilder* cb);
+void code_builder_clear(CodeBuilder* cb);
+void code_builder_puts(CodeBuilder* cb, char const* str);
+void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n);
+void code_builder_putc(CodeBuilder* cb, char c);
+void code_builder_format(CodeBuilder* cb, char const* format, ...);
+void code_builder_indent(CodeBuilder* cb);
+void code_builder_dedent(CodeBuilder* cb);
 
 #ifdef __cplusplus
 }
