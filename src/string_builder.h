@@ -23,6 +23,7 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include <stdarg.h>
 #include <stddef.h>
 
 #ifdef STRING_BUILDER_STATIC
@@ -112,6 +113,14 @@ STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
 STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* format, ...);
 
 /**
+ * Same as @see string_builder_format but takes a va_list instead of variadic arguments.
+ * @param sb The string builder to append to.
+ * @param format The format string, similar to printf.
+ * @param args The va_list of arguments for the format string.
+ */
+STRING_BUILDER_DEF void string_builder_vformat(StringBuilder* sb, char const* format, va_list args);
+
+/**
  * Utility for building code with indentation, using an underlying string builder.
  * Useful for code generation where the goal is producing a somewhat nicely formatted output.
  */
@@ -132,6 +141,7 @@ STRING_BUILDER_DEF void code_builder_puts(CodeBuilder* cb, char const* str);
 STRING_BUILDER_DEF void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n);
 STRING_BUILDER_DEF void code_builder_putc(CodeBuilder* cb, char c);
 STRING_BUILDER_DEF void code_builder_format(CodeBuilder* cb, char const* format, ...);
+STRING_BUILDER_DEF void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args);
 STRING_BUILDER_DEF void code_builder_indent(CodeBuilder* cb);
 STRING_BUILDER_DEF void code_builder_dedent(CodeBuilder* cb);
 
@@ -210,28 +220,110 @@ void string_builder_putc(StringBuilder* sb, char c) {
 void string_builder_format(StringBuilder* sb, char const* format, ...) {
     va_list args;
     va_start(args, format);
+    string_builder_vformat(sb, format, args);
+    va_end(args);
+}
+
+void string_builder_vformat(StringBuilder* sb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args);
-    va_end(args);
-    STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute length of formatted string");
     string_builder_reserve(sb, sb->length + (size_t)formattedLength);
-    va_start(args, format);
     vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
-    va_end(args);
     sb->length += (size_t)formattedLength;
 }
 
 // Code builder ////////////////////////////////////////////////////////////////
 
-void code_builder_reserve(CodeBuilder* cb, size_t capacity);
-char* code_builder_to_cstr(CodeBuilder* cb);
-void code_builder_free(CodeBuilder* cb);
-void code_builder_clear(CodeBuilder* cb);
-void code_builder_puts(CodeBuilder* cb, char const* str);
-void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n);
-void code_builder_putc(CodeBuilder* cb, char c);
-void code_builder_format(CodeBuilder* cb, char const* format, ...);
-void code_builder_indent(CodeBuilder* cb);
-void code_builder_dedent(CodeBuilder* cb);
+static void code_builder_indent_if_needed(CodeBuilder* cb) {
+    StringBuilder* sb = &cb->builder;
+    if (sb->length == 0 || sb->buffer[sb->length - 1] == '\n' || sb->buffer[sb->length - 1] == '\r') {
+        for (size_t i = 0; i < cb->indent_level; ++i) {
+            string_builder_puts(sb, cb->indent_str);
+        }
+    }
+}
+
+static size_t code_builder_line_length(char const* str, size_t maxLength) {
+    size_t i = 0;
+    while (i < maxLength) {
+        char ch = str[i];
+        if (ch == '\0') break;
+        if (ch == '\n') {
+            ++i; // Include the newline in the length
+            break;
+        }
+        if (ch == '\r') {
+            ++i; // Include the carriage return in the length
+            if (i < maxLength && str[i] == '\n') {
+                ++i; // Include the newline in the length if it's a CRLF sequence
+            }
+            break;
+        }
+        ++i;
+    }
+    return i;
+}
+
+void code_builder_reserve(CodeBuilder* cb, size_t capacity) {
+    string_builder_reserve(&cb->builder, capacity);
+}
+
+char* code_builder_to_cstr(CodeBuilder* cb) {
+    return string_builder_to_cstr(&cb->builder);
+}
+
+void code_builder_free(CodeBuilder* cb) {
+    string_builder_free(&cb->builder);
+}
+void code_builder_clear(CodeBuilder* cb) {
+    string_builder_clear(&cb->builder);
+}
+
+void code_builder_puts(CodeBuilder* cb, char const* str) {
+    size_t strLength = strlen(str);
+    code_builder_putsn(cb, str, strLength);
+}
+
+void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n) {
+    // Each line is indented separately
+    while (n > 0) {
+        size_t lineLength = code_builder_line_length(str, n);
+        code_builder_indent_if_needed(cb);
+        string_builder_putsn(&cb->builder, str, lineLength);
+        str += lineLength;
+        n -= lineLength;
+    }
+}
+
+void code_builder_putc(CodeBuilder* cb, char c) {
+    code_builder_indent_if_needed(cb);
+    string_builder_putc(&cb->builder, c);
+}
+
+void code_builder_format(CodeBuilder* cb, char const* format, ...) {
+    va_list args;
+    va_start(args, format);
+    code_builder_vformat(cb, format, args);
+    va_end(args);
+}
+
+void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
+    // Each line is indented separately, so we format into a temporary buffer first, then putsn that buffer
+    int formattedLength = vsnprintf(NULL, 0, format, args);
+    char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (formattedLength + 1));
+    STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
+    vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
+    code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
+    STRING_BUILDER_FREE(formattedStr);
+}
+
+void code_builder_indent(CodeBuilder* cb) {
+    ++cb->indent_level;
+}
+
+void code_builder_dedent(CodeBuilder* cb) {
+    STRING_BUILDER_ASSERT(cb->indent_level > 0, "cannot dedent code builder, already at indent level 0");
+    --cb->indent_level;
+}
 
 #ifdef __cplusplus
 }
