@@ -2,6 +2,8 @@
  * ctest.h is a single-header C testing framework.
  *
  * A fairly minimalistic single-header testing framework for C.
+ * If needed, the tested code can override its assertion macros to seamlessly integrate with the framework, check the
+ * self-test section or the example section at the end of this file for examples of how to do that.
  *
  * Configuration:
  *  - #define CTEST_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
