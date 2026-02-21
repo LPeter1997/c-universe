@@ -35,16 +35,16 @@
 #include <stddef.h>
 
 #ifdef CTEST_STATIC
-#   define CTEST_DEF static
+    #define CTEST_DEF static
 #else
-#   define CTEST_DEF extern
+    #define CTEST_DEF extern
 #endif
 
 #ifndef CTEST_REALLOC
-#   define CTEST_REALLOC realloc
+    #define CTEST_REALLOC realloc
 #endif
 #ifndef CTEST_FREE
-#   define CTEST_FREE free
+    #define CTEST_FREE free
 #endif
 
 #ifdef __cplusplus
