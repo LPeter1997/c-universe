@@ -42,16 +42,16 @@
 #include <stddef.h>
 
 #ifdef ARGPARSE_STATIC
-#   define ARGPARSE_DEF static
+    #define ARGPARSE_DEF static
 #else
-#   define ARGPARSE_DEF extern
+    #define ARGPARSE_DEF extern
 #endif
 
 #ifndef ARGPARSE_REALLOC
-#   define ARGPARSE_REALLOC realloc
+    #define ARGPARSE_REALLOC realloc
 #endif
 #ifndef ARGPARSE_FREE
-#   define ARGPARSE_FREE free
+    #define ARGPARSE_FREE free
 #endif
 
 #ifdef __cplusplus

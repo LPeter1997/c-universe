@@ -78,3 +78,15 @@ Compile-And-Run `
     -Defines @("ARGPARSE_EXAMPLE") `
     -AllowUnusedParameters `
     -RunArgs @("run", "--verbose", "--", "arg1", "arg2", "arg3")
+
+# 4. StringBuilder library
+Write-Host "running self-test for StringBuilder library..."
+Compile-And-Run `
+    -Sources @("../src/string_builder.h") `
+    -Defines @("STRING_BUILDER_STATIC", "STRING_BUILDER_IMPLEMENTATION", "STRING_BUILDER_SELF_TEST") `
+    -AllowUnusedParameters
+Write-Host "running example for StringBuilder library..."
+Compile-And-Run `
+    -Sources @("../src/string_builder.h") `
+    -Defines @("STRING_BUILDER_EXAMPLE") `
+    -AllowUnusedParameters
