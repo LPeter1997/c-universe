@@ -38,6 +38,7 @@
 #ifndef ARGPARSE_H
 #define ARGPARSE_H
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -268,6 +269,14 @@ ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
  * @returns A heap-allocated string containing the formatted result, will be freed by the library using ARGPARSE_FREE.
  */
 ARGPARSE_DEF char* argparse_format(char const* format, ...);
+
+/**
+ * Same as @see argparse_format but takes a va_list instead of variadic arguments.
+ * @param format The format string, followed by any additional arguments needed for formatting.
+ * @param args The va_list of arguments needed for formatting.
+ * @returns A heap-allocated string containing the formatted result, will be freed by the library using ARGPARSE_FREE.
+ */
+ARGPARSE_DEF char* argparse_vformat(char const* format, va_list args);
 
 #ifdef __cplusplus
 }
@@ -1059,13 +1068,16 @@ void argparse_free_command(Argparse_Command* command) {
 char* argparse_format(char const* format, ...) {
     va_list args;
     va_start(args, format);
-    int length = vsnprintf(NULL, 0, format, args);
+    char* result = argparse_vformat(format, args);
     va_end(args);
+    return result;
+}
+
+char* argparse_vformat(char const* format, va_list args) {
+    int length = vsnprintf(NULL, 0, format, args);
     char* buffer = (char*)ARGPARSE_REALLOC(NULL, (size_t)length + 1);
     ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
-    va_start(args, format);
     vsnprintf(buffer, (size_t)length + 1, format, args);
-    va_end(args);
     return buffer;
 }
 
