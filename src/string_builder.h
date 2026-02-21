@@ -91,13 +91,46 @@ char* string_builder_to_cstr(StringBuilder* sb) {
     return cstr;
 }
 
-void string_builder_free(StringBuilder* sb);
-void string_builder_clear(StringBuilder* sb);
+void string_builder_free(StringBuilder* sb) {
+    STRING_BUILDER_FREE(sb->buffer);
+    sb->buffer = NULL;
+    sb->length = 0;
+    sb->capacity = 0;
+}
 
-void string_builder_puts(StringBuilder* sb, char const* str);
-void string_builder_putsn(StringBuilder* sb, char const* str, size_t n);
-void string_builder_putc(StringBuilder* sb, char c);
-void string_builder_format(StringBuilder* sb, char const* format, ...);
+void string_builder_clear(StringBuilder* sb) {
+    sb->length = 0;
+}
+
+void string_builder_puts(StringBuilder* sb, char const* str) {
+    size_t strLength = strlen(str);
+    string_builder_putsn(sb, str, strLength);
+}
+
+void string_builder_putsn(StringBuilder* sb, char const* str, size_t n) {
+    string_builder_reserve(sb, sb->length + n);
+    memcpy(sb->buffer + sb->length, str, sizeof(char) * n);
+    sb->length += n;
+}
+
+void string_builder_putc(StringBuilder* sb, char c) {
+    string_builder_reserve(sb, sb->length + 1);
+    sb->buffer[sb->length] = c;
+    sb->length += 1;
+}
+
+void string_builder_format(StringBuilder* sb, char const* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int formattedLength = vsnprintf(NULL, 0, format, args);
+    va_end(args);
+    STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute length of formatted string");
+    string_builder_reserve(sb, sb->length + (size_t)formattedLength);
+    va_start(args, format);
+    vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
+    va_end(args);
+    sb->length += (size_t)formattedLength;
+}
 
 #ifdef __cplusplus
 }
@@ -111,6 +144,12 @@ void string_builder_format(StringBuilder* sb, char const* format, ...);
 // Self-testing section                                                       //
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef STRING_BUILDER_SELF_TEST
+
+// Use our own test framework
+#define CTEST_STATIC
+#define CTEST_IMPLEMENTATION
+#define CTEST_MAIN
+#include "ctest.h"
 
 // TODO
 
