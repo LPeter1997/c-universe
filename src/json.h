@@ -98,8 +98,7 @@ typedef struct Json_Value {
         } array_value;
         struct {
             struct Json_HashBucket* buckets;
-            size_t length;
-            size_t capacity;
+            size_t buckets_length;
             size_t entry_count;
         } object_value;
     };
@@ -134,7 +133,7 @@ JSON_DEF void json_document_free(Json_Document* doc);
 JSON_DEF void json_object_set(Json_Value* object, char const* key, Json_Value value);
 JSON_DEF Json_Value* json_object_get(Json_Value* object, char const* key);
 JSON_DEF bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value);
-JSON_DEF bool json_object_remove(Json_Value* object, char const* key);
+JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value);
 
 JSON_DEF void json_array_append(Json_Value* array, Json_Value value);
 JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
@@ -957,6 +956,8 @@ void json_array_append(Json_Value* array, Json_Value value) {
 void json_array_set(Json_Value* array, size_t index, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
     JSON_ASSERT(index < array->array_value.length, "attempted to set index out of bounds in array");
+    // Free old value if needed
+    json_free_value(&array->array_value.elements[index]);
     array->array_value.elements[index] = value;
 }
 
@@ -970,11 +971,22 @@ void json_array_remove(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to remove index on non-array value");
     JSON_ASSERT(index < array->array_value.length, "attempted to remove index out of bounds in array");
     Json_Value* elements = array->array_value.elements;
+    // Free the value being removed
+    json_free_value(&elements[index]);
     memmove(&elements[index], &elements[index + 1], (array->array_value.length - index - 1) * sizeof(Json_Value));
     --array->array_value.length;
 }
 
 // Object manipulation /////////////////////////////////////////////////////////
+
+static size_t json_hash_string(char const* str) {
+    size_t hash = 5381;
+    while (*str != '\0') {
+        hash = ((hash << 5) + hash) + (size_t)(unsigned char)(*str); // hash * 33 + c
+        ++str;
+    }
+    return hash;
+}
 
 typedef struct Json_HashEntry {
     char const* key;
@@ -988,10 +1000,136 @@ typedef struct Json_HashBucket {
     size_t capacity;
 } Json_HashBucket;
 
-void json_object_set(Json_Value* object, char const* key, Json_Value value);
-Json_Value* json_object_get(Json_Value* object, char const* key);
-bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value);
-bool json_object_remove(Json_Value* object, char const* key);
+static const double Json_HashTable_UpsizeLoadFactor = 0.75;
+
+static double json_hash_table_load_factor(Json_Value* value) {
+    JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to compute hash table load factor on non-object value");
+    if (value->object_value.buckets == NULL) return 1.0;
+    return (double)value->object_value.entry_count / (double)value->object_value.buckets_length;
+}
+
+static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
+    JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to resize hash table on non-object value");
+    Json_HashBucket* newBuckets = (Json_HashBucket*)JSON_REALLOC(NULL, newBucketCount * sizeof(Json_HashBucket));
+    JSON_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets");
+    memset(newBuckets, 0, newBucketCount * sizeof(Json_HashBucket));
+    // Add each item from each bucket to the new bucket array, essentially redistributing
+    for (size_t i = 0; i < value->object_value.buckets_length; ++i) {
+        Json_HashBucket* oldBucket = &value->object_value.buckets[i];
+        for (size_t j = 0; j < oldBucket->length; ++j) {
+            Json_HashEntry entry = oldBucket->entries[j];
+            size_t newBucketIndex = entry.hash % newBucketCount;
+            Json_HashBucket* newBucket = &newBuckets[newBucketIndex];
+            JSON_ADD_TO_ARRAY(newBucket->entries, newBucket->length, newBucket->capacity, entry);
+        }
+        // Old bucket entries have been moved to the new buckets, we can free the old bucket entries array
+        JSON_FREE(oldBucket->entries);
+    }
+    // Free the old buckets and replace with the new ones
+    JSON_FREE(value->object_value.buckets);
+    value->object_value.buckets = newBuckets;
+    value->object_value.buckets_length = newBucketCount;
+}
+
+static void json_hash_table_grow(Json_Value* value) {
+    JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to grow hash table on non-object value");
+    // Let's double the size of the bucket array
+    size_t newLength = value->object_value.buckets_length * 2;
+    if (newLength < 8) newLength = 8;
+    json_hash_table_resize(value, newLength);
+}
+
+void json_object_set(Json_Value* object, char const* key, Json_Value value) {
+    JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to set key-value pair on non-object value");
+    // Grow if needed
+    double loadFactor = json_hash_table_load_factor(object);
+    if (loadFactor > Json_HashTable_UpsizeLoadFactor || object->object_value.buckets_length == 0) json_hash_table_grow(object);
+    // Compute bucket index
+    size_t hash = json_hash_string(key);
+    size_t bucketIndex = hash % object->object_value.buckets_length;
+    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    // Check if the key already exists in the bucket, if so, replace the value
+    for (size_t i = 0; i < bucket->length; ++i) {
+        Json_HashEntry* entry = &bucket->entries[i];
+        if (entry->hash == hash && strcmp(entry->key, key) == 0) {
+            // Free the old value if needed
+            json_free_value(&entry->value);
+            entry->value = value;
+            return;
+        }
+    }
+    // Key does not exist, add a new entry to the bucket
+    JSON_ADD_TO_ARRAY(bucket->entries, bucket->length, bucket->capacity, (Json_HashEntry){
+        // NOTE: We copy the key
+        .key = json_strdup(key),
+        .value = value,
+        .hash = hash,
+    });
+    // New element was added
+    ++object->object_value.entry_count;
+}
+
+Json_Value* json_object_get(Json_Value* object, char const* key) {
+    JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to get value by key on non-object value");
+    if (object->object_value.buckets_length == 0) return NULL;
+    // Compute bucket index
+    size_t hash = json_hash_string(key);
+    size_t bucketIndex = hash % object->object_value.buckets_length;
+    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    // Look for the key in the bucket
+    for (size_t i = 0; i < bucket->length; ++i) {
+        Json_HashEntry* entry = &bucket->entries[i];
+        if (entry->hash == hash && strcmp(entry->key, key) == 0) {
+            return &entry->value;
+        }
+    }
+    return NULL;
+}
+
+bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value) {
+    JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to get key-value pair by index on non-object value");
+    if (object->object_value.buckets_length == 0) return false;
+    size_t currentIndex = 0;
+    for (size_t i = 0; i < object->object_value.buckets_length; ++i) {
+        Json_HashBucket* bucket = &object->object_value.buckets[i];
+        for (size_t j = 0; j < bucket->length; ++j) {
+            if (currentIndex == index) {
+                Json_HashEntry* entry = &bucket->entries[j];
+                if (out_key != NULL) *out_key = entry->key;
+                if (out_value != NULL) *out_value = entry->value;
+                return true;
+            }
+            ++currentIndex;
+        }
+    }
+    return false;
+}
+
+bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value) {
+    JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to remove key-value pair on non-object value");
+    if (object->object_value.buckets_length == 0) return false;
+    // Compute bucket index
+    size_t hash = json_hash_string(key);
+    size_t bucketIndex = hash % object->object_value.buckets_length;
+    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    // Look for the key in the bucket
+    for (size_t i = 0; i < bucket->length; ++i) {
+        Json_HashEntry* entry = &bucket->entries[i];
+        if (entry->hash == hash && strcmp(entry->key, key) == 0) {
+            // If old value is wanted, copy it out, otherwise free it
+            if (out_value != NULL) *out_value = entry->value;
+            else json_free_value(&entry->value);
+            // Free the key
+            JSON_FREE(entry->key);
+            // Remove the entry by shifting the remaining entries
+            memmove(&bucket->entries[i], &bucket->entries[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
+            --bucket->length;
+            --object->object_value.entry_count;
+            return true;
+        }
+    }
+    return false;
+}
 
 #ifdef __cplusplus
 }
