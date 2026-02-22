@@ -442,7 +442,7 @@ static void json_parse_string_value(Json_Parser* parser) {
         JSON_ASSERT(buffer != NULL, "failed to allocate buffer for string value");
         json_parse_string_value_impl(parser, buffer, length, &parserToAdvance);
         buffer[length] = '\0';
-        sax->on_string(sax->user_data, buffer, length);
+        sax->on_string(parser->user_data, buffer, length);
     }
     json_parser_advance(parser, parserToAdvance);
 }
@@ -456,15 +456,15 @@ static void json_parse_identifier_value(Json_Parser* parser) {
     char const* ident = parser->text + parser->index;
     if (parserOffset == 4 && strncmp(ident, "true", 4) == 0) {
         json_parser_advance(parser, 4);
-        if (sax->on_bool != NULL) sax->on_bool(sax->user_data, true);
+        if (sax->on_bool != NULL) sax->on_bool(parser->user_data, true);
     }
     else if (parserOffset == 5 && strncmp(ident, "false", 5) == 0) {
         json_parser_advance(parser, 5);
-        if (sax->on_bool != NULL) sax->on_bool(sax->user_data, false);
+        if (sax->on_bool != NULL) sax->on_bool(parser->user_data, false);
     }
     else if (parserOffset == 4 && strncmp(ident, "null", 4) == 0) {
         json_parser_advance(parser, 4);
-        if (sax->on_null != NULL) sax->on_null(sax->user_data);
+        if (sax->on_null != NULL) sax->on_null(parser->user_data);
     }
     else {
         char* message = json_format("unexpected identifier '%.*s'", (int)parserOffset, ident);
@@ -472,7 +472,7 @@ static void json_parse_identifier_value(Json_Parser* parser) {
         // We don't actually return here, for best-effort we just skip it and return null
         json_parser_advance(parser, parserOffset);
         // We still need to report a value to the consumer, so we report null
-        if (sax->on_null != NULL) sax->on_null(sax->user_data);
+        if (sax->on_null != NULL) sax->on_null(parser->user_data);
     }
 }
 
@@ -498,7 +498,7 @@ static void json_parse_number_value(Json_Parser* parser) {
     char next = json_parser_peek(parser, parserOffset, '\0');
     if (next != '.' && next != 'e' && next != 'E') {
         json_parser_advance(parser, parserOffset);
-        if (sax->on_int != NULL) sax->on_int(sax->user_data, intValue);
+        if (sax->on_int != NULL) sax->on_int(parser->user_data, intValue);
         return;
     }
     // We have a fraction or exponent part, we need to parse as double
@@ -538,7 +538,7 @@ static void json_parse_number_value(Json_Parser* parser) {
         doubleValue *= pow(10, exponent);
     }
     json_parser_advance(parser, parserOffset);
-    if (sax->on_double != NULL) sax->on_double(sax->user_data, doubleValue);
+    if (sax->on_double != NULL) sax->on_double(parser->user_data, doubleValue);
 }
 
 static void json_parse_value(Json_Parser* parser);
@@ -547,7 +547,7 @@ static void json_parse_array_value(Json_Parser* parser) {
     Json_Sax* sax = &parser->sax;
     if (!json_parser_expect_char(parser, '[')) return;
 
-    if (sax->on_array_start != NULL) sax->on_array_start(sax->user_data);
+    if (sax->on_array_start != NULL) sax->on_array_start(parser->user_data);
 
     // Track these to report trailing comma errors
     Json_Position lastCommaPosition = { 0 };
@@ -589,14 +589,14 @@ static void json_parse_array_value(Json_Parser* parser) {
 
     // Done
     json_parser_expect_char(parser, ']');
-    if (sax->on_array_end != NULL) sax->on_array_end(sax->user_data);
+    if (sax->on_array_end != NULL) sax->on_array_end(parser->user_data);
 }
 
 static void json_parse_object_value(Json_Parser* parser) {
     Json_Sax* sax = &parser->sax;
     if (!json_parser_expect_char(parser, '{')) return;
 
-    if (sax->on_object_start != NULL) sax->on_object_start(sax->user_data);
+    if (sax->on_object_start != NULL) sax->on_object_start(parser->user_data);
 
     // Track these to report trailing comma errors
     Json_Position lastCommaPosition = { 0 };
@@ -632,7 +632,7 @@ static void json_parse_object_value(Json_Parser* parser) {
             JSON_ASSERT(keyBuffer != NULL, "failed to allocate buffer for object key");
             json_parse_string_value_impl(parser, keyBuffer, keyLength, &parserToAdvance);
             keyBuffer[keyLength] = '\0';
-            sax->on_object_key(sax->user_data, keyBuffer, keyLength);
+            sax->on_object_key(parser->user_data, keyBuffer, keyLength);
         }
         json_parser_advance(parser, parserToAdvance);
         // After the key, we need a colon
@@ -664,7 +664,7 @@ static void json_parse_object_value(Json_Parser* parser) {
 
     // Done
     json_parser_expect_char(parser, '}');
-    if (sax->on_object_end != NULL) sax->on_object_end(sax->user_data);
+    if (sax->on_object_end != NULL) sax->on_object_end(parser->user_data);
 }
 
 static void json_parse_value(Json_Parser* parser) {
@@ -694,7 +694,15 @@ static void json_parse_value(Json_Parser* parser) {
 }
 
 void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* user_data) {
-
+    Json_Parser parser = {
+        .text = json,
+        .length = strlen(json),
+        .position = { 0 },
+        .sax = sax,
+        .options = options,
+        .user_data = user_data,
+    };
+    json_parse_value(&parser);
 }
 
 // Value constructors //////////////////////////////////////////////////////////
