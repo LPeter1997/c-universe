@@ -267,39 +267,36 @@ static char json_parser_peek(Json_Parser* parser, size_t offset, char def) {
     return parser->text[parser->index + offset];
 }
 
-static void json_parser_skip_whitespace(Json_Parser* parser) {
-    while (parser->index < parser->length) {
-        char c = parser->text[parser->index];
-        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
-
-        if (c == '\r') {
+static void json_parser_advance(Json_Parser* parser, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        JSON_ASSERT(parser->index < parser->length, "attempted to advance past end of input");
+        char ch = parser->text[parser->index];
+        if (ch == '\r') {
+            // Could be an OS-X or Windows-style newline
+            // If Windows-style, we'll go to the next line in the next iteration
             if (json_parser_peek(parser, 1, '\0') == '\n') {
-                // Windows-style newline
-                parser->index += 2;
+                // Windows-style newline, will step to newline in the next iteration
             }
             else {
                 // OSX-style newline
-                ++parser->index;
+                ++parser->line;
+                parser->column = 0;
             }
-            ++parser->line;
-            parser->column = 0;
         }
-        else if (c == '\n') {
+        else if (ch == '\n') {
             // Unix-style newline
-            ++parser->index;
             ++parser->line;
             parser->column = 0;
         }
         else {
-            ++parser->index;
             ++parser->column;
         }
+        ++parser->index;
     }
 }
 
-static void json_parser_advance(Json_Parser* parser, size_t count) {
-    parser->index += count;
-    parser->column += count;
+static void json_parser_skip_whitespace(Json_Parser* parser) {
+    while (isspace(json_parser_peek(parser, 0, '\0'))) json_parser_advance(parser, 1);
 }
 
 static bool json_parser_expect_char(Json_Parser* parser, char expected) {
@@ -315,92 +312,127 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
     }
 }
 
-// TODO: RETHINK THIS METHOD, IT'S AN ABSOLUTE CATASTROPHE
-// NOTE: Does not actually advance the parser, when buffer is NULL
-// This is so the user of this call can first compute the required buffer size, then allocate, then call again to fill the buffer
-static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, size_t bufferSize) {
+// NOTE: Does not actually advance the parser, this function is designed to be called twice:
+//  - first with buffer = NULL to compute the required buffer size
+//  - then with an allocated buffer to fill it
+static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, size_t bufferSize, size_t* outParserAdvance) {
     size_t parserOffset = 0;
-    // Skip opening quote
-    if (json_parser_peek(parser, parserOffset, '\0') != '"') {
-        char* message = json_format("expected '\"' at the start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
-        json_parser_report_error(parser, message);
-        return 0;
-    }
-
-    // Only advance, if buffer is not NULL
-    if (buffer != NULL) {
-        json_parser_advance(parser, 1);
-    }
-    else {
-        ++parserOffset;
-    }
-
     size_t bufferIndex = 0;
-    while (parser->index + parserOffset < parser->length) {
-        char ch = parser->text[parser->index + parserOffset];
-        if (ch == '"') break;
-        if (ch != '\\') {
-            // Normal character
-            if (buffer != NULL) {
-                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
-                json_parser_advance(parser, 1);
-                buffer[bufferIndex] = ch;
-            }
-            ++parserOffset;
-            ++bufferIndex;
-            continue;
-        }
-        // Escape sequence
-        json_parser_advance(parser, 1);
-        char escaped = json_parser_peek(parser, 0, '\0');
-        char unescaped = '\0';
-        switch (escaped) {
-        case '"': unescaped = '"'; break;
-        case '\\': unescaped = '\\'; break;
-        case '/': unescaped = '/'; break;
-        case 'b': unescaped = '\b'; break;
-        case 'f': unescaped = '\f'; break;
-        case 'n': unescaped = '\n'; break;
-        case 'r': unescaped = '\r'; break;
-        case 't': unescaped = '\t'; break;
-        }
-        if (unescaped != '\0') {
-            // Simple escape sequence
-            if (buffer != NULL) {
-                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
-                buffer[bufferIndex] = unescaped;
-            }
-            ++bufferIndex;
-            continue;
-        }
-        // Unicode codepoint escape sequence
-        if (escaped == 'u') {
-            // TODO
-            continue;
-        }
-        // Invalid escape sequence
-        char* message = json_format("invalid escape sequence '\\%c' in string value", escaped);
+    if (json_parser_peek(parser, parserOffset, '\0') != '"') {
+        char* message = json_format("expected '\"' at start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
         json_parser_report_error(parser, message);
-        // We add the unescaped substring to best approximate the error
-        if (buffer != NULL) {
-            JSON_ASSERT(bufferIndex + 1 < bufferSize, "buffer overflow while parsing string value");
-            buffer[bufferIndex] = '\\';
-            buffer[bufferIndex + 1] = escaped;
+        goto done;
+    }
+    // skip opening quote
+    ++parserOffset;
+    while (true) {
+        char c = json_parser_peek(parser, parserOffset, '\0');
+        if (c == '\0') {
+            char* message = json_format("unexpected end of input while parsing string value");
+            json_parser_report_error(parser, message);
+            goto done;
         }
-        bufferIndex += 2;
+        if (c == '"') {
+            // skip closing quote
+            ++parserOffset;
+            goto done;
+        }
+        if (c != '\\') {
+            // Regular character, just copy
+            if (buffer != NULL) {
+                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
+                buffer[bufferIndex] = c;
+            }
+            ++bufferIndex;
+            ++parserOffset;
+            continue;
+        }
+        // Escape sequence, skip backslash
+        ++parserOffset;
+        char escape = json_parser_peek(parser, parserOffset, '\0');
+        if (escape == '\0') {
+            char* message = json_format("unexpected end of input in escape sequence of string value");
+            json_parser_report_error(parser, message);
+            goto done;
+        }
+        if (escape != 'u') {
+            // Simple escape sequence, just translate and copy
+            char escapedChar;
+            switch (escape) {
+                case '"': escapedChar = '"'; break;
+                case '\\': escapedChar = '\\'; break;
+                case '/': escapedChar = '/'; break;
+                case 'b': escapedChar = '\b'; break;
+                case 'f': escapedChar = '\f'; break;
+                case 'n': escapedChar = '\n'; break;
+                case 'r': escapedChar = '\r'; break;
+                case 't': escapedChar = '\t'; break;
+                default: {
+                    char* message = json_format("invalid escape sequence '\\%c' in string value", escape);
+                    json_parser_report_error(parser, message);
+                    // We don't actually return here, for best-effort we just treat it as a literal
+                    escapedChar = escape;
+                    break;
+                }
+            }
+            if (buffer != NULL) {
+                JSON_ASSERT(bufferIndex < bufferSize, "buffer overflow while parsing string value");
+                buffer[bufferIndex] = escapedChar;
+            }
+            ++bufferIndex;
+            ++parserOffset;
+            continue;
+        }
+        // Unicode escape, we expect 4 hex digits after \u
+        // First, skip 'u'
+        ++parserOffset;
+        uint32_t codepoint = 0;
+        for (size_t i = 0; i < 4; ++i) {
+            char hex = json_parser_peek(parser, parserOffset, '\0');
+            if (hex == '\0') {
+                char* message = json_format("unexpected end of input in unicode escape sequence of string value");
+                json_parser_report_error(parser, message);
+                goto done;
+            }
+            int hexValue;
+            if (!json_isxdigit(hex, &hexValue)) {
+                char* message = json_format("invalid hex digit '%c' in unicode escape sequence of string value", hex);
+                json_parser_report_error(parser, message);
+                // We don't actually return here, for best-effort we just treat it as a literal
+                hexValue = 0;
+            }
+            codepoint = (codepoint << 4) | (uint32_t)hexValue;
+            ++parserOffset;
+        }
+        // Encode the codepoint as UTF-8 and copy
+        char utf8[4];
+        size_t utf8Length = json_utf8_encode(codepoint, utf8);
+        if (utf8Length == 0) {
+            char* message = json_format("invalid Unicode code point U+%04X in string value", codepoint);
+            json_parser_report_error(parser, message);
+            // We don't actually return here, for best-effort we just skip it
+            continue;
+        }
+        if (buffer != NULL) {
+            JSON_ASSERT(bufferIndex + utf8Length <= bufferSize, "buffer overflow while parsing string value");
+            memcpy(buffer + bufferIndex, utf8, utf8Length * sizeof(char));
+        }
+        bufferIndex += utf8Length;
     }
 
+done:
+    *outParserAdvance = parserOffset;
     return bufferIndex;
 }
 
 static Json_Value json_parse_string_value(Json_Parser* parser) {
-    size_t bufferSize = json_parse_string_value_impl(parser, NULL, 0);
-    if (bufferSize == 0) return json_string("");
-    char* buffer = (char*)JSON_REALLOC(NULL, (bufferSize + 1) * sizeof(char));
-    JSON_ASSERT(buffer != NULL, "failed to allocate memory for parsed string value");
-    json_parse_string_value_impl(parser, buffer, bufferSize);
-    buffer[bufferSize] = '\0';
-    // NOTE: we don't use json_string here as we already have an owned string
+    size_t parserToAdvance;
+    size_t length = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
+    char* buffer = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
+    JSON_ASSERT(buffer != NULL, "failed to allocate buffer for string value");
+    json_parse_string_value_impl(parser, buffer, length, &parserToAdvance);
+    buffer[length] = '\0';
+    json_parser_advance(parser, parserToAdvance);
     return (Json_Value){
         .type = JSON_VALUE_STRING,
         .string_value = buffer,
