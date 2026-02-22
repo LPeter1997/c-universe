@@ -1427,14 +1427,255 @@ void json_free_document(Json_Document* doc) {
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef JSON_SELF_TEST
 
+#include <stdio.h>
+#include <string.h>
+
 // Use our own testing library for self-testing
 #define CTEST_STATIC
 #define CTEST_IMPLEMENTATION
 #define CTEST_MAIN
 #include "ctest.h"
 
-CTEST_CASE(sample_test) {
-    CTEST_ASSERT_FAIL("TODO");
+// Helper macros
+#define ASSERT_NO_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length == 0)
+#define ASSERT_HAS_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length > 0)
+
+// Parsing primitives //////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_null) {
+    Json_Document doc = json_parse("null", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_NULL);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_true) {
+    Json_Document doc = json_parse("true", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
+    CTEST_ASSERT_TRUE(doc.root.bool_value == true);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_false) {
+    Json_Document doc = json_parse("false", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
+    CTEST_ASSERT_TRUE(doc.root.bool_value == false);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_integer) {
+    Json_Document doc = json_parse("42", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
+    CTEST_ASSERT_TRUE(doc.root.int_value == 42);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_negative_integer) {
+    Json_Document doc = json_parse("-123", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
+    CTEST_ASSERT_TRUE(doc.root.int_value == -123);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_double) {
+    Json_Document doc = json_parse("3.14", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
+    CTEST_ASSERT_TRUE(doc.root.double_value > 3.13 && doc.root.double_value < 3.15);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_negative_double) {
+    Json_Document doc = json_parse("-0.5", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
+    CTEST_ASSERT_TRUE(doc.root.double_value < -0.49 && doc.root.double_value > -0.51);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_double_with_exponent) {
+    Json_Document doc = json_parse("1.5e10", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
+    CTEST_ASSERT_TRUE(doc.root.double_value > 1.4e10 && doc.root.double_value < 1.6e10);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_string) {
+    Json_Document doc = json_parse("\"hello\"", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "hello") == 0);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_string_with_escapes) {
+    Json_Document doc = json_parse("\"line1\\nline2\\ttab\"", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "line1\nline2\ttab") == 0);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_string_with_unicode) {
+    Json_Document doc = json_parse("\"\\u0048\\u0065\\u006c\\u006c\\u006f\"", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "Hello") == 0);
+    json_free_document(&doc);
+}
+
+// Parsing arrays //////////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_empty_array) {
+    Json_Document doc = json_parse("[]", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
+    CTEST_ASSERT_TRUE(doc.root.array_value.length == 0);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_array_with_values) {
+    Json_Document doc = json_parse("[1, 2, 3]", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
+    CTEST_ASSERT_TRUE(doc.root.array_value.length == 3);
+    CTEST_ASSERT_TRUE(doc.root.array_value.elements[0].int_value == 1);
+    CTEST_ASSERT_TRUE(doc.root.array_value.elements[1].int_value == 2);
+    CTEST_ASSERT_TRUE(doc.root.array_value.elements[2].int_value == 3);
+    json_free_document(&doc);
+}
+
+// Parsing objects /////////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_empty_object) {
+    Json_Document doc = json_parse("{}", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
+    CTEST_ASSERT_TRUE(doc.root.object_value.entry_count == 0);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_object_with_properties) {
+    Json_Document doc = json_parse("{\"name\": \"John\", \"age\": 30}", (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
+    CTEST_ASSERT_TRUE(doc.root.object_value.entry_count == 2);
+    Json_Value* name = json_object_get(&doc.root, "name");
+    Json_Value* age = json_object_get(&doc.root, "age");
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "John") == 0);
+    CTEST_ASSERT_TRUE(age != NULL && age->int_value == 30);
+    json_free_document(&doc);
+}
+
+// Error handling //////////////////////////////////////////////////////////////
+
+CTEST_CASE(parse_leading_zeros_error) {
+    Json_Document doc = json_parse("007", (Json_Options){0});
+    ASSERT_HAS_ERRORS(doc);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_leading_zeros_allowed_with_extension) {
+    Json_Document doc = json_parse("007", (Json_Options){ .extensions = JSON_EXTENSION_LEADING_ZEROS });
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.int_value == 7);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_trailing_comma_error) {
+    Json_Document doc = json_parse("[1, 2, 3,]", (Json_Options){0});
+    ASSERT_HAS_ERRORS(doc);
+    json_free_document(&doc);
+}
+
+CTEST_CASE(parse_trailing_comma_allowed_with_extension) {
+    Json_Document doc = json_parse("[1, 2, 3,]", (Json_Options){ .extensions = JSON_EXTENSION_TRAILING_COMMAS });
+    ASSERT_NO_ERRORS(doc);
+    CTEST_ASSERT_TRUE(doc.root.array_value.length == 3);
+    json_free_document(&doc);
+}
+
+// Builder API /////////////////////////////////////////////////////////////////
+
+CTEST_CASE(build_object_manually) {
+    Json_Value obj = json_object();
+    json_object_set(&obj, "name", json_string("Alice"));
+    json_object_set(&obj, "score", json_int(100));
+
+    Json_Value* name = json_object_get(&obj, "name");
+    Json_Value* score = json_object_get(&obj, "score");
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "Alice") == 0);
+    CTEST_ASSERT_TRUE(score != NULL && score->int_value == 100);
+
+    json_free_value(&obj);
+}
+
+CTEST_CASE(build_array_manually) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(10));
+    json_array_append(&arr, json_int(20));
+    json_array_append(&arr, json_int(30));
+
+    CTEST_ASSERT_TRUE(arr.array_value.length == 3);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->int_value == 10);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->int_value == 20);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 2)->int_value == 30);
+
+    json_free_value(&arr);
+}
+
+// Serialization ///////////////////////////////////////////////////////////////
+
+CTEST_CASE(serialize_primitives) {
+    Json_Options opts = { .newline_str = "\n", .indent_str = "  " };
+
+    char* null_str = json_serialize(json_null(), opts, NULL);
+    char* true_str = json_serialize(json_bool(true), opts, NULL);
+    char* int_str = json_serialize(json_int(42), opts, NULL);
+    char* str_str = json_serialize(json_string("hello"), opts, NULL);
+
+    CTEST_ASSERT_TRUE(strcmp(null_str, "null") == 0);
+    CTEST_ASSERT_TRUE(strcmp(true_str, "true") == 0);
+    CTEST_ASSERT_TRUE(strcmp(int_str, "42") == 0);
+    CTEST_ASSERT_TRUE(strcmp(str_str, "\"hello\"") == 0);
+
+    free(null_str);
+    free(true_str);
+    free(int_str);
+    free(str_str);
+}
+
+CTEST_CASE(serialize_string_escapes) {
+    Json_Value val = json_string("line1\nline2\ttab");
+    char* str = json_serialize(val, (Json_Options){0}, NULL);
+    CTEST_ASSERT_TRUE(strcmp(str, "\"line1\\nline2\\ttab\"") == 0);
+    free(str);
+    json_free_value(&val);
+}
+
+CTEST_CASE(serialize_roundtrip) {
+    char const* original = "{\"name\": \"Bob\", \"active\": true}";
+    Json_Document doc = json_parse(original, (Json_Options){0});
+    ASSERT_NO_ERRORS(doc);
+
+    char* serialized = json_serialize(doc.root, (Json_Options){0}, NULL);
+    Json_Document doc2 = json_parse(serialized, (Json_Options){0});
+    ASSERT_NO_ERRORS(doc2);
+
+    // Verify the re-parsed values match
+    Json_Value* name = json_object_get(&doc2.root, "name");
+    Json_Value* active = json_object_get(&doc2.root, "active");
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "Bob") == 0);
+    CTEST_ASSERT_TRUE(active != NULL && active->bool_value == true);
+
+    free(serialized);
+    json_free_document(&doc);
+    json_free_document(&doc2);
 }
 
 #endif /* JSON_SELF_TEST */
@@ -1452,7 +1693,39 @@ CTEST_CASE(sample_test) {
 #include "json.h"
 
 int main(void) {
-    // TODO: Example usage goes here
+    // Parse a JSON string
+    char const* input = "{\"name\": \"Alice\", \"scores\": [85, 92, 78]}";
+    Json_Document doc = json_parse(input, (Json_Options){0});
+
+    if (doc.errors.length > 0) {
+        printf("Parse error: %s\n", doc.errors.elements[0].message);
+        json_free_document(&doc);
+        return 1;
+    }
+
+    // Access and print values
+    Json_Value* name = json_object_get(&doc.root, "name");
+    printf("Name: %s\n", name->string_value);
+
+    Json_Value* scores = json_object_get(&doc.root, "scores");
+    printf("Scores: ");
+    for (size_t i = 0; i < scores->array_value.length; ++i) {
+        printf("%lld ", scores->array_value.elements[i].int_value);
+    }
+    printf("\n");
+
+    // Modify the document
+    json_object_set(&doc.root, "active", json_bool(true));
+    json_array_append(scores, json_int(95));
+
+    // Serialize with pretty printing
+    Json_Options opts = { .newline_str = "\n", .indent_str = "  " };
+    char* output = json_serialize(doc.root, opts, NULL);
+    printf("\nModified JSON:\n%s\n", output);
+
+    // Cleanup
+    free(output);
+    json_free_document(&doc);
     return 0;
 }
 
