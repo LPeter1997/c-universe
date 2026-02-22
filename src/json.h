@@ -974,6 +974,25 @@ void json_array_remove(Json_Value* array, size_t index) {
     --array->array_value.length;
 }
 
+// Object manipulation /////////////////////////////////////////////////////////
+
+typedef struct Json_HashEntry {
+    char const* key;
+    Json_Value value;
+    size_t hash;
+} Json_HashEntry;
+
+typedef struct Json_HashBucket {
+    Json_HashEntry* entries;
+    size_t length;
+    size_t capacity;
+} Json_HashBucket;
+
+void json_object_set(Json_Value* object, char const* key, Json_Value value);
+Json_Value* json_object_get(Json_Value* object, char const* key);
+bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value);
+bool json_object_remove(Json_Value* object, char const* key);
+
 #ifdef __cplusplus
 }
 #endif
