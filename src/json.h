@@ -57,7 +57,7 @@ typedef struct Json_Options {
 
 typedef struct Json_Error {
     // Owned string
-    char const* message;
+    char* message;
     size_t line;
     size_t column;
     size_t index;
@@ -68,11 +68,11 @@ typedef struct Json_Sax {
     void(*on_bool)(void* user_data, bool value);
     void(*on_int)(void* user_data, long long value);
     void(*on_double)(void* user_data, double value);
-    void(*on_string)(void* user_data, char const* value, size_t length);
+    void(*on_string)(void* user_data, char* value, size_t length);
     void(*on_array_start)(void* user_data);
     void(*on_array_end)(void* user_data);
     void(*on_object_start)(void* user_data);
-    void(*on_object_key)(void* user_data, char const* key, size_t length);
+    void(*on_object_key)(void* user_data, char* key, size_t length);
     void(*on_object_end)(void* user_data);
     void(*on_error)(void* user_data, Json_Error error);
 } Json_Sax;
@@ -92,22 +92,22 @@ struct Json_HashBucket;
 typedef struct Json_Value {
     Json_ValueType type;
     union {
-        bool bool_value;
-        long long int_value;
-        double double_value;
+        bool boolean;
+        long long integer;
+        double floating;
         // Owned string
-        char const* string_value;
+        char* string;
         struct {
-            Json_Value* elements;
+            struct Json_Value* elements;
             size_t length;
             size_t capacity;
-        } array_value;
+        } array;
         struct {
             struct Json_HashBucket* buckets;
             size_t buckets_length;
             size_t entry_count;
-        } object_value;
-    };
+        } object;
+    } value;
 } Json_Value;
 
 typedef struct Json_Document {
@@ -161,6 +161,7 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 #include <ctype.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -273,7 +274,7 @@ typedef struct Json_Parser {
     void* user_data;
 } Json_Parser;
 
-static void json_parser_report_error(Json_Parser* parser, Json_Position position, char const* message) {
+static void json_parser_report_error(Json_Parser* parser, Json_Position position, char* message) {
     if (parser->sax.on_error == NULL) {
         JSON_FREE(message);
         return;
@@ -819,7 +820,7 @@ void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* 
 typedef struct Json_DomFrame {
     Json_Value value;
     // Relevant for objects only
-    char const* last_key;
+    char* last_key;
 } Json_DomFrame;
 
 typedef struct Json_DomBuilder {
@@ -833,7 +834,8 @@ typedef struct Json_DomBuilder {
 } Json_DomBuilder;
 
 static void json_dom_builder_push(Json_DomBuilder* builder, Json_Value value) {
-    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, (Json_DomFrame){ .value = value, .last_key = NULL });
+    Json_DomFrame frame = { .value = value, .last_key = NULL };
+    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, frame);
 }
 
 static Json_Value json_dom_builder_pop(Json_DomBuilder* builder) {
@@ -888,12 +890,12 @@ static void json_dom_builder_on_double(void* user_data, double value) {
     json_dom_builder_append_value(builder, json_double(value));
 }
 
-static void json_dom_builder_on_string(void* user_data, char const* value, size_t length) {
+static void json_dom_builder_on_string(void* user_data, char* value, size_t length) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     // The string is owned already, don't use json_string here
     json_dom_builder_append_value(builder, (Json_Value){
         .type = JSON_VALUE_STRING,
-        .string_value = value,
+        .value = { .string = value },
     });
 }
 
@@ -913,7 +915,7 @@ static void json_dom_builder_on_object_start(void* user_data) {
     json_dom_builder_push(builder, json_object());
 }
 
-static void json_dom_builder_on_object_key(void* user_data, char const* key, size_t length) {
+static void json_dom_builder_on_object_key(void* user_data, char* key, size_t length) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     // The key is owned already, we just need to keep track of it until we get the value
     Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
@@ -961,41 +963,41 @@ Json_Document json_parse(char const* json, Json_Options options) {
 Json_Value json_object(void) {
     return (Json_Value){
         .type = JSON_VALUE_OBJECT,
-        .object_value = { 0 },
+        .value = { .object = { 0 } },
     };
 }
 
 Json_Value json_array(void) {
     return (Json_Value){
         .type = JSON_VALUE_ARRAY,
-        .array_value = { 0 },
+        .value = { .array = { 0 } },
     };
 }
 
 Json_Value json_string(char const* str) {
     return (Json_Value){
         .type = JSON_VALUE_STRING,
-        .string_value = json_strdup(str),
+        .value = { .string = json_strdup(str) },
     };
 }
 
 Json_Value json_int(long long value) {
     return (Json_Value){
         .type = JSON_VALUE_INT,
-        .int_value = value,
+        .value = { .integer = value },
     };
 }
 Json_Value json_double(double value) {
     return (Json_Value){
         .type = JSON_VALUE_DOUBLE,
-        .double_value = value,
+        .value = { .floating = value },
     };
 }
 
 Json_Value json_bool(bool value) {
     return (Json_Value){
         .type = JSON_VALUE_BOOL,
-        .bool_value = value,
+        .value = { .boolean = value },
     };
 }
 
@@ -1009,31 +1011,31 @@ Json_Value json_null(void) {
 
 void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to append to non-array value");
-    JSON_ADD_TO_ARRAY(array->array_value.elements, array->array_value.length, array->array_value.capacity, value);
+    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
 }
 
 void json_array_set(Json_Value* array, size_t index, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
-    JSON_ASSERT(index < array->array_value.length, "attempted to set index out of bounds in array");
+    JSON_ASSERT(index < array->value.array.length, "attempted to set index out of bounds in array");
     // Free old value if needed
-    json_free_value(&array->array_value.elements[index]);
-    array->array_value.elements[index] = value;
+    json_free_value(&array->value.array.elements[index]);
+    array->value.array.elements[index] = value;
 }
 
 Json_Value* json_array_get(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to get index on non-array value");
-    JSON_ASSERT(index < array->array_value.length, "attempted to get index out of bounds in array");
-    return &array->array_value.elements[index];
+    JSON_ASSERT(index < array->value.array.length, "attempted to get index out of bounds in array");
+    return &array->value.array.elements[index];
 }
 
 void json_array_remove(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to remove index on non-array value");
-    JSON_ASSERT(index < array->array_value.length, "attempted to remove index out of bounds in array");
-    Json_Value* elements = array->array_value.elements;
+    JSON_ASSERT(index < array->value.array.length, "attempted to remove index out of bounds in array");
+    Json_Value* elements = array->value.array.elements;
     // Free the value being removed
     json_free_value(&elements[index]);
-    memmove(&elements[index], &elements[index + 1], (array->array_value.length - index - 1) * sizeof(Json_Value));
-    --array->array_value.length;
+    memmove(&elements[index], &elements[index + 1], (array->value.array.length - index - 1) * sizeof(Json_Value));
+    --array->value.array.length;
 }
 
 // Object manipulation /////////////////////////////////////////////////////////
@@ -1048,7 +1050,7 @@ static size_t json_hash_string(char const* str) {
 }
 
 typedef struct Json_HashEntry {
-    char const* key;
+    char* key;
     Json_Value value;
     size_t hash;
 } Json_HashEntry;
@@ -1063,8 +1065,8 @@ static const double Json_HashTable_UpsizeLoadFactor = 0.75;
 
 static double json_hash_table_load_factor(Json_Value* value) {
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to compute hash table load factor on non-object value");
-    if (value->object_value.buckets == NULL) return 1.0;
-    return (double)value->object_value.entry_count / (double)value->object_value.buckets_length;
+    if (value->value.object.buckets == NULL) return 1.0;
+    return (double)value->value.object.entry_count / (double)value->value.object.buckets_length;
 }
 
 static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
@@ -1073,8 +1075,8 @@ static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
     JSON_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets");
     memset(newBuckets, 0, newBucketCount * sizeof(Json_HashBucket));
     // Add each item from each bucket to the new bucket array, essentially redistributing
-    for (size_t i = 0; i < value->object_value.buckets_length; ++i) {
-        Json_HashBucket* oldBucket = &value->object_value.buckets[i];
+    for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
+        Json_HashBucket* oldBucket = &value->value.object.buckets[i];
         for (size_t j = 0; j < oldBucket->length; ++j) {
             Json_HashEntry entry = oldBucket->entries[j];
             size_t newBucketIndex = entry.hash % newBucketCount;
@@ -1085,15 +1087,15 @@ static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
         JSON_FREE(oldBucket->entries);
     }
     // Free the old buckets and replace with the new ones
-    JSON_FREE(value->object_value.buckets);
-    value->object_value.buckets = newBuckets;
-    value->object_value.buckets_length = newBucketCount;
+    JSON_FREE(value->value.object.buckets);
+    value->value.object.buckets = newBuckets;
+    value->value.object.buckets_length = newBucketCount;
 }
 
 static void json_hash_table_grow(Json_Value* value) {
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to grow hash table on non-object value");
     // Let's double the size of the bucket array
-    size_t newLength = value->object_value.buckets_length * 2;
+    size_t newLength = value->value.object.buckets_length * 2;
     if (newLength < 8) newLength = 8;
     json_hash_table_resize(value, newLength);
 }
@@ -1102,11 +1104,11 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to set key-value pair on non-object value");
     // Grow if needed
     double loadFactor = json_hash_table_load_factor(object);
-    if (loadFactor > Json_HashTable_UpsizeLoadFactor || object->object_value.buckets_length == 0) json_hash_table_grow(object);
+    if (loadFactor > Json_HashTable_UpsizeLoadFactor || object->value.object.buckets_length == 0) json_hash_table_grow(object);
     // Compute bucket index
     size_t hash = json_hash_string(key);
-    size_t bucketIndex = hash % object->object_value.buckets_length;
-    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    size_t bucketIndex = hash % object->value.object.buckets_length;
+    Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Check if the key already exists in the bucket, if so, replace the value
     for (size_t i = 0; i < bucket->length; ++i) {
         Json_HashEntry* entry = &bucket->entries[i];
@@ -1118,23 +1120,24 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
         }
     }
     // Key does not exist, add a new entry to the bucket
-    JSON_ADD_TO_ARRAY(bucket->entries, bucket->length, bucket->capacity, (Json_HashEntry){
+    Json_HashEntry newEntry = {
         // NOTE: We copy the key
         .key = json_strdup(key),
         .value = value,
         .hash = hash,
-    });
+    };
+    JSON_ADD_TO_ARRAY(bucket->entries, bucket->length, bucket->capacity, newEntry);
     // New element was added
-    ++object->object_value.entry_count;
+    ++object->value.object.entry_count;
 }
 
 Json_Value* json_object_get(Json_Value* object, char const* key) {
     JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to get value by key on non-object value");
-    if (object->object_value.buckets_length == 0) return NULL;
+    if (object->value.object.buckets_length == 0) return NULL;
     // Compute bucket index
     size_t hash = json_hash_string(key);
-    size_t bucketIndex = hash % object->object_value.buckets_length;
-    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    size_t bucketIndex = hash % object->value.object.buckets_length;
+    Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
         Json_HashEntry* entry = &bucket->entries[i];
@@ -1147,10 +1150,10 @@ Json_Value* json_object_get(Json_Value* object, char const* key) {
 
 bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value) {
     JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to get key-value pair by index on non-object value");
-    if (object->object_value.buckets_length == 0) return false;
+    if (object->value.object.buckets_length == 0) return false;
     size_t currentIndex = 0;
-    for (size_t i = 0; i < object->object_value.buckets_length; ++i) {
-        Json_HashBucket* bucket = &object->object_value.buckets[i];
+    for (size_t i = 0; i < object->value.object.buckets_length; ++i) {
+        Json_HashBucket* bucket = &object->value.object.buckets[i];
         for (size_t j = 0; j < bucket->length; ++j) {
             if (currentIndex == index) {
                 Json_HashEntry* entry = &bucket->entries[j];
@@ -1166,11 +1169,11 @@ bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, 
 
 bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value) {
     JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to remove key-value pair on non-object value");
-    if (object->object_value.buckets_length == 0) return false;
+    if (object->value.object.buckets_length == 0) return false;
     // Compute bucket index
     size_t hash = json_hash_string(key);
-    size_t bucketIndex = hash % object->object_value.buckets_length;
-    Json_HashBucket* bucket = &object->object_value.buckets[bucketIndex];
+    size_t bucketIndex = hash % object->value.object.buckets_length;
+    Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
         Json_HashEntry* entry = &bucket->entries[i];
@@ -1183,7 +1186,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
             // Remove the entry by shifting the remaining entries
             memmove(&bucket->entries[i], &bucket->entries[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
             --bucket->length;
-            --object->object_value.entry_count;
+            --object->value.object.entry_count;
             return true;
         }
     }
@@ -1279,26 +1282,26 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
         json_serializer_append(serializer, "null");
         break;
     case JSON_VALUE_BOOL:
-        json_serializer_append(serializer, value.bool_value ? "true" : "false");
+        json_serializer_append(serializer, value.value.boolean ? "true" : "false");
         break;
     case JSON_VALUE_INT: {
         char buffer[32];
-        int length = snprintf(buffer, sizeof(buffer), "%lld", value.int_value);
+        int length = snprintf(buffer, sizeof(buffer), "%lld", value.value.integer);
         JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to serialize int value in JSON serializer");
         json_serializer_appendn(serializer, buffer, (size_t)length);
     } break;
     case JSON_VALUE_DOUBLE: {
         char buffer[32];
-        int length = snprintf(buffer, sizeof(buffer), "%g", value.double_value);
+        int length = snprintf(buffer, sizeof(buffer), "%g", value.value.floating);
         JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to serialize double value in JSON serializer");
         json_serializer_appendn(serializer, buffer, (size_t)length);
     } break;
     case JSON_VALUE_STRING:
-        json_serialize_string_value(serializer, value.string_value);
+        json_serialize_string_value(serializer, value.value.string);
         break;
     case JSON_VALUE_ARRAY: {
         // For empty we can just append []
-        if (value.array_value.length == 0) {
+        if (value.value.array.length == 0) {
             json_serializer_append(serializer, "[]");
             break;
         }
@@ -1306,10 +1309,10 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
         json_serializer_append_char(serializer, '[');
         json_serializer_append(serializer, serializer->options.newline_str);
         ++serializer->indent;
-        for (size_t i = 0; i < value.array_value.length; ++i) {
+        for (size_t i = 0; i < value.value.array.length; ++i) {
             json_serializer_append_indent(serializer);
-            json_serialize_value(serializer, value.array_value.elements[i]);
-            if (i < value.array_value.length - 1) json_serializer_append_char(serializer, ',');
+            json_serialize_value(serializer, value.value.array.elements[i]);
+            if (i < value.value.array.length - 1) json_serializer_append_char(serializer, ',');
             json_serializer_append(serializer, serializer->options.newline_str);
         }
         --serializer->indent;
@@ -1318,7 +1321,7 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
     } break;
     case JSON_VALUE_OBJECT: {
         // For empty we can just append {}
-        if (value.object_value.entry_count == 0) {
+        if (value.value.object.entry_count == 0) {
             json_serializer_append(serializer, "{}");
             break;
         }
@@ -1327,15 +1330,15 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
         json_serializer_append(serializer, serializer->options.newline_str);
         ++serializer->indent;
         size_t entryIndex = 0;
-        for (size_t i = 0; i < value.object_value.buckets_length; ++i) {
-            Json_HashBucket* bucket = &value.object_value.buckets[i];
+        for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
+            Json_HashBucket* bucket = &value.value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j, ++entryIndex) {
                 Json_HashEntry* entry = &bucket->entries[j];
                 json_serializer_append_indent(serializer);
                 json_serialize_string_value(serializer, entry->key);
                 json_serializer_append(serializer, ": ");
                 json_serialize_value(serializer, entry->value);
-                if (entryIndex < value.object_value.entry_count - 1) json_serializer_append_char(serializer, ',');
+                if (entryIndex < value.value.object.entry_count - 1) json_serializer_append_char(serializer, ',');
                 json_serializer_append(serializer, serializer->options.newline_str);
             }
         }
@@ -1377,17 +1380,17 @@ char* json_serialize(Json_Value value, Json_Options options, size_t* out_length)
 void json_free_value(Json_Value* value) {
     switch (value->type) {
     case JSON_VALUE_STRING:
-        JSON_FREE(value->string_value);
+        JSON_FREE(value->value.string);
         break;
     case JSON_VALUE_ARRAY: {
-        for (size_t i = 0; i < value->array_value.length; ++i) {
-            json_free_value(&value->array_value.elements[i]);
+        for (size_t i = 0; i < value->value.array.length; ++i) {
+            json_free_value(&value->value.array.elements[i]);
         }
-        JSON_FREE(value->array_value.elements);
+        JSON_FREE(value->value.array.elements);
     } break;
     case JSON_VALUE_OBJECT: {
-        for (size_t i = 0; i < value->object_value.buckets_length; ++i) {
-            Json_HashBucket* bucket = &value->object_value.buckets[i];
+        for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
+            Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
                 Json_HashEntry* entry = &bucket->entries[j];
                 // Free the value and the key
@@ -1396,7 +1399,7 @@ void json_free_value(Json_Value* value) {
             }
             JSON_FREE(bucket->entries);
         }
-        JSON_FREE(value->object_value.buckets);
+        JSON_FREE(value->value.object.buckets);
     } break;
     default:
         // No resources to free for other types
@@ -1453,7 +1456,7 @@ CTEST_CASE(parse_true) {
     Json_Document doc = json_parse("true", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.bool_value == true);
+    CTEST_ASSERT_TRUE(doc.root.value.boolean == true);
     json_free_document(&doc);
 }
 
@@ -1461,7 +1464,7 @@ CTEST_CASE(parse_false) {
     Json_Document doc = json_parse("false", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.bool_value == false);
+    CTEST_ASSERT_TRUE(doc.root.value.boolean == false);
     json_free_document(&doc);
 }
 
@@ -1469,7 +1472,7 @@ CTEST_CASE(parse_integer) {
     Json_Document doc = json_parse("42", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.int_value == 42);
+    CTEST_ASSERT_TRUE(doc.root.value.integer == 42);
     json_free_document(&doc);
 }
 
@@ -1477,7 +1480,7 @@ CTEST_CASE(parse_negative_integer) {
     Json_Document doc = json_parse("-123", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.int_value == -123);
+    CTEST_ASSERT_TRUE(doc.root.value.integer == -123);
     json_free_document(&doc);
 }
 
@@ -1485,7 +1488,7 @@ CTEST_CASE(parse_double) {
     Json_Document doc = json_parse("3.14", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.double_value > 3.13 && doc.root.double_value < 3.15);
+    CTEST_ASSERT_TRUE(doc.root.value.floating > 3.13 && doc.root.value.floating < 3.15);
     json_free_document(&doc);
 }
 
@@ -1493,7 +1496,7 @@ CTEST_CASE(parse_negative_double) {
     Json_Document doc = json_parse("-0.5", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.double_value < -0.49 && doc.root.double_value > -0.51);
+    CTEST_ASSERT_TRUE(doc.root.value.floating < -0.49 && doc.root.value.floating > -0.51);
     json_free_document(&doc);
 }
 
@@ -1501,7 +1504,7 @@ CTEST_CASE(parse_double_with_exponent) {
     Json_Document doc = json_parse("1.5e10", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.double_value > 1.4e10 && doc.root.double_value < 1.6e10);
+    CTEST_ASSERT_TRUE(doc.root.value.floating > 1.4e10 && doc.root.value.floating < 1.6e10);
     json_free_document(&doc);
 }
 
@@ -1509,7 +1512,7 @@ CTEST_CASE(parse_string) {
     Json_Document doc = json_parse("\"hello\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "hello") == 0);
     json_free_document(&doc);
 }
 
@@ -1517,7 +1520,7 @@ CTEST_CASE(parse_string_with_escapes) {
     Json_Document doc = json_parse("\"line1\\nline2\\ttab\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "line1\nline2\ttab") == 0);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "line1\nline2\ttab") == 0);
     json_free_document(&doc);
 }
 
@@ -1525,7 +1528,7 @@ CTEST_CASE(parse_string_with_unicode) {
     Json_Document doc = json_parse("\"\\u0048\\u0065\\u006c\\u006c\\u006f\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.string_value, "Hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "Hello") == 0);
     json_free_document(&doc);
 }
 
@@ -1535,7 +1538,7 @@ CTEST_CASE(parse_empty_array) {
     Json_Document doc = json_parse("[]", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
-    CTEST_ASSERT_TRUE(doc.root.array_value.length == 0);
+    CTEST_ASSERT_TRUE(doc.root.value.array.length == 0);
     json_free_document(&doc);
 }
 
@@ -1543,10 +1546,10 @@ CTEST_CASE(parse_array_with_values) {
     Json_Document doc = json_parse("[1, 2, 3]", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
-    CTEST_ASSERT_TRUE(doc.root.array_value.length == 3);
-    CTEST_ASSERT_TRUE(doc.root.array_value.elements[0].int_value == 1);
-    CTEST_ASSERT_TRUE(doc.root.array_value.elements[1].int_value == 2);
-    CTEST_ASSERT_TRUE(doc.root.array_value.elements[2].int_value == 3);
+    CTEST_ASSERT_TRUE(doc.root.value.array.length == 3);
+    CTEST_ASSERT_TRUE(doc.root.value.array.elements[0].value.integer == 1);
+    CTEST_ASSERT_TRUE(doc.root.value.array.elements[1].value.integer == 2);
+    CTEST_ASSERT_TRUE(doc.root.value.array.elements[2].value.integer == 3);
     json_free_document(&doc);
 }
 
@@ -1556,7 +1559,7 @@ CTEST_CASE(parse_empty_object) {
     Json_Document doc = json_parse("{}", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
-    CTEST_ASSERT_TRUE(doc.root.object_value.entry_count == 0);
+    CTEST_ASSERT_TRUE(doc.root.value.object.entry_count == 0);
     json_free_document(&doc);
 }
 
@@ -1564,11 +1567,11 @@ CTEST_CASE(parse_object_with_properties) {
     Json_Document doc = json_parse("{\"name\": \"John\", \"age\": 30}", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
-    CTEST_ASSERT_TRUE(doc.root.object_value.entry_count == 2);
+    CTEST_ASSERT_TRUE(doc.root.value.object.entry_count == 2);
     Json_Value* name = json_object_get(&doc.root, "name");
     Json_Value* age = json_object_get(&doc.root, "age");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "John") == 0);
-    CTEST_ASSERT_TRUE(age != NULL && age->int_value == 30);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "John") == 0);
+    CTEST_ASSERT_TRUE(age != NULL && age->value.integer == 30);
     json_free_document(&doc);
 }
 
@@ -1583,7 +1586,7 @@ CTEST_CASE(parse_leading_zeros_error) {
 CTEST_CASE(parse_leading_zeros_allowed_with_extension) {
     Json_Document doc = json_parse("007", (Json_Options){ .extensions = JSON_EXTENSION_LEADING_ZEROS });
     ASSERT_NO_ERRORS(doc);
-    CTEST_ASSERT_TRUE(doc.root.int_value == 7);
+    CTEST_ASSERT_TRUE(doc.root.value.integer == 7);
     json_free_document(&doc);
 }
 
@@ -1596,7 +1599,7 @@ CTEST_CASE(parse_trailing_comma_error) {
 CTEST_CASE(parse_trailing_comma_allowed_with_extension) {
     Json_Document doc = json_parse("[1, 2, 3,]", (Json_Options){ .extensions = JSON_EXTENSION_TRAILING_COMMAS });
     ASSERT_NO_ERRORS(doc);
-    CTEST_ASSERT_TRUE(doc.root.array_value.length == 3);
+    CTEST_ASSERT_TRUE(doc.root.value.array.length == 3);
     json_free_document(&doc);
 }
 
@@ -1609,8 +1612,8 @@ CTEST_CASE(build_object_manually) {
 
     Json_Value* name = json_object_get(&obj, "name");
     Json_Value* score = json_object_get(&obj, "score");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "Alice") == 0);
-    CTEST_ASSERT_TRUE(score != NULL && score->int_value == 100);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Alice") == 0);
+    CTEST_ASSERT_TRUE(score != NULL && score->value.integer == 100);
 
     json_free_value(&obj);
 }
@@ -1621,10 +1624,50 @@ CTEST_CASE(build_array_manually) {
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
 
-    CTEST_ASSERT_TRUE(arr.array_value.length == 3);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->int_value == 10);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->int_value == 20);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 2)->int_value == 30);
+    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 10);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 20);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 2)->value.integer == 30);
+
+    json_free_value(&arr);
+}
+
+CTEST_CASE(object_get_at_and_remove) {
+    Json_Value obj = json_object();
+    json_object_set(&obj, "a", json_int(1));
+    json_object_set(&obj, "b", json_int(2));
+
+    // Test get_at
+    char const* key = NULL;
+    Json_Value val;
+    CTEST_ASSERT_TRUE(json_object_get_at(&obj, 0, &key, &val));
+    CTEST_ASSERT_TRUE(key != NULL);
+
+    // Test remove
+    Json_Value removed;
+    CTEST_ASSERT_TRUE(json_object_remove(&obj, "a", &removed));
+    CTEST_ASSERT_TRUE(removed.value.integer == 1);
+    CTEST_ASSERT_TRUE(obj.value.object.entry_count == 1);
+    CTEST_ASSERT_TRUE(json_object_get(&obj, "a") == NULL);
+
+    json_free_value(&obj);
+}
+
+CTEST_CASE(array_set_and_remove) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(10));
+    json_array_append(&arr, json_int(20));
+    json_array_append(&arr, json_int(30));
+
+    // Test set
+    json_array_set(&arr, 1, json_int(99));
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 99);
+
+    // Test remove
+    json_array_remove(&arr, 0);
+    CTEST_ASSERT_TRUE(arr.value.array.length == 2);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 99);
+    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 30);
 
     json_free_value(&arr);
 }
@@ -1670,8 +1713,8 @@ CTEST_CASE(serialize_roundtrip) {
     // Verify the re-parsed values match
     Json_Value* name = json_object_get(&doc2.root, "name");
     Json_Value* active = json_object_get(&doc2.root, "active");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->string_value, "Bob") == 0);
-    CTEST_ASSERT_TRUE(active != NULL && active->bool_value == true);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Bob") == 0);
+    CTEST_ASSERT_TRUE(active != NULL && active->value.boolean == true);
 
     free(serialized);
     json_free_document(&doc);
