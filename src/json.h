@@ -1131,6 +1131,45 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
     return false;
 }
 
+// Resource release ////////////////////////////////////////////////////////////
+
+void json_value_free(Json_Value* value) {
+    switch (value->type) {
+    case JSON_VALUE_STRING:
+        JSON_FREE(value->string_value);
+        break;
+    case JSON_VALUE_ARRAY:
+    {
+        for (size_t i = 0; i < value->array_value.length; ++i) {
+            json_value_free(&value->array_value.elements[i]);
+        }
+        JSON_FREE(value->array_value.elements);
+    } break;
+    case JSON_VALUE_OBJECT:
+    {
+        for (size_t i = 0; i < value->object_value.buckets_length; ++i) {
+            Json_HashBucket* bucket = &value->object_value.buckets[i];
+            for (size_t j = 0; j < bucket->length; ++j) {
+                Json_HashEntry* entry = &bucket->entries[j];
+                // Free the value and the key
+                json_value_free(&entry->value);
+                JSON_FREE(entry->key);
+            }
+            JSON_FREE(bucket->entries);
+        }
+        JSON_FREE(value->object_value.buckets);
+    } break;
+    default:
+        // No resources to free for other types
+        break;
+    }
+}
+
+void json_document_free(Json_Document* doc) {
+    json_value_free(&doc->root);
+    JSON_FREE(doc->errors.elements);
+}
+
 #ifdef __cplusplus
 }
 #endif
