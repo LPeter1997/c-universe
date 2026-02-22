@@ -1222,9 +1222,9 @@ static void json_serializer_append_char(Json_Serializer* serializer, char c) {
 }
 
 static void json_serializer_append_indent(Json_Serializer* serializer) {
-    if (serializer->options.indent_string == NULL) return;
+    if (serializer->options.indent_str == NULL) return;
     for (size_t i = 0; i < serializer->indent; ++i) {
-        json_serializer_append(serializer, serializer->options.indent_string);
+        json_serializer_append(serializer, serializer->options.indent_str);
     }
 }
 
@@ -1297,13 +1297,23 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
         json_serialize_string_value(serializer, value.string_value);
         break;
     case JSON_VALUE_ARRAY: {
+        // For empty we can just append []
+        if (value.array_value.length == 0) {
+            json_serializer_append(serializer, "[]");
+            break;
+        }
+        // For non-empty, we print each element on a new line with indentation
         json_serializer_append_char(serializer, '[');
+        json_serializer_append(serializer, serializer->options.newline_str);
         ++serializer->indent;
         for (size_t i = 0; i < value.array_value.length; ++i) {
-            if (i > 0) json_serializer_append_char(serializer, ',');
+            json_serializer_append_indent(serializer);
             json_serialize_value(serializer, value.array_value.elements[i]);
+            if (i < value.array_value.length - 1) json_serializer_append_char(serializer, ',');
+            json_serializer_append(serializer, serializer->options.newline_str);
         }
         --serializer->indent;
+        json_serializer_append_indent(serializer);
         json_serializer_append_char(serializer, ']');
     } break;
     case JSON_VALUE_OBJECT: {
@@ -1314,7 +1324,7 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
         }
         // For non-empty, we print each property on a new line with indentation
         json_serializer_append_char(serializer, '{');
-        json_serializer_append(serializer, serializer->options.newline_string);
+        json_serializer_append(serializer, serializer->options.newline_str);
         ++serializer->indent;
         size_t entryIndex = 0;
         for (size_t i = 0; i < value.object_value.buckets_length; ++i) {
@@ -1326,7 +1336,7 @@ static void json_serialize_value(Json_Serializer* serializer, Json_Value value) 
                 json_serializer_append(serializer, ": ");
                 json_serialize_value(serializer, entry->value);
                 if (entryIndex < value.object_value.entry_count - 1) json_serializer_append_char(serializer, ',');
-                json_serializer_append(serializer, serializer->options.newline_string);
+                json_serializer_append(serializer, serializer->options.newline_str);
             }
         }
         --serializer->indent;
