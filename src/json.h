@@ -188,6 +188,14 @@ JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
  * @returns The number of characters the serialized JSON string would have written, excluding the null terminator.
  */
 JSON_DEF size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
+
+/**
+ * Serializes the given JSON value into a newly allocated string, which must be freed by the caller using JSON_FREE.
+ * @param value The JSON value to serialize.
+ * @param options The options to customize the behavior of the serializer.
+ * @param out_length A pointer to a size_t variable that will receive the length of the serialized string, excluding the null terminator. Can be NULL if the length is not needed.
+ * @returns A newly allocated string containing the serialized JSON value.
+ */
 JSON_DEF char* json_serialize(Json_Value value, Json_Options options, size_t* out_length);
 
 JSON_DEF Json_Value json_object(void);
