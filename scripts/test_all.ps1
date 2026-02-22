@@ -95,3 +95,17 @@ Compile-And-Run `
     -Sources @("../src/string_builder.h") `
     -Defines @("STRING_BUILDER_EXAMPLE") `
     -AllowUnusedParameters
+
+# 5. JSON library
+Write-Host "running self-test for JSON library..."
+Compile-And-Run `
+    -Sources @("../src/json.h") `
+    -Defines @("JSON_STATIC", "JSON_IMPLEMENTATION", "JSON_SELF_TEST") `
+    -AllowUnusedParameters `
+    -AllowUnusedFunctions
+Write-Host "running example for JSON library..."
+Compile-And-Run `
+    -Sources @("../src/json.h") `
+    -Defines @("JSON_EXAMPLE") `
+    -AllowUnusedParameters `
+    -AllowUnusedFunctions

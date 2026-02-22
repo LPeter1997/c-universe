@@ -540,7 +540,7 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     if (fileSize < 0) goto io_fail;
     fseek(file, 0, SEEK_SET);
     // Read file content
-    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, (size_t)fileSize);
+    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, (size_t)fileSize * sizeof(char));
     ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
     size_t bytesRead = fread(fileContent, 1, (size_t)fileSize, file);
     fclose(file);
@@ -709,7 +709,7 @@ static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argum
     void* resultValue = NULL;
     if (argument->option->parse_fn == NULL) {
         // Paste the raw text as the value
-        char* valueCopy = (char*)ARGPARSE_REALLOC(NULL, valueLength + 1);
+        char* valueCopy = (char*)ARGPARSE_REALLOC(NULL, (size_t)(valueLength + 1) * sizeof(char));
         ARGPARSE_ASSERT(valueCopy != NULL, "failed to allocate memory for option value");
         memcpy(valueCopy, value, valueLength);
         valueCopy[valueLength] = '\0';
@@ -1079,7 +1079,7 @@ char* argparse_vformat(char const* format, va_list args) {
     int length = vsnprintf(NULL, 0, format, args_copy);
     ARGPARSE_ASSERT(length >= 0, "failed to compute length of formatted string");
     va_end(args_copy);
-    char* buffer = (char*)ARGPARSE_REALLOC(NULL, (size_t)length + 1);
+    char* buffer = (char*)ARGPARSE_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
     ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
     vsnprintf(buffer, (size_t)length + 1, format, args);
     return buffer;
