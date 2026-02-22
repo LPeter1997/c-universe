@@ -39,8 +39,14 @@ extern "C" {
 
 typedef enum Json_Extension {
     JSON_EXTENSION_NONE = 0,
-    JSON_EXTENSION_COMMENTS = 1 << 0,
-    JSON_EXTENSION_TRAILING_COMMAS = 1 << 1,
+    JSON_EXTENSION_LINE_COMMENTS = 1 << 0,
+    JSON_EXTENSION_BLOCK_COMMENTS = 1 << 1,
+    JSON_EXTENSION_TRAILING_COMMAS = 1 << 2,
+    JSON_EXTENSION_LEADING_ZEROS = 1 << 3,
+    JSON_EXTENSION_ALL = JSON_EXTENSION_LINE_COMMENTS
+                       | JSON_EXTENSION_BLOCK_COMMENTS
+                       | JSON_EXTENSION_TRAILING_COMMAS
+                       | JSON_EXTENSION_LEADING_ZEROS,
 } Json_Extension;
 
 typedef struct Json_Options {
@@ -321,7 +327,7 @@ start:
     // We check for line comments here
     if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '/') {
         // If extension is not enabled, report an error
-        if ((parser->options.extensions & JSON_EXTENSION_COMMENTS) == 0) {
+        if ((parser->options.extensions & JSON_EXTENSION_LINE_COMMENTS) == 0) {
             char* message = json_format("line comments are not allowed");
             json_parser_report_error(parser, parser->position, message);
             // We still continue the parser, treating the comment as whitespace
@@ -331,6 +337,33 @@ start:
         while (true) {
             char c = json_parser_peek(parser, 0, '\n');
             if (c == '\n' || c == '\r') break;
+            json_parser_advance(parser, 1);
+        }
+        // Whitespaces and comment again
+        goto start;
+    }
+
+    // And for block comments
+    if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '*') {
+        // If extension is not enabled, report an error
+        if ((parser->options.extensions & JSON_EXTENSION_BLOCK_COMMENTS) == 0) {
+            char* message = json_format("block comments are not allowed");
+            json_parser_report_error(parser, parser->position, message);
+            // We still continue the parser, treating the comment as whitespace
+        }
+        // Skip the comment
+        json_parser_advance(parser, 2);
+        while (true) {
+            char c = json_parser_peek(parser, 0, '\0');
+            if (c == '\0') {
+                char* message = json_format("unexpected end of input in block comment");
+                json_parser_report_error(parser, parser->position, message);
+                return;
+            }
+            if (c == '*' && json_parser_peek(parser, 1, '\0') == '/') {
+                json_parser_advance(parser, 2);
+                break;
+            }
             json_parser_advance(parser, 1);
         }
         // Whitespaces and comment again
@@ -522,9 +555,16 @@ static void json_parse_number_value(Json_Parser* parser) {
         ++parserOffset;
     }
     size_t digitStart = parserOffset;
+    bool leadingZero = false;
     while (true) {
         char c = json_parser_peek(parser, parserOffset, '\0');
         if (!isdigit((unsigned char)c)) break;
+        if (c == '0' && parserOffset == digitStart) leadingZero = true;
+        if (leadingZero && parserOffset > digitStart && (parser->options.extensions & JSON_EXTENSION_LEADING_ZEROS) == 0) {
+            char* message = json_format("leading zeros are not allowed in number values");
+            json_parser_report_error(parser, parser->position, message);
+            // We don't actually return here, for best-effort we just skip the leading zeros
+        }
         intValue = intValue * 10 + (unsigned long long)(c - '0');
         ++parserOffset;
     }
