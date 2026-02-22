@@ -466,6 +466,69 @@ static Json_Value json_parse_identifier_value(Json_Parser* parser) {
     }
 }
 
+static Json_Value json_parse_number_value(Json_Parser* parser) {
+    long long intValue = 0;
+    bool negate = false;
+    size_t parserOffset = 0;
+    // Minus sign has to stick to the number, no whitespace allowed in between
+    if (json_parser_peek(parser, parserOffset, '\0') == '-') {
+        negate = true;
+        ++parserOffset;
+    }
+    while (true) {
+        char c = json_parser_peek(parser, parserOffset, '\0');
+        if (!isdigit(c)) break;
+        intValue = intValue * 10 + (c - '0');
+        ++parserOffset;
+    }
+    if (negate) intValue = -intValue;
+    // From here on we have a fraction and exponent part, both optional
+    // Check, if either is coming up, if not, we can return an int value
+    char next = json_parser_peek(parser, parserOffset, '\0');
+    if (next != '.' && next != 'e' && next != 'E') {
+        json_parser_advance(parser, parserOffset);
+        return json_int(intValue);
+    }
+    // We have a fraction or exponent part, we need to parse as double
+    double doubleValue = (double)intValue;
+    if (next == '.') {
+        // Fractional part is present, skip dot
+        ++parserOffset;
+        double fractionMultiplier = 0.1;
+        while (true) {
+            char c = json_parser_peek(parser, parserOffset, '\0');
+            if (!isdigit(c)) break;
+            doubleValue += (c - '0') * fractionMultiplier;
+            fractionMultiplier *= 0.1;
+            ++parserOffset;
+        }
+    }
+    next = json_parser_peek(parser, parserOffset, '\0');
+    if (next == 'e' || next == 'E') {
+        // Exponent part is present, skip 'e' or 'E'
+        ++parserOffset;
+        bool expNegate = false;
+        if (json_parser_peek(parser, parserOffset, '\0') == '-') {
+            expNegate = true;
+            ++parserOffset;
+        }
+        else if (json_parser_peek(parser, parserOffset, '\0') == '+') {
+            ++parserOffset;
+        }
+        int exponent = 0;
+        while (true) {
+            char c = json_parser_peek(parser, parserOffset, '\0');
+            if (!isdigit(c)) break;
+            exponent = exponent * 10 + (c - '0');
+            ++parserOffset;
+        }
+        if (expNegate) exponent = -exponent;
+        doubleValue *= pow(10, exponent);
+    }
+    json_parser_advance(parser, parserOffset);
+    return json_double(doubleValue);
+}
+
 static Json_Value json_parse_value(Json_Parser* parser) {
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
@@ -479,7 +542,7 @@ static Json_Value json_parse_value(Json_Parser* parser) {
         return json_parse_string_value(parser);
     }
     else if (isdigit(c) || c == '-') {
-        // TODO: Parse number (int or double)
+        return json_parse_number_value(parser);
     }
     else if (json_isident(c)) {
         return json_parse_identifier_value(parser);
