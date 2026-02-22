@@ -214,7 +214,7 @@
 
 #define HashTable_set(table, in_key, in_value) \
     do { \
-        if (HashTable_load_factor(table) > 0.75) { \
+        if (HashTable_load_factor(table) > 0.75 || (table).buckets_length == 0) { \
             HashTable_grow(table); \
         } \
         size_t __COLLECTIONS_ID(hash) = (table).hash_fn(in_key); \
