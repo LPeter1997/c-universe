@@ -439,6 +439,33 @@ static Json_Value json_parse_string_value(Json_Parser* parser) {
     };
 }
 
+static Json_Value json_parse_identifier_value(Json_Parser* parser) {
+    size_t parserOffset = 0;
+    while (json_isident(json_parser_peek(parser, parserOffset, '\0'))) ++parserOffset;
+
+    // Check if we match true/false/null
+    char const* ident = parser->text + parser->index;
+    if (parserOffset == 4 && strncmp(ident, "true", 4) == 0) {
+        json_parser_advance(parser, 4);
+        return json_bool(true);
+    }
+    else if (parserOffset == 5 && strncmp(ident, "false", 5) == 0) {
+        json_parser_advance(parser, 5);
+        return json_bool(false);
+    }
+    else if (parserOffset == 4 && strncmp(ident, "null", 4) == 0) {
+        json_parser_advance(parser, 4);
+        return json_null();
+    }
+    else {
+        char* message = json_format("unexpected identifier '%.*s'", (int)parserOffset, ident);
+        json_parser_report_error(parser, message);
+        // We don't actually return here, for best-effort we just skip it and return null
+        json_parser_advance(parser, parserOffset);
+        return json_null();
+    }
+}
+
 static Json_Value json_parse_value(Json_Parser* parser) {
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
@@ -455,7 +482,7 @@ static Json_Value json_parse_value(Json_Parser* parser) {
         // TODO: Parse number (int or double)
     }
     else if (json_isident(c)) {
-        // TODO: Parse an identifier, match to true/false/null
+        return json_parse_identifier_value(parser);
     }
     else {
         char* message = json_format("unexpected character '%c' while parsing value", c);
