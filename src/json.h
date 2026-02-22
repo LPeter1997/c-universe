@@ -354,7 +354,6 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 
 #include <assert.h>
 #include <ctype.h>
-#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -390,6 +389,18 @@ typedef struct Json_HashBucket {
 } Json_HashBucket;
 
 static const double Json_HashTable_UpsizeLoadFactor = 0.75;
+
+// We whip up our own pow10 function to avoid depending on math.h, which might need extra linker flags on some platforms
+static double json_pow10(int exp) {
+    double result = 1;
+    if (exp > 0) {
+        for (int i = 0; i < exp; ++i) result *= 10;
+    }
+    else if (exp < 0) {
+        for (int i = 0; i < -exp; ++i) result /= 10;
+    }
+    return result;
+}
 
 static bool json_isident(char c) {
     return isalpha((unsigned char)c) || isdigit((unsigned char)c) || c == '_';
@@ -842,7 +853,7 @@ static void json_parse_number_value(Json_Parser* parser) {
             json_parser_report_error(parser, parser->position, message);
         }
         if (expNegate) exponent = -exponent;
-        doubleValue *= pow(10, exponent);
+        doubleValue *= json_pow10(exponent);
     }
     // Apply sign at the end
     if (negate) doubleValue = -doubleValue;
