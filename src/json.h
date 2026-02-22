@@ -37,6 +37,9 @@
 extern "C" {
 #endif
 
+/**
+ * Extension flags for the JSON parser, allowing it to support common, non-standard JSON features.
+ */
 typedef enum Json_Extension {
     JSON_EXTENSION_NONE = 0,
     JSON_EXTENSION_LINE_COMMENTS = 1 << 0,
@@ -49,34 +52,66 @@ typedef enum Json_Extension {
                        | JSON_EXTENSION_LEADING_ZEROS,
 } Json_Extension;
 
+/**
+ * Options for the JSON parser and serializer, allowing customization of their behavior.
+ */
 typedef struct Json_Options {
+    // Enabled extensions, a combination of @see Json_Extension flags.
     Json_Extension extensions;
+    // The string to use for newlines when serializing. NULL means no newline.
     char const* newline_str;
+    // The string to use for indentation when serializing. NULL means no indentation.
     char const* indent_str;
 } Json_Options;
 
+/**
+ * Represents an error encountered during JSON parsing.
+ */
 typedef struct Json_Error {
-    // Owned string
+    // A human-readable message describing the error.
+    // Owned by the document it's added to, the library will call JSON_FREE on it when the document is freed.
     char* message;
+    // The line number where the error occurred, starting from 0.
     size_t line;
+    // The column number where the error occurred, starting from 0.
     size_t column;
+    // The index in the input string where the error occurred, starting from 0.
     size_t index;
 } Json_Error;
 
+/**
+ * A set of callback functions for a SAX-style JSON parser, allowing the caller to handle JSON parsing events in a streaming fashion.
+ */
 typedef struct Json_Sax {
+    // The callback when a null value is encountered.
     void(*on_null)(void* user_data);
+    // The callback when a boolean value is encountered, with the boolean value as an argument.
     void(*on_bool)(void* user_data, bool value);
+    // The callback when an integer value is encountered, with the integer value as an argument.
     void(*on_int)(void* user_data, long long value);
+    // The callback when a double value is encountered, with the double value as an argument.
     void(*on_double)(void* user_data, double value);
+    // The callback when a string value is encountered, with the string value and its length as arguments.
+    // The string is null-terminated. If the callback is not null, the responsibility of freeing the string is on the caller.
     void(*on_string)(void* user_data, char* value, size_t length);
+    // The callback when the start of an array is encountered.
     void(*on_array_start)(void* user_data);
+    // The callback when the end of an array is encountered.
     void(*on_array_end)(void* user_data);
+    // The callback when the start of an object is encountered.
     void(*on_object_start)(void* user_data);
+    // The callback when a key in an object is encountered, with the key and its length as arguments.
+    // The key is null-terminated. If the callback is not null, the responsibility of freeing the key is on the caller.
     void(*on_object_key)(void* user_data, char* key, size_t length);
+    // The callback when the end of an object is encountered.
     void(*on_object_end)(void* user_data);
+    // The callback when an error is encountered during parsing, with the error details as an argument.
     void(*on_error)(void* user_data, Json_Error error);
 } Json_Sax;
 
+/**
+ * The different legal types of JSON values.
+ */
 typedef enum Json_ValueType {
     JSON_VALUE_NULL,
     JSON_VALUE_BOOL,
@@ -89,7 +124,11 @@ typedef enum Json_ValueType {
 
 struct Json_HashBucket;
 
+/**
+ * Represents a JSON value, which can be of various types including null, boolean, integer, double, string, array or object.
+ */
 typedef struct Json_Value {
+    // The type of the JSON value, which determines the legal field to access in @see value.
     Json_ValueType type;
     union {
         bool boolean;
@@ -110,6 +149,9 @@ typedef struct Json_Value {
     } value;
 } Json_Value;
 
+/**
+ * Represents a JSON document, containing the root JSON value and any errors encountered during parsing.
+ */
 typedef struct Json_Document {
     Json_Value root;
     struct {
