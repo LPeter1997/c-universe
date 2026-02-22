@@ -9,10 +9,10 @@
  *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * StringBuilder API:
- *  - Use string_builder_puts, string_builder_putsn, string_builder_putc and string_builder_format to build the string as needed
- *  - Use string_builder_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
- *  - Use string_builder_clear to clear the content of the builder without freeing the allocated buffer
- *  - Use string_builder_free to free the memory allocated for the builder when it is no longer needed
+ *  - Use sb_puts, sb_putsn, sb_putc and sb_format to build the string as needed
+ *  - Use sb_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
+ *  - Use sb_clear to clear the content of the builder without freeing the allocated buffer
+ *  - Use sb_free to free the memory allocated for the builder when it is no longer needed
  *
  * CodeBuilder API:
  *  - Similar to StringBuilder but with automatic indentation at the start of lines, useful for code generation
@@ -67,7 +67,7 @@ typedef struct StringBuilder {
  * @param sb The string builder to reserve capacity for.
  * @param capacity The minimum capacity to ensure.
  */
-STRING_BUILDER_DEF void string_builder_reserve(StringBuilder* sb, size_t capacity);
+STRING_BUILDER_DEF void sb_reserve(StringBuilder* sb, size_t capacity);
 
 /**
  * Converts the current content of the builder to a null-terminated C string.
@@ -75,26 +75,26 @@ STRING_BUILDER_DEF void string_builder_reserve(StringBuilder* sb, size_t capacit
  * @param sb The string builder to convert.
  * @return A null-terminated C string with the current content of the builder.
  */
-STRING_BUILDER_DEF char* string_builder_to_cstr(StringBuilder* sb);
+STRING_BUILDER_DEF char* sb_to_cstr(StringBuilder* sb);
 
 /**
  * Frees the memory allocated for the builder and resets its state.
  * @param sb The string builder to free.
  */
-STRING_BUILDER_DEF void string_builder_free(StringBuilder* sb);
+STRING_BUILDER_DEF void sb_free(StringBuilder* sb);
 
 /**
  * Clears the content of the builder without freeing the allocated buffer.
  * @param sb The string builder to clear.
  */
-STRING_BUILDER_DEF void string_builder_clear(StringBuilder* sb);
+STRING_BUILDER_DEF void sb_clear(StringBuilder* sb);
 
 /**
  * Appends a null-terminated string to the builder.
  * @param sb The string builder to append to.
  * @param str The null-terminated string to append.
  */
-STRING_BUILDER_DEF void string_builder_puts(StringBuilder* sb, char const* str);
+STRING_BUILDER_DEF void sb_puts(StringBuilder* sb, char const* str);
 
 /**
  * Appends a string with the given length to the builder.
@@ -102,14 +102,14 @@ STRING_BUILDER_DEF void string_builder_puts(StringBuilder* sb, char const* str);
  * @param str The string to append, not necessarily null-terminated.
  * @param n The length of the string to append.
  */
-STRING_BUILDER_DEF void string_builder_putsn(StringBuilder* sb, char const* str, size_t n);
+STRING_BUILDER_DEF void sb_putsn(StringBuilder* sb, char const* str, size_t n);
 
 /**
  * Appends a single character to the builder.
  * @param sb The string builder to append to.
  * @param c The character to append.
  */
-STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
+STRING_BUILDER_DEF void sb_putc(StringBuilder* sb, char c);
 
 /**
  * Appends formatted content to the builder, similar to printf.
@@ -117,15 +117,15 @@ STRING_BUILDER_DEF void string_builder_putc(StringBuilder* sb, char c);
  * @param format The format string, similar to printf.
  * @param ... The arguments for the format string.
  */
-STRING_BUILDER_DEF void string_builder_format(StringBuilder* sb, char const* format, ...);
+STRING_BUILDER_DEF void sb_format(StringBuilder* sb, char const* format, ...);
 
 /**
- * Same as @see string_builder_format but takes a va_list instead of variadic arguments.
+ * Same as @see sb_format but takes a va_list instead of variadic arguments.
  * @param sb The string builder to append to.
  * @param format The format string, similar to printf.
  * @param args The va_list of arguments for the format string.
  */
-STRING_BUILDER_DEF void string_builder_vformat(StringBuilder* sb, char const* format, va_list args);
+STRING_BUILDER_DEF void sb_vformat(StringBuilder* sb, char const* format, va_list args);
 
 /**
  * Utility for building code with indentation, using an underlying string builder.
@@ -177,7 +177,7 @@ extern "C" {
 
 // String builder //////////////////////////////////////////////////////////////
 
-void string_builder_reserve(StringBuilder* sb, size_t capacity) {
+void sb_reserve(StringBuilder* sb, size_t capacity) {
     if (capacity <= sb->capacity) return;
 
     size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
@@ -188,7 +188,7 @@ void string_builder_reserve(StringBuilder* sb, size_t capacity) {
     sb->capacity = newCapacity;
 }
 
-char* string_builder_to_cstr(StringBuilder* sb) {
+char* sb_to_cstr(StringBuilder* sb) {
     char* cstr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (sb->length + 1));
     STRING_BUILDER_ASSERT(cstr != NULL, "failed to allocate memory for cstring from string builder");
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
@@ -196,47 +196,47 @@ char* string_builder_to_cstr(StringBuilder* sb) {
     return cstr;
 }
 
-void string_builder_free(StringBuilder* sb) {
+void sb_free(StringBuilder* sb) {
     STRING_BUILDER_FREE(sb->buffer);
     sb->buffer = NULL;
     sb->length = 0;
     sb->capacity = 0;
 }
 
-void string_builder_clear(StringBuilder* sb) {
+void sb_clear(StringBuilder* sb) {
     sb->length = 0;
 }
 
-void string_builder_puts(StringBuilder* sb, char const* str) {
+void sb_puts(StringBuilder* sb, char const* str) {
     size_t strLength = strlen(str);
-    string_builder_putsn(sb, str, strLength);
+    sb_putsn(sb, str, strLength);
 }
 
-void string_builder_putsn(StringBuilder* sb, char const* str, size_t n) {
-    string_builder_reserve(sb, sb->length + n);
+void sb_putsn(StringBuilder* sb, char const* str, size_t n) {
+    sb_reserve(sb, sb->length + n);
     memcpy(sb->buffer + sb->length, str, sizeof(char) * n);
     sb->length += n;
 }
 
-void string_builder_putc(StringBuilder* sb, char c) {
-    string_builder_reserve(sb, sb->length + 1);
+void sb_putc(StringBuilder* sb, char c) {
+    sb_reserve(sb, sb->length + 1);
     sb->buffer[sb->length] = c;
     sb->length += 1;
 }
 
-void string_builder_format(StringBuilder* sb, char const* format, ...) {
+void sb_format(StringBuilder* sb, char const* format, ...) {
     va_list args;
     va_start(args, format);
-    string_builder_vformat(sb, format, args);
+    sb_vformat(sb, format, args);
     va_end(args);
 }
 
-void string_builder_vformat(StringBuilder* sb, char const* format, va_list args) {
+void sb_vformat(StringBuilder* sb, char const* format, va_list args) {
     va_list args_copy;
     va_copy(args_copy, args);
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
-    string_builder_reserve(sb, sb->length + (size_t)formattedLength);
+    sb_reserve(sb, sb->length + (size_t)formattedLength);
     vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
     sb->length += (size_t)formattedLength;
 }
@@ -248,7 +248,7 @@ static void code_builder_indent_if_needed(CodeBuilder* cb) {
     if (sb->length == 0 || sb->buffer[sb->length - 1] == '\n' || sb->buffer[sb->length - 1] == '\r') {
         char const* indent = cb->indent_str == NULL ? "    " : cb->indent_str;
         for (size_t i = 0; i < cb->indent_level; ++i) {
-            string_builder_puts(sb, indent);
+            sb_puts(sb, indent);
         }
     }
 }
@@ -275,18 +275,18 @@ static size_t code_builder_line_length(char const* str, size_t maxLength) {
 }
 
 void code_builder_reserve(CodeBuilder* cb, size_t capacity) {
-    string_builder_reserve(&cb->builder, capacity);
+    sb_reserve(&cb->builder, capacity);
 }
 
 char* code_builder_to_cstr(CodeBuilder* cb) {
-    return string_builder_to_cstr(&cb->builder);
+    return sb_to_cstr(&cb->builder);
 }
 
 void code_builder_free(CodeBuilder* cb) {
-    string_builder_free(&cb->builder);
+    sb_free(&cb->builder);
 }
 void code_builder_clear(CodeBuilder* cb) {
-    string_builder_clear(&cb->builder);
+    sb_clear(&cb->builder);
 }
 
 void code_builder_puts(CodeBuilder* cb, char const* str) {
@@ -299,7 +299,7 @@ void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n) {
     while (n > 0) {
         size_t lineLength = code_builder_line_length(str, n);
         code_builder_indent_if_needed(cb);
-        string_builder_putsn(&cb->builder, str, lineLength);
+        sb_putsn(&cb->builder, str, lineLength);
         str += lineLength;
         n -= lineLength;
     }
@@ -307,7 +307,7 @@ void code_builder_putsn(CodeBuilder* cb, char const* str, size_t n) {
 
 void code_builder_putc(CodeBuilder* cb, char c) {
     code_builder_indent_if_needed(cb);
-    string_builder_putc(&cb->builder, c);
+    sb_putc(&cb->builder, c);
 }
 
 void code_builder_format(CodeBuilder* cb, char const* format, ...) {
@@ -383,178 +383,178 @@ CTEST_CASE(string_builder_empty_on_init) {
 
 CTEST_CASE(string_builder_reserve_allocates_memory) {
     StringBuilder sb = test_sb_create();
-    string_builder_reserve(&sb, 32);
+    sb_reserve(&sb, 32);
     CTEST_ASSERT_TRUE(sb.buffer != NULL);
     CTEST_ASSERT_TRUE(sb.capacity >= 32);
     CTEST_ASSERT_TRUE(sb.length == 0);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_reserve_grows_exponentially) {
     StringBuilder sb = test_sb_create();
-    string_builder_reserve(&sb, 1);
+    sb_reserve(&sb, 1);
     size_t initialCapacity = sb.capacity;
     CTEST_ASSERT_TRUE(initialCapacity >= 16);
-    string_builder_reserve(&sb, 100);
+    sb_reserve(&sb, 100);
     CTEST_ASSERT_TRUE(sb.capacity >= 100);
     CTEST_ASSERT_TRUE(sb.capacity > initialCapacity);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_reserve_no_shrink) {
     StringBuilder sb = test_sb_create();
-    string_builder_reserve(&sb, 64);
+    sb_reserve(&sb, 64);
     size_t cap = sb.capacity;
-    string_builder_reserve(&sb, 32);
+    sb_reserve(&sb, 32);
     CTEST_ASSERT_TRUE(sb.capacity == cap);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Puts tests //////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_puts_appends_string) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Hello");
+    sb_puts(&sb, "Hello");
     CTEST_ASSERT_TRUE(sb.length == 5);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_puts_multiple) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Hello");
-    string_builder_puts(&sb, ", ");
-    string_builder_puts(&sb, "World!");
+    sb_puts(&sb, "Hello");
+    sb_puts(&sb, ", ");
+    sb_puts(&sb, "World!");
     CTEST_ASSERT_TRUE(sb.length == 13);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello, World!"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_puts_empty_string) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "");
+    sb_puts(&sb, "");
     CTEST_ASSERT_TRUE(sb.length == 0);
-    string_builder_puts(&sb, "test");
-    string_builder_puts(&sb, "");
+    sb_puts(&sb, "test");
+    sb_puts(&sb, "");
     CTEST_ASSERT_TRUE(sb.length == 4);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Putsn tests /////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_putsn_appends_partial_string) {
     StringBuilder sb = test_sb_create();
-    string_builder_putsn(&sb, "Hello, World!", 5);
+    sb_putsn(&sb, "Hello, World!", 5);
     CTEST_ASSERT_TRUE(sb.length == 5);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_putsn_zero_length) {
     StringBuilder sb = test_sb_create();
-    string_builder_putsn(&sb, "test", 0);
+    sb_putsn(&sb, "test", 0);
     CTEST_ASSERT_TRUE(sb.length == 0);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_putsn_exact_length) {
     StringBuilder sb = test_sb_create();
-    string_builder_putsn(&sb, "test", 4);
+    sb_putsn(&sb, "test", 4);
     CTEST_ASSERT_TRUE(sb.length == 4);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Putc tests //////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_putc_appends_char) {
     StringBuilder sb = test_sb_create();
-    string_builder_putc(&sb, 'A');
+    sb_putc(&sb, 'A');
     CTEST_ASSERT_TRUE(sb.length == 1);
     CTEST_ASSERT_TRUE(sb.buffer[0] == 'A');
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_putc_multiple) {
     StringBuilder sb = test_sb_create();
-    string_builder_putc(&sb, 'H');
-    string_builder_putc(&sb, 'i');
-    string_builder_putc(&sb, '!');
+    sb_putc(&sb, 'H');
+    sb_putc(&sb, 'i');
+    sb_putc(&sb, '!');
     CTEST_ASSERT_TRUE(sb.length == 3);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hi!"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_putc_null_char) {
     StringBuilder sb = test_sb_create();
-    string_builder_putc(&sb, 'A');
-    string_builder_putc(&sb, '\0');
-    string_builder_putc(&sb, 'B');
+    sb_putc(&sb, 'A');
+    sb_putc(&sb, '\0');
+    sb_putc(&sb, 'B');
     CTEST_ASSERT_TRUE(sb.length == 3);
     CTEST_ASSERT_TRUE(sb.buffer[0] == 'A');
     CTEST_ASSERT_TRUE(sb.buffer[1] == '\0');
     CTEST_ASSERT_TRUE(sb.buffer[2] == 'B');
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Format tests ////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_format_simple_string) {
     StringBuilder sb = test_sb_create();
-    string_builder_format(&sb, "Hello, %s!", "World");
+    sb_format(&sb, "Hello, %s!", "World");
     CTEST_ASSERT_TRUE(sb.length == 13);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello, World!"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_format_integer) {
     StringBuilder sb = test_sb_create();
-    string_builder_format(&sb, "Value: %d", 42);
+    sb_format(&sb, "Value: %d", 42);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Value: 42"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_format_multiple_args) {
     StringBuilder sb = test_sb_create();
-    string_builder_format(&sb, "%s=%d, %s=%d", "x", 10, "y", 20);
+    sb_format(&sb, "%s=%d, %s=%d", "x", 10, "y", 20);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "x=10, y=20"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_format_append_after_puts) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Count: ");
-    string_builder_format(&sb, "%d items", 5);
+    sb_puts(&sb, "Count: ");
+    sb_format(&sb, "%d items", 5);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Count: 5 items"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_format_empty_format) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "test");
-    string_builder_format(&sb, "");
+    sb_puts(&sb, "test");
+    sb_format(&sb, "");
     CTEST_ASSERT_TRUE(sb.length == 4);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // To cstring tests ////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_to_cstr_creates_null_terminated) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Hello");
-    char* cstr = string_builder_to_cstr(&sb);
+    sb_puts(&sb, "Hello");
+    char* cstr = sb_to_cstr(&sb);
     CTEST_ASSERT_TRUE(cstr != NULL);
     CTEST_ASSERT_TRUE(strlen(cstr) == 5);
     CTEST_ASSERT_TRUE(strcmp(cstr, "Hello") == 0);
     free(cstr);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_to_cstr_empty_builder) {
     StringBuilder sb = test_sb_create();
-    char* cstr = string_builder_to_cstr(&sb);
+    char* cstr = sb_to_cstr(&sb);
     CTEST_ASSERT_TRUE(cstr != NULL);
     CTEST_ASSERT_TRUE(strlen(cstr) == 0);
     CTEST_ASSERT_TRUE(cstr[0] == '\0');
@@ -563,41 +563,41 @@ CTEST_CASE(string_builder_to_cstr_empty_builder) {
 
 CTEST_CASE(string_builder_to_cstr_independent_copy) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Hello");
-    char* cstr = string_builder_to_cstr(&sb);
-    string_builder_puts(&sb, " World"); // Modify original
+    sb_puts(&sb, "Hello");
+    char* cstr = sb_to_cstr(&sb);
+    sb_puts(&sb, " World"); // Modify original
     CTEST_ASSERT_TRUE(strcmp(cstr, "Hello") == 0); // Copy unchanged
     free(cstr);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Clear tests /////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_clear_resets_length) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Hello, World!");
+    sb_puts(&sb, "Hello, World!");
     size_t capBefore = sb.capacity;
-    string_builder_clear(&sb);
+    sb_clear(&sb);
     CTEST_ASSERT_TRUE(sb.length == 0);
     CTEST_ASSERT_TRUE(sb.capacity == capBefore);
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_clear_allows_reuse) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "First");
-    string_builder_clear(&sb);
-    string_builder_puts(&sb, "Second");
+    sb_puts(&sb, "First");
+    sb_clear(&sb);
+    sb_puts(&sb, "Second");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Second"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Free tests //////////////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_free_resets_all) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "test");
-    string_builder_free(&sb);
+    sb_puts(&sb, "test");
+    sb_free(&sb);
     CTEST_ASSERT_TRUE(sb.buffer == NULL);
     CTEST_ASSERT_TRUE(sb.length == 0);
     CTEST_ASSERT_TRUE(sb.capacity == 0);
@@ -605,7 +605,7 @@ CTEST_CASE(string_builder_free_resets_all) {
 
 CTEST_CASE(string_builder_free_empty_builder) {
     StringBuilder sb = test_sb_create();
-    string_builder_free(&sb); // Should not crash
+    sb_free(&sb); // Should not crash
     CTEST_ASSERT_TRUE(sb.buffer == NULL);
 }
 
@@ -613,47 +613,47 @@ CTEST_CASE(string_builder_free_empty_builder) {
 
 CTEST_CASE(string_builder_mixed_operations) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "Name: ");
-    string_builder_format(&sb, "%s", "John");
-    string_builder_puts(&sb, ", Age: ");
-    string_builder_format(&sb, "%d", 30);
+    sb_puts(&sb, "Name: ");
+    sb_format(&sb, "%s", "John");
+    sb_puts(&sb, ", Age: ");
+    sb_format(&sb, "%d", 30);
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Name: John, Age: 30"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_build_path) {
     StringBuilder sb = test_sb_create();
-    string_builder_puts(&sb, "/home");
-    string_builder_putc(&sb, '/');
-    string_builder_puts(&sb, "user");
-    string_builder_putc(&sb, '/');
-    string_builder_puts(&sb, "documents");
+    sb_puts(&sb, "/home");
+    sb_putc(&sb, '/');
+    sb_puts(&sb, "user");
+    sb_putc(&sb, '/');
+    sb_puts(&sb, "documents");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "/home/user/documents"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_large_content) {
     StringBuilder sb = test_sb_create();
     for (int i = 0; i < 1000; ++i) {
-        string_builder_putc(&sb, 'A');
+        sb_putc(&sb, 'A');
     }
     CTEST_ASSERT_TRUE(sb.length == 1000);
     CTEST_ASSERT_TRUE(sb.capacity >= 1000);
     for (size_t i = 0; i < sb.length; ++i) {
         CTEST_ASSERT_TRUE(sb.buffer[i] == 'A');
     }
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_repeated_clear_and_build) {
     StringBuilder sb = test_sb_create();
     for (int i = 0; i < 10; ++i) {
-        string_builder_format(&sb, "iteration %d", i);
-        string_builder_clear(&sb);
+        sb_format(&sb, "iteration %d", i);
+        sb_clear(&sb);
     }
-    string_builder_puts(&sb, "final");
+    sb_puts(&sb, "final");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "final"));
-    string_builder_free(&sb);
+    sb_free(&sb);
 }
 
 // Code builder tests //////////////////////////////////////////////////////////
@@ -763,13 +763,13 @@ CTEST_CASE(code_builder_clear_preserves_indent_level) {
 int main(void) {
     // StringBuilder: simple string concatenation
     StringBuilder sb = { 0 };
-    string_builder_puts(&sb, "Hello, ");
-    string_builder_puts(&sb, "World!");
-    string_builder_format(&sb, " The answer is %d.", 42);
-    char* msg = string_builder_to_cstr(&sb);
+    sb_puts(&sb, "Hello, ");
+    sb_puts(&sb, "World!");
+    sb_format(&sb, " The answer is %d.", 42);
+    char* msg = sb_to_cstr(&sb);
     printf("%s\n\n", msg);
     free(msg);
-    string_builder_free(&sb);
+    sb_free(&sb);
 
     // CodeBuilder: code generation with automatic indentation
     CodeBuilder cb = { 0 };
