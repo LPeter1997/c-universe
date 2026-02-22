@@ -114,7 +114,7 @@ Compile-And-Run `
 Write-Host "running self-test for Collections library..."
 Compile-And-Run `
     -Sources @("../src/collections.h") `
-    -Defines @("COLLECTIONS_STATIC", "COLLECTIONS_IMPLEMENTATION", "COLLECTIONS_SELF_TEST")
+    -Defines @("COLLECTIONS_SELF_TEST")
 #Write-Host "running example for Collections library..."
 #Compile-And-Run `
 #    -Sources @("../src/collections.h") `

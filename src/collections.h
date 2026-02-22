@@ -40,6 +40,8 @@
     #define COLLECTIONS_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
+#define __COLLECTIONS_ID(name) __collections_ ## name ## _ ## __LINE__
+
 #define DynamicArray(T) \
     struct { \
         T* elements; \
@@ -67,12 +69,12 @@
 #define DynamicArray_reserve(array, new_capacity) \
     do { \
         if ((new_capacity) > (array).capacity) { \
-            size_t newCap = (array).capacity == 0 ? 8 : (array).capacity * 2; \
-            while (newCap < (new_capacity)) newCap *= 2; \
-            void* newElements = COLLECTIONS_REALLOC((array).elements, newCap * sizeof(*(array).elements)); \
-            COLLECTIONS_ASSERT(newElements != NULL, "failed to allocate memory for dynamic array"); \
-            (array).elements = newElements; \
-            (array).capacity = newCap; \
+            size_t __COLLECTIONS_ID(new_cap) = (array).capacity == 0 ? 8 : (array).capacity * 2; \
+            while (__COLLECTIONS_ID(new_cap) < (new_capacity)) __COLLECTIONS_ID(new_cap) *= 2; \
+            void* __COLLECTIONS_ID(new_elements) = COLLECTIONS_REALLOC((array).elements, __COLLECTIONS_ID(new_cap) * sizeof(*(array).elements)); \
+            COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_elements) != NULL, "failed to allocate memory for dynamic array"); \
+            (array).elements = __COLLECTIONS_ID(new_elements); \
+            (array).capacity = __COLLECTIONS_ID(new_cap); \
         } \
     } while (false)
 
@@ -112,7 +114,7 @@
 
 // Hash table //////////////////////////////////////////////////////////////////
 
-#define HashTable(K, V, hash_fn, eq_fn) \
+#define HashTable(K, V) \
     struct { \
         struct { \
             struct { \
@@ -131,8 +133,8 @@
 
 #define HashTable_free(table) \
     do { \
-        for (size_t i = 0; i < (table).buckets_length; ++i) { \
-            COLLECTIONS_FREE((table).buckets[i].entries); \
+        for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets_length; ++__COLLECTIONS_ID(i)) { \
+            COLLECTIONS_FREE((table).buckets[__COLLECTIONS_ID(i)].entries); \
         } \
         COLLECTIONS_FREE((table).buckets); \
         (table).buckets = NULL; \
@@ -142,28 +144,49 @@
 
 #define HashTable_resize(table, new_buckets_length) \
     do { \
-        if ((new_buckets_length) != (table).buckets_length) { \
-            struct { K key; V value; size_t hash; }* newBuckets = (struct { K key; V value; size_t hash; }*)COLLECTIONS_REALLOC(NULL, (new_buckets_length) * sizeof(*(newBuckets))); \
-            COLLECTIONS_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets"); \
-            memset(newBuckets, 0, (new_buckets_length) * sizeof(*(newBuckets))); \
-            for (size_t i = 0; i < (table).buckets_length; ++i) { \
-                for (size_t j = 0; j < (table).buckets[i].length; ++j) { \
-                    size_t newBucketIndex = (table).buckets[i].entries[j].hash % (new_buckets_length); \
-                    struct { K key; V value; size_t hash; } entry = (table).buckets[i].entries[j]; \
-                    if ((table).buckets[newBucketIndex].length == (table).buckets[newBucketIndex].capacity) { \
-                        size_t newCap = (table).buckets[newBucketIndex].capacity == 0 ? 8 : (table).buckets[newBucketIndex].capacity * 2; \
-                        void* newEntries = COLLECTIONS_REALLOC((table).buckets[newBucketIndex].entries, newCap * sizeof(*(table).buckets[newBucketIndex].entries)); \
-                        COLLECTIONS_ASSERT(newEntries != NULL, "failed to allocate memory for resized hash table bucket entries"); \
-                        (table).buckets[newBucketIndex].entries = newEntries; \
-                        (table).buckets[newBucketIndex].capacity = newCap; \
+        size_t __COLLECTIONS_ID(new_len) = (new_buckets_length); \
+        if (__COLLECTIONS_ID(new_len) != (table).buckets_length) { \
+            /* Allocate new buckets memory */ \
+            void* __COLLECTIONS_ID(new_ptr) = COLLECTIONS_REALLOC(NULL, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
+            COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_ptr) != NULL, "failed to allocate memory for resized hash table buckets"); \
+            memset(__COLLECTIONS_ID(new_ptr), 0, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
+            /* Save old state */ \
+            void* __COLLECTIONS_ID(old_ptr) = (table).buckets; \
+            size_t __COLLECTIONS_ID(old_len) = (table).buckets_length; \
+            /* Iterate old buckets while still pointing to old */ \
+            for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < __COLLECTIONS_ID(old_len); ++__COLLECTIONS_ID(i)) { \
+                for (size_t __COLLECTIONS_ID(j) = 0; __COLLECTIONS_ID(j) < (table).buckets[__COLLECTIONS_ID(i)].length; ++__COLLECTIONS_ID(j)) { \
+                    /* Capture entry data from old bucket */ \
+                    size_t __COLLECTIONS_ID(entry_hash) = (table).buckets[__COLLECTIONS_ID(i)].entries[__COLLECTIONS_ID(j)].hash; \
+                    void* __COLLECTIONS_ID(entry_ptr) = &(table).buckets[__COLLECTIONS_ID(i)].entries[__COLLECTIONS_ID(j)]; \
+                    size_t __COLLECTIONS_ID(entry_size) = sizeof(*(table).buckets[0].entries); \
+                    /* Calculate new bucket index */ \
+                    size_t __COLLECTIONS_ID(new_idx) = __COLLECTIONS_ID(entry_hash) % __COLLECTIONS_ID(new_len); \
+                    /* Switch to new buckets to write */ \
+                    (table).buckets = __COLLECTIONS_ID(new_ptr); \
+                    (table).buckets_length = __COLLECTIONS_ID(new_len); \
+                    /* Ensure new bucket has capacity */ \
+                    if ((table).buckets[__COLLECTIONS_ID(new_idx)].length == (table).buckets[__COLLECTIONS_ID(new_idx)].capacity) { \
+                        size_t __COLLECTIONS_ID(new_cap) = (table).buckets[__COLLECTIONS_ID(new_idx)].capacity == 0 ? 8 : (table).buckets[__COLLECTIONS_ID(new_idx)].capacity * 2; \
+                        void* __COLLECTIONS_ID(new_entries) = COLLECTIONS_REALLOC((table).buckets[__COLLECTIONS_ID(new_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[0].entries)); \
+                        COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_entries) != NULL, "failed to allocate memory for resized hash table bucket entries"); \
+                        (table).buckets[__COLLECTIONS_ID(new_idx)].entries = __COLLECTIONS_ID(new_entries); \
+                        (table).buckets[__COLLECTIONS_ID(new_idx)].capacity = __COLLECTIONS_ID(new_cap); \
                     } \
-                    (table).buckets[newBucketIndex].entries[(table).buckets[newBucketIndex].length++] = entry; \
+                    /* Copy entry to new bucket */ \
+                    size_t __COLLECTIONS_ID(dest_idx) = (table).buckets[__COLLECTIONS_ID(new_idx)].length++; \
+                    memcpy(&(table).buckets[__COLLECTIONS_ID(new_idx)].entries[__COLLECTIONS_ID(dest_idx)], __COLLECTIONS_ID(entry_ptr), __COLLECTIONS_ID(entry_size)); \
+                    /* Switch back to old buckets for next iteration */ \
+                    (table).buckets = __COLLECTIONS_ID(old_ptr); \
+                    (table).buckets_length = __COLLECTIONS_ID(old_len); \
                 } \
-                COLLECTIONS_FREE((table).buckets[i].entries); \
+                /* Free old bucket entries */ \
+                COLLECTIONS_FREE((table).buckets[__COLLECTIONS_ID(i)].entries); \
             } \
-            COLLECTIONS_FREE((table).buckets); \
-            (table).buckets = newBuckets; \
-            (table).buckets_length = (new_buckets_length); \
+            /* Final switch to new buckets */ \
+            COLLECTIONS_FREE(__COLLECTIONS_ID(old_ptr)); \
+            (table).buckets = __COLLECTIONS_ID(new_ptr); \
+            (table).buckets_length = __COLLECTIONS_ID(new_len); \
         } \
     } while (false)
 
@@ -173,14 +196,14 @@
 
 #define HashTable_shrink(table) HashTable_resize((table), (table).buckets_length / 2)
 
-#define HashTable_get(table, key, result) \
+#define HashTable_get(table, searched_key, result) \
     do { \
         if ((table).buckets_length > 0) { \
-            size_t hash = (table).hash_fn(key); \
-            size_t bucketIndex = hash % (table).buckets_length; \
-            for (size_t i = 0; i < (table).buckets[bucketIndex].length; ++i) { \
-                if ((table).buckets[bucketIndex].entries[i].hash == hash && (table).eq_fn((table).buckets[bucketIndex].entries[i].key, key)) { \
-                    (result) = &(table).buckets[bucketIndex].entries[i].value; \
+            size_t __COLLECTIONS_ID(hash) = (table).hash_fn(searched_key); \
+            size_t __COLLECTIONS_ID(bucket_idx) = __COLLECTIONS_ID(hash) % (table).buckets_length; \
+            for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
+                if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, searched_key)) { \
+                    (result) = &(table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value; \
                     break; \
                 } \
             } \
@@ -189,28 +212,35 @@
         } \
     } while (false)
 
-#define HashTable_set(table, key, value) \
+#define HashTable_set(table, in_key, in_value) \
     do { \
         if (HashTable_load_factor(table) > 0.75) { \
             HashTable_grow(table); \
         } \
-        size_t hash = (table).hash_fn(key); \
-        size_t bucketIndex = hash % (table).buckets_length; \
-        for (size_t i = 0; i < (table).buckets[bucketIndex].length; ++i) { \
-            if ((table).buckets[bucketIndex].entries[i].hash == hash && (table).eq_fn((table).buckets[bucketIndex].entries[i].key, key)) { \
-                (table).buckets[bucketIndex].entries[i].value = value; \
-                return; \
+        size_t __COLLECTIONS_ID(hash) = (table).hash_fn(in_key); \
+        size_t __COLLECTIONS_ID(bucket_idx) = __COLLECTIONS_ID(hash) % (table).buckets_length; \
+        bool __COLLECTIONS_ID(found) = false; \
+        for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
+            if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, in_key)) { \
+                (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value = in_value; \
+                __COLLECTIONS_ID(found) = true; \
+                break; \
             } \
         } \
-        if ((table).buckets[bucketIndex].length == (table).buckets[bucketIndex].capacity) { \
-            size_t newCap = (table).buckets[bucketIndex].capacity == 0 ? 8 : (table).buckets[bucketIndex].capacity * 2; \
-            void* newEntries = COLLECTIONS_REALLOC((table).buckets[bucketIndex].entries, newCap * sizeof(*(table).buckets[bucketIndex].entries)); \
-            COLLECTIONS_ASSERT(newEntries != NULL, "failed to allocate memory for hash table bucket entries during set"); \
-            (table).buckets[bucketIndex].entries = newEntries; \
-            (table).buckets[bucketIndex].capacity = newCap; \
+        if (!__COLLECTIONS_ID(found)) { \
+            if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].length == (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity) { \
+                size_t __COLLECTIONS_ID(new_cap) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity == 0 ? 8 : (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity * 2; \
+                void* __COLLECTIONS_ID(new_entries) = COLLECTIONS_REALLOC((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[__COLLECTIONS_ID(bucket_idx)].entries)); \
+                COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_entries) != NULL, "failed to allocate memory for hash table bucket entries during set"); \
+                (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries = __COLLECTIONS_ID(new_entries); \
+                (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity = __COLLECTIONS_ID(new_cap); \
+            } \
+            size_t __COLLECTIONS_ID(idx) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].length++; \
+            (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].key = in_key; \
+            (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].value = in_value; \
+            (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].hash = __COLLECTIONS_ID(hash); \
+            ++(table).entry_count; \
         } \
-        (table).buckets[bucketIndex].entries[(table).buckets[bucketIndex].length++] = ((struct { K key; V value; size_t hash; }){ .key = key, .value = value, .hash = hash }); \
-        ++(table).entry_count; \
     } while (false)
 
 #ifdef __cplusplus
@@ -731,6 +761,357 @@ CTEST_CASE(dynamic_array_large_dataset) {
         CTEST_ASSERT_TRUE(DynamicArray_at(arr, i) == i);
     }
     DynamicArray_free(arr);
+}
+
+// HashTable helper functions //////////////////////////////////////////////////
+
+static size_t test_hash_int(int key) {
+    return (size_t)key;
+}
+
+static bool test_eq_int(int a, int b) {
+    return a == b;
+}
+
+static size_t test_hash_string(const char* key) {
+    size_t hash = 5381;
+    while (*key) {
+        hash = ((hash << 5) + hash) + (size_t)*key;
+        ++key;
+    }
+    return hash;
+}
+
+static bool test_eq_string(const char* a, const char* b) {
+    return strcmp(a, b) == 0;
+}
+
+// HashTable initialization tests //////////////////////////////////////////////
+
+CTEST_CASE(hash_table_empty_on_init) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    CTEST_ASSERT_TRUE(table.buckets == NULL);
+    CTEST_ASSERT_TRUE(table.buckets_length == 0);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+}
+
+CTEST_CASE(hash_table_load_factor_on_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) == 1.0);
+}
+
+// HashTable_set and HashTable_get tests ///////////////////////////////////////
+
+CTEST_CASE(hash_table_set_single_element) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    int* result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result != NULL);
+    CTEST_ASSERT_TRUE(*result == 100);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_set_multiple_elements) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_set(table, 3, 30);
+    CTEST_ASSERT_TRUE(table.entry_count == 3);
+    int* result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 10);
+    result = NULL;
+    HashTable_get(table, 2, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 20);
+    result = NULL;
+    HashTable_get(table, 3, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 30);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_get_nonexistent_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    int* result = NULL;
+    HashTable_get(table, 999, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_get_from_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    int* result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+}
+
+CTEST_CASE(hash_table_overwrite_existing_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    HashTable_set(table, 42, 200);
+    // Entry count should remain 1 since we're overwriting
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    int* result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result != NULL);
+    CTEST_ASSERT_TRUE(*result == 200);
+    HashTable_free(table);
+}
+
+// HashTable_grow tests ////////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_grow_from_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_grow(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 8);
+    CTEST_ASSERT_TRUE(table.buckets != NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_grow_doubles_capacity) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_grow(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 8);
+    HashTable_grow(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 16);
+    HashTable_grow(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 32);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_grow_preserves_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_set(table, 3, 30);
+    size_t originalCount = table.entry_count;
+    HashTable_grow(table);
+    CTEST_ASSERT_TRUE(table.entry_count == originalCount);
+    int* result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 10);
+    result = NULL;
+    HashTable_get(table, 2, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 20);
+    result = NULL;
+    HashTable_get(table, 3, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 30);
+    HashTable_free(table);
+}
+
+// HashTable_resize tests //////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_resize_to_specific_size) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 16);
+    CTEST_ASSERT_TRUE(table.buckets_length == 16);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_resize_preserves_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 100, 1000);
+    HashTable_set(table, 200, 2000);
+    HashTable_resize(table, 32);
+    CTEST_ASSERT_TRUE(table.entry_count == 2);
+    int* result = NULL;
+    HashTable_get(table, 100, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 1000);
+    result = NULL;
+    HashTable_get(table, 200, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 2000);
+    HashTable_free(table);
+}
+
+// HashTable_shrink tests //////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_shrink_halves_capacity) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 32);
+    HashTable_shrink(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 16);
+    HashTable_shrink(table);
+    CTEST_ASSERT_TRUE(table.buckets_length == 8);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_shrink_preserves_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 64);
+    HashTable_set(table, 5, 50);
+    HashTable_set(table, 10, 100);
+    HashTable_shrink(table);
+    CTEST_ASSERT_TRUE(table.entry_count == 2);
+    int* result = NULL;
+    HashTable_get(table, 5, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 50);
+    result = NULL;
+    HashTable_get(table, 10, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 100);
+    HashTable_free(table);
+}
+
+// HashTable_load_factor tests /////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_load_factor_calculation) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 8);
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) == 0.0);
+    HashTable_set(table, 1, 10);
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) == 0.125); // 1/8
+    HashTable_set(table, 2, 20);
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) == 0.25);  // 2/8
+    HashTable_set(table, 3, 30);
+    HashTable_set(table, 4, 40);
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) == 0.5);   // 4/8
+    HashTable_free(table);
+}
+
+// HashTable_free tests ////////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_free_resets_state) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_free(table);
+    CTEST_ASSERT_TRUE(table.buckets == NULL);
+    CTEST_ASSERT_TRUE(table.buckets_length == 0);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+}
+
+CTEST_CASE(hash_table_free_on_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_free(table);
+    CTEST_ASSERT_TRUE(table.buckets == NULL);
+    CTEST_ASSERT_TRUE(table.buckets_length == 0);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+}
+
+// HashTable with string keys //////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_with_string_keys) {
+    HashTable(const char*, int) table = { .hash_fn = test_hash_string, .eq_fn = test_eq_string };
+    HashTable_set(table, "apple", 1);
+    HashTable_set(table, "banana", 2);
+    HashTable_set(table, "cherry", 3);
+    CTEST_ASSERT_TRUE(table.entry_count == 3);
+    int* result = NULL;
+    HashTable_get(table, "apple", result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 1);
+    result = NULL;
+    HashTable_get(table, "banana", result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 2);
+    result = NULL;
+    HashTable_get(table, "cherry", result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 3);
+    result = NULL;
+    HashTable_get(table, "durian", result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_string_key_overwrite) {
+    HashTable(const char*, int) table = { .hash_fn = test_hash_string, .eq_fn = test_eq_string };
+    HashTable_set(table, "key", 100);
+    HashTable_set(table, "key", 200);
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    int* result = NULL;
+    HashTable_get(table, "key", result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 200);
+    HashTable_free(table);
+}
+
+// HashTable collision handling ////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_handles_collisions) {
+    // Keys that will likely hash to same bucket with small bucket count
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 4); // Small bucket count to force collisions
+    // These keys (0, 4, 8) will all hash to bucket 0 (mod 4)
+    HashTable_set(table, 0, 100);
+    HashTable_set(table, 4, 200);
+    HashTable_set(table, 8, 300);
+    CTEST_ASSERT_TRUE(table.entry_count == 3);
+    int* result = NULL;
+    HashTable_get(table, 0, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 100);
+    result = NULL;
+    HashTable_get(table, 4, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 200);
+    result = NULL;
+    HashTable_get(table, 8, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 300);
+    HashTable_free(table);
+}
+
+// HashTable auto-grow tests ///////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_auto_grows_on_high_load) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    // Insert many elements to trigger auto-grow
+    for (int i = 0; i < 20; ++i) {
+        HashTable_set(table, i, i * 10);
+    }
+    CTEST_ASSERT_TRUE(table.entry_count == 20);
+    CTEST_ASSERT_TRUE(HashTable_load_factor(table) <= 0.75);
+    // Verify all entries are still accessible
+    for (int i = 0; i < 20; ++i) {
+        int* result = NULL;
+        HashTable_get(table, i, result);
+        CTEST_ASSERT_TRUE(result != NULL && *result == i * 10);
+    }
+    HashTable_free(table);
+}
+
+// HashTable integration tests /////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_large_dataset) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    const int count = 1000;
+    for (int i = 0; i < count; ++i) {
+        HashTable_set(table, i, i * 2);
+    }
+    CTEST_ASSERT_TRUE(table.entry_count == (size_t)count);
+    // Verify all entries
+    for (int i = 0; i < count; ++i) {
+        int* result = NULL;
+        HashTable_get(table, i, result);
+        CTEST_ASSERT_TRUE(result != NULL && *result == i * 2);
+    }
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_negative_keys) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, -1, 100);
+    HashTable_set(table, -100, 200);
+    HashTable_set(table, -999, 300);
+    CTEST_ASSERT_TRUE(table.entry_count == 3);
+    int* result = NULL;
+    HashTable_get(table, -1, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 100);
+    result = NULL;
+    HashTable_get(table, -100, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 200);
+    result = NULL;
+    HashTable_get(table, -999, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 300);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_modify_value_via_pointer) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    int* result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result != NULL);
+    *result = 999;
+    result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 999);
+    HashTable_free(table);
 }
 
 #endif /* COLLECTIONS_SELF_TEST */
