@@ -908,7 +908,7 @@ static bool test_eq_int(int a, int b) {
 static size_t test_hash_string(const char* key) {
     size_t hash = 5381;
     while (*key) {
-        hash = ((hash << 5) + hash) + (size_t)*key;
+        hash = ((hash << 5) + hash) + (unsigned char)*key;
         ++key;
     }
     return hash;
