@@ -237,40 +237,44 @@ static size_t json_utf8_encode(uint32_t cp, char out[4]) {
 
 // Parsing /////////////////////////////////////////////////////////////////////
 
-typedef struct Json_Parser {
-    char const* text;
-    size_t length;
+typedef struct Json_Position {
     size_t index;
     size_t line;
     size_t column;
+} Json_Position;
+
+typedef struct Json_Parser {
+    char const* text;
+    size_t length;
+    Json_Position position;
     Json_Sax sax;
     Json_Options options;
     void* user_data;
 } Json_Parser;
 
-static void json_parser_report_error(Json_Parser* parser, char const* message) {
+static void json_parser_report_error(Json_Parser* parser, Json_Position position, char const* message) {
     if (parser->sax.on_error == NULL) {
         JSON_FREE(message);
         return;
     }
     Json_Error error = {
         .message = message,
-        .line = parser->line,
-        .column = parser->column,
-        .index = parser->index,
+        .line = position.line,
+        .column = position.column,
+        .index = position.index,
     };
     parser->sax.on_error(parser->user_data, error);
 }
 
 static char json_parser_peek(Json_Parser* parser, size_t offset, char def) {
-    if (parser->index + offset >= parser->length) return def;
-    return parser->text[parser->index + offset];
+    if (parser->position.index + offset >= parser->length) return def;
+    return parser->text[parser->position.index + offset];
 }
 
 static void json_parser_advance(Json_Parser* parser, size_t count) {
     for (size_t i = 0; i < count; ++i) {
-        JSON_ASSERT(parser->index < parser->length, "attempted to advance past end of input");
-        char ch = parser->text[parser->index];
+        JSON_ASSERT(parser->position.index < parser->length, "attempted to advance past end of input");
+        char ch = parser->text[parser->position.index];
         if (ch == '\r') {
             // Could be an OS-X or Windows-style newline
             // If Windows-style, we'll go to the next line in the next iteration
@@ -279,19 +283,19 @@ static void json_parser_advance(Json_Parser* parser, size_t count) {
             }
             else {
                 // OSX-style newline
-                ++parser->line;
-                parser->column = 0;
+                ++parser->position.line;
+                parser->position.column = 0;
             }
         }
         else if (ch == '\n') {
             // Unix-style newline
-            ++parser->line;
-            parser->column = 0;
+            ++parser->position.line;
+            parser->position.column = 0;
         }
         else {
-            ++parser->column;
+            ++parser->position.column;
         }
-        ++parser->index;
+        ++parser->position.index;
     }
 }
 
@@ -307,7 +311,7 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
     }
     else {
         char* message = json_format("expected character '%c', but got '%c'", expected, c);
-        json_parser_report_error(parser, message);
+        json_parser_report_error(parser, parser->position, message);
         return false;
     }
 }
@@ -320,7 +324,7 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
     size_t bufferIndex = 0;
     if (json_parser_peek(parser, parserOffset, '\0') != '"') {
         char* message = json_format("expected '\"' at start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
-        json_parser_report_error(parser, message);
+        json_parser_report_error(parser, parser->position, message);
         goto done;
     }
     // skip opening quote
@@ -329,7 +333,7 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
         char c = json_parser_peek(parser, parserOffset, '\0');
         if (c == '\0') {
             char* message = json_format("unexpected end of input while parsing string value");
-            json_parser_report_error(parser, message);
+            json_parser_report_error(parser, parser->position, message);
             goto done;
         }
         if (c == '"') {
@@ -352,7 +356,7 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
         char escape = json_parser_peek(parser, parserOffset, '\0');
         if (escape == '\0') {
             char* message = json_format("unexpected end of input in escape sequence of string value");
-            json_parser_report_error(parser, message);
+            json_parser_report_error(parser, parser->position, message);
             goto done;
         }
         if (escape != 'u') {
@@ -369,7 +373,7 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
                 case 't': escapedChar = '\t'; break;
                 default: {
                     char* message = json_format("invalid escape sequence '\\%c' in string value", escape);
-                    json_parser_report_error(parser, message);
+                    json_parser_report_error(parser, parser->position, message);
                     // We don't actually return here, for best-effort we just treat it as a literal
                     escapedChar = escape;
                     break;
@@ -391,13 +395,13 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
             char hex = json_parser_peek(parser, parserOffset, '\0');
             if (hex == '\0') {
                 char* message = json_format("unexpected end of input in unicode escape sequence of string value");
-                json_parser_report_error(parser, message);
+                json_parser_report_error(parser, parser->position, message);
                 goto done;
             }
             int hexValue;
             if (!json_isxdigit(hex, &hexValue)) {
                 char* message = json_format("invalid hex digit '%c' in unicode escape sequence of string value", hex);
-                json_parser_report_error(parser, message);
+                json_parser_report_error(parser, parser->position, message);
                 // We don't actually return here, for best-effort we just treat it as a literal
                 hexValue = 0;
             }
@@ -409,7 +413,7 @@ static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, siz
         size_t utf8Length = json_utf8_encode(codepoint, utf8);
         if (utf8Length == 0) {
             char* message = json_format("invalid Unicode code point U+%04X in string value", codepoint);
-            json_parser_report_error(parser, message);
+            json_parser_report_error(parser, parser->position, message);
             // We don't actually return here, for best-effort we just skip it
             continue;
         }
@@ -459,7 +463,7 @@ static Json_Value json_parse_identifier_value(Json_Parser* parser) {
     }
     else {
         char* message = json_format("unexpected identifier '%.*s'", (int)parserOffset, ident);
-        json_parser_report_error(parser, message);
+        json_parser_report_error(parser, parser->position, message);
         // We don't actually return here, for best-effort we just skip it and return null
         json_parser_advance(parser, parserOffset);
         return json_null();
@@ -527,6 +531,38 @@ static Json_Value json_parse_number_value(Json_Parser* parser) {
     }
     json_parser_advance(parser, parserOffset);
     return json_double(doubleValue);
+}
+
+static Json_Value json_parse_value(Json_Parser* parser);
+
+static Json_value json_parse_array(Json_Parser* parser) {
+    if (!json_parser_expect_char(parser, '[')) return json_null();
+
+    Json_Value array = json_array();
+    while (true) {
+        json_parser_skip_whitespace(parser);
+        char c = json_parser_peek(parser, 0, '\0');
+        // End of file
+        if (c == '\0') {
+            char* message = json_format("unexpected end of input while parsing array");
+            json_parser_report_error(parser, parser->position, message);
+            return array;
+        }
+        // End of array, consumed after the loop
+        if (c == ']') break;
+        // Must be a value
+        Json_Value value = json_parse_value(parser);
+        json_array_append(&array, value);
+        // After a value, we can have either a comma (more values coming) or a closing bracket (end of array)
+        json_parser_skip_whitespace(parser);
+        c = json_parser_peek(parser, 0, '\0');
+        if (c == ',') {
+            json_parser_advance(parser, 1);
+            continue;
+        }
+        // Was not a comma, must be end of array
+        break;
+    }
 }
 
 static Json_Value json_parse_value(Json_Parser* parser) {
