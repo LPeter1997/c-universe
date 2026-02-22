@@ -300,7 +300,27 @@ static void json_parser_advance(Json_Parser* parser, size_t count) {
 }
 
 static void json_parser_skip_whitespace(Json_Parser* parser) {
+start:
     while (isspace(json_parser_peek(parser, 0, '\0'))) json_parser_advance(parser, 1);
+
+    // We check for line comments here
+    if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '/') {
+        // If extension is not enabled, report an error
+        if ((parser->options.extensions & JSON_EXTENSION_COMMENTS) == 0) {
+            char* message = json_format("line comments are not allowed");
+            json_parser_report_error(parser, parser->position, message);
+            // We still continue the parser, treating the comment as whitespace
+        }
+        // Skip the comment
+        json_parser_advance(parser, 2);
+        while (true) {
+            char c = json_parser_peek(parser, 0, '\n');
+            if (c == '\n' || c == '\r') break;
+            json_parser_advance(parser, 1);
+        }
+        // Whitespaces and comment again
+        goto start;
+    }
 }
 
 static bool json_parser_expect_char(Json_Parser* parser, char expected) {
