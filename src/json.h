@@ -179,6 +179,14 @@ JSON_DEF void json_parse_sax(char const* json, Json_Sax sax, Json_Options option
  */
 JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
 
+/**
+ * Serializes the given JSON value into a string, writing it to the provided buffer.
+ * @param value The JSON value to serialize.
+ * @param options The options to customize the behavior of the serializer.
+ * @param buffer The buffer to write the serialized JSON string to. Can be NULL to compute the required buffer size.
+ * @param buffer_size The size of the buffer.
+ * @returns The number of characters the serialized JSON string would have written, excluding the null terminator.
+ */
 JSON_DEF size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
 JSON_DEF char* json_serialize(Json_Value value, Json_Options options, size_t* out_length);
 
@@ -1297,8 +1305,7 @@ typedef struct Json_Serializer {
 
 static void json_serializer_appendn(Json_Serializer* serializer, char const* str, size_t str_length) {
     if (str == NULL) return;
-    if (serializer->buffer != NULL) {
-        JSON_ASSERT(serializer->length + str_length <= serializer->capacity, "buffer overflow in JSON serializer");
+    if (serializer->buffer != NULL && serializer->length + str_length <= serializer->capacity) {
         memcpy(serializer->buffer + serializer->length, str, str_length);
     }
     serializer->length += str_length;
@@ -1310,8 +1317,7 @@ static void json_serializer_append(Json_Serializer* serializer, char const* str)
 }
 
 static void json_serializer_append_char(Json_Serializer* serializer, char c) {
-    if (serializer->buffer != NULL) {
-        JSON_ASSERT(serializer->length + 1 <= serializer->capacity, "buffer overflow in JSON serializer");
+    if (serializer->buffer != NULL && serializer->length + 1 <= serializer->capacity) {
         serializer->buffer[serializer->length] = c;
     }
     ++serializer->length;
