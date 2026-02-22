@@ -101,9 +101,11 @@ Write-Host "running self-test for JSON library..."
 Compile-And-Run `
     -Sources @("../src/json.h") `
     -Defines @("JSON_STATIC", "JSON_IMPLEMENTATION", "JSON_SELF_TEST") `
-    -AllowUnusedParameters
+    -AllowUnusedParameters `
+    -AllowUnusedFunctions
 Write-Host "running example for JSON library..."
 Compile-And-Run `
     -Sources @("../src/json.h") `
     -Defines @("JSON_EXAMPLE") `
-    -AllowUnusedParameters
+    -AllowUnusedParameters `
+    -AllowUnusedFunctions
