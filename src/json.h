@@ -1,5 +1,5 @@
 /**
- * json.h is a single-header JSON library for parsing, building and serializing JSON format.
+ * json.h is a single-header JSON library for parsing, building and writing JSON format.
  *
  * Configuration:
  *  - TODO
@@ -53,14 +53,14 @@ typedef enum Json_Extension {
 } Json_Extension;
 
 /**
- * Options for the JSON parser and serializer, allowing customization of their behavior.
+ * Options for the JSON parser and writer, allowing customization of their behavior.
  */
 typedef struct Json_Options {
     // Enabled extensions, a combination of @see Json_Extension flags.
     Json_Extension extensions;
-    // The string to use for newlines when serializing. NULL means no newline.
+    // The string to use for newlines when writing. NULL means no newline.
     char const* newline_str;
-    // The string to use for indentation when serializing. NULL means no indentation.
+    // The string to use for indentation when writing. NULL means no indentation.
     char const* indent_str;
 } Json_Options;
 
@@ -180,23 +180,23 @@ JSON_DEF void json_parse_sax(char const* json, Json_Sax sax, Json_Options option
 JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
 
 /**
- * Serializes the given JSON value into a string, writing it to the provided buffer.
- * @param value The JSON value to serialize.
- * @param options The options to customize the behavior of the serializer.
- * @param buffer The buffer to write the serialized JSON string to. Can be NULL to compute the required buffer size.
+ * Writes the given JSON value into a string, writing it to the provided buffer.
+ * @param value The JSON value to write.
+ * @param options The options to customize the behavior of the writer.
+ * @param buffer The buffer to write the JSON string to. Can be NULL to compute the required buffer size.
  * @param buffer_size The size of the buffer.
- * @returns The number of characters the serialized JSON string would have written, excluding the null terminator.
+ * @returns The number of characters the JSON string would take up, excluding the null terminator.
  */
-JSON_DEF size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
+JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
 
 /**
- * Serializes the given JSON value into a newly allocated string, which must be freed by the caller using JSON_FREE.
- * @param value The JSON value to serialize.
- * @param options The options to customize the behavior of the serializer.
- * @param out_length A pointer to a size_t variable that will receive the length of the serialized string, excluding the null terminator. Can be NULL if the length is not needed.
- * @returns A newly allocated string containing the serialized JSON value.
+ * Writes the given JSON value into a newly allocated string, which must be freed by the caller using JSON_FREE.
+ * @param value The JSON value to write.
+ * @param options The options to customize the behavior of the writer.
+ * @param out_length A pointer to a size_t variable that will receive the length of the written string, excluding the null terminator. Can be NULL if the length is not needed.
+ * @returns A newly allocated string containing the written JSON value.
  */
-JSON_DEF char* json_serialize(Json_Value value, Json_Options options, size_t* out_length);
+JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_length);
 
 JSON_DEF Json_Value json_object(void);
 JSON_DEF Json_Value json_array(void);
@@ -1301,182 +1301,182 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
     return false;
 }
 
-// Serialization ///////////////////////////////////////////////////////////////
+// Writing /////////////////////////////////////////////////////////////////////
 
-typedef struct Json_Serializer {
+typedef struct Json_Writer {
     char* buffer;
     size_t length;
     size_t capacity;
     Json_Options options;
     size_t indent;
-} Json_Serializer;
+} Json_Writer;
 
-static void json_serializer_appendn(Json_Serializer* serializer, char const* str, size_t str_length) {
+static void json_writer_appendn(Json_Writer* writer, char const* str, size_t str_length) {
     if (str == NULL) return;
-    if (serializer->buffer != NULL && serializer->length + str_length <= serializer->capacity) {
-        memcpy(serializer->buffer + serializer->length, str, str_length);
+    if (writer->buffer != NULL && writer->length + str_length <= writer->capacity) {
+        memcpy(writer->buffer + writer->length, str, str_length);
     }
-    serializer->length += str_length;
+    writer->length += str_length;
 }
 
-static void json_serializer_append(Json_Serializer* serializer, char const* str) {
+static void json_writer_append(Json_Writer* writer, char const* str) {
     if (str == NULL) return;
-    json_serializer_appendn(serializer, str, strlen(str));
+    json_writer_appendn(writer, str, strlen(str));
 }
 
-static void json_serializer_append_char(Json_Serializer* serializer, char c) {
-    if (serializer->buffer != NULL && serializer->length + 1 <= serializer->capacity) {
-        serializer->buffer[serializer->length] = c;
+static void json_writer_append_char(Json_Writer* writer, char c) {
+    if (writer->buffer != NULL && writer->length + 1 <= writer->capacity) {
+        writer->buffer[writer->length] = c;
     }
-    ++serializer->length;
+    ++writer->length;
 }
 
-static void json_serializer_append_indent(Json_Serializer* serializer) {
-    if (serializer->options.indent_str == NULL) return;
-    for (size_t i = 0; i < serializer->indent; ++i) {
-        json_serializer_append(serializer, serializer->options.indent_str);
+static void json_writer_append_indent(Json_Writer* writer) {
+    if (writer->options.indent_str == NULL) return;
+    for (size_t i = 0; i < writer->indent; ++i) {
+        json_writer_append(writer, writer->options.indent_str);
     }
 }
 
-static void json_serialize_string_value(Json_Serializer* serializer, char const* str) {
-    json_serializer_append_char(serializer, '"');
+static void json_write_string_value(Json_Writer* writer, char const* str) {
+    json_writer_append_char(writer, '"');
     while (*str != '\0') {
         char c = *str;
         switch (c) {
         case '"':
-            json_serializer_append(serializer, "\\\"");
+            json_writer_append(writer, "\\\"");
             break;
         case '\\':
-            json_serializer_append(serializer, "\\\\");
+            json_writer_append(writer, "\\\\");
             break;
         case '\b':
-            json_serializer_append(serializer, "\\b");
+            json_writer_append(writer, "\\b");
             break;
         case '\f':
-            json_serializer_append(serializer, "\\f");
+            json_writer_append(writer, "\\f");
             break;
         case '\n':
-            json_serializer_append(serializer, "\\n");
+            json_writer_append(writer, "\\n");
             break;
         case '\r':
-            json_serializer_append(serializer, "\\r");
+            json_writer_append(writer, "\\r");
             break;
         case '\t':
-            json_serializer_append(serializer, "\\t");
+            json_writer_append(writer, "\\t");
             break;
         default:
             if (iscntrl((unsigned char)c)) {
                 // Control characters must be escaped as \uXXXX
                 char buffer[7];
                 int length = snprintf(buffer, sizeof(buffer), "\\u%04x", (unsigned char)c);
-                JSON_ASSERT(length == 6, "failed to serialize control character in JSON string value");
-                json_serializer_appendn(serializer, buffer, (size_t)length);
+                JSON_ASSERT(length == 6, "failed to write control character in JSON string value");
+                json_writer_appendn(writer, buffer, (size_t)length);
             }
             else {
                 // Regular character can be appended as is
-                json_serializer_append_char(serializer, c);
+                json_writer_append_char(writer, c);
             }
             break;
         }
         ++str;
     }
-    json_serializer_append_char(serializer, '"');
+    json_writer_append_char(writer, '"');
 }
 
-static void json_serialize_value(Json_Serializer* serializer, Json_Value value) {
+static void json_write_value(Json_Writer* writer, Json_Value value) {
     switch (value.type) {
     case JSON_VALUE_NULL:
-        json_serializer_append(serializer, "null");
+        json_writer_append(writer, "null");
         break;
     case JSON_VALUE_BOOL:
-        json_serializer_append(serializer, value.value.boolean ? "true" : "false");
+        json_writer_append(writer, value.value.boolean ? "true" : "false");
         break;
     case JSON_VALUE_INT: {
         char buffer[32];
         int length = snprintf(buffer, sizeof(buffer), "%lld", value.value.integer);
-        JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to serialize int value in JSON serializer");
-        json_serializer_appendn(serializer, buffer, (size_t)length);
+        JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to write int value in JSON writer");
+        json_writer_appendn(writer, buffer, (size_t)length);
     } break;
     case JSON_VALUE_DOUBLE: {
         char buffer[32];
         int length = snprintf(buffer, sizeof(buffer), "%g", value.value.floating);
-        JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to serialize double value in JSON serializer");
-        json_serializer_appendn(serializer, buffer, (size_t)length);
+        JSON_ASSERT(length > 0 && (size_t)length < sizeof(buffer), "failed to write double value in JSON writer");
+        json_writer_appendn(writer, buffer, (size_t)length);
     } break;
     case JSON_VALUE_STRING:
-        json_serialize_string_value(serializer, value.value.string);
+        json_write_string_value(writer, value.value.string);
         break;
     case JSON_VALUE_ARRAY: {
         // For empty we can just append []
         if (value.value.array.length == 0) {
-            json_serializer_append(serializer, "[]");
+            json_writer_append(writer, "[]");
             break;
         }
         // For non-empty, we print each element on a new line with indentation
-        json_serializer_append_char(serializer, '[');
-        json_serializer_append(serializer, serializer->options.newline_str);
-        ++serializer->indent;
+        json_writer_append_char(writer, '[');
+        json_writer_append(writer, writer->options.newline_str);
+        ++writer->indent;
         for (size_t i = 0; i < value.value.array.length; ++i) {
-            json_serializer_append_indent(serializer);
-            json_serialize_value(serializer, value.value.array.elements[i]);
-            if (i < value.value.array.length - 1) json_serializer_append_char(serializer, ',');
-            json_serializer_append(serializer, serializer->options.newline_str);
+            json_writer_append_indent(writer);
+            json_write_value(writer, value.value.array.elements[i]);
+            if (i < value.value.array.length - 1) json_writer_append_char(writer, ',');
+            json_writer_append(writer, writer->options.newline_str);
         }
-        --serializer->indent;
-        json_serializer_append_indent(serializer);
-        json_serializer_append_char(serializer, ']');
+        --writer->indent;
+        json_writer_append_indent(writer);
+        json_writer_append_char(writer, ']');
     } break;
     case JSON_VALUE_OBJECT: {
         // For empty we can just append {}
         if (value.value.object.entry_count == 0) {
-            json_serializer_append(serializer, "{}");
+            json_writer_append(writer, "{}");
             break;
         }
         // For non-empty, we print each property on a new line with indentation
-        json_serializer_append_char(serializer, '{');
-        json_serializer_append(serializer, serializer->options.newline_str);
-        ++serializer->indent;
+        json_writer_append_char(writer, '{');
+        json_writer_append(writer, writer->options.newline_str);
+        ++writer->indent;
         size_t entryIndex = 0;
         for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value.value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j, ++entryIndex) {
                 Json_HashEntry* entry = &bucket->entries[j];
-                json_serializer_append_indent(serializer);
-                json_serialize_string_value(serializer, entry->key);
-                json_serializer_append(serializer, ": ");
-                json_serialize_value(serializer, entry->value);
-                if (entryIndex < value.value.object.entry_count - 1) json_serializer_append_char(serializer, ',');
-                json_serializer_append(serializer, serializer->options.newline_str);
+                json_writer_append_indent(writer);
+                json_write_string_value(writer, entry->key);
+                json_writer_append(writer, ": ");
+                json_write_value(writer, entry->value);
+                if (entryIndex < value.value.object.entry_count - 1) json_writer_append_char(writer, ',');
+                json_writer_append(writer, writer->options.newline_str);
             }
         }
-        --serializer->indent;
-        json_serializer_append_indent(serializer);
-        json_serializer_append_char(serializer, '}');
+        --writer->indent;
+        json_writer_append_indent(writer);
+        json_writer_append_char(writer, '}');
     } break;
     default:
-        JSON_ASSERT(false, "invalid value type in JSON serializer");
+        JSON_ASSERT(false, "invalid value type in JSON writer");
         break;
     }
 }
 
-size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size) {
-    Json_Serializer serializer = {
+size_t json_swrite(Json_Value value, Json_Options options, char* buffer, size_t buffer_size) {
+    Json_Writer writer = {
         .buffer = buffer,
         .length = 0,
         .capacity = buffer_size,
         .options = options,
         .indent = 0,
     };
-    json_serialize_value(&serializer, value);
-    return serializer.length;
+    json_write_value(&writer, value);
+    return writer.length;
 }
 
-char* json_serialize(Json_Value value, Json_Options options, size_t* out_length) {
-    // Simply compute the length, then allocate a buffer of the needed size and serialize into it
-    size_t length = json_serialize_to(value, options, NULL, 0);
+char* json_write(Json_Value value, Json_Options options, size_t* out_length) {
+    // Simply compute the length, then allocate a buffer of the needed size and write into it
+    size_t length = json_swrite(value, options, NULL, 0);
     char* buffer = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
-    JSON_ASSERT(buffer != NULL, "failed to allocate buffer for JSON serialization");
-    json_serialize_to(value, options, buffer, length);
+    JSON_ASSERT(buffer != NULL, "failed to allocate buffer for JSON writing");
+    json_swrite(value, options, buffer, length);
     buffer[length] = '\0';
     if (out_length != NULL) *out_length = length;
     return buffer;
@@ -1791,15 +1791,15 @@ CTEST_CASE(array_set_and_remove) {
     json_free_value(&arr);
 }
 
-// Serialization ///////////////////////////////////////////////////////////////
+// Writing /////////////////////////////////////////////////////////////////////
 
-CTEST_CASE(serialize_primitives) {
+CTEST_CASE(write_primitives) {
     Json_Options opts = { .newline_str = "\n", .indent_str = "  " };
 
-    char* null_str = json_serialize(json_null(), opts, NULL);
-    char* true_str = json_serialize(json_bool(true), opts, NULL);
-    char* int_str = json_serialize(json_int(42), opts, NULL);
-    char* str_str = json_serialize(json_string("hello"), opts, NULL);
+    char* null_str = json_write(json_null(), opts, NULL);
+    char* true_str = json_write(json_bool(true), opts, NULL);
+    char* int_str = json_write(json_int(42), opts, NULL);
+    char* str_str = json_write(json_string("hello"), opts, NULL);
 
     CTEST_ASSERT_TRUE(strcmp(null_str, "null") == 0);
     CTEST_ASSERT_TRUE(strcmp(true_str, "true") == 0);
@@ -1812,21 +1812,21 @@ CTEST_CASE(serialize_primitives) {
     free(str_str);
 }
 
-CTEST_CASE(serialize_string_escapes) {
+CTEST_CASE(write_string_escapes) {
     Json_Value val = json_string("line1\nline2\ttab");
-    char* str = json_serialize(val, (Json_Options){0}, NULL);
+    char* str = json_write(val, (Json_Options){0}, NULL);
     CTEST_ASSERT_TRUE(strcmp(str, "\"line1\\nline2\\ttab\"") == 0);
     free(str);
     json_free_value(&val);
 }
 
-CTEST_CASE(serialize_roundtrip) {
+CTEST_CASE(write_roundtrip) {
     char const* original = "{\"name\": \"Bob\", \"active\": true}";
     Json_Document doc = json_parse(original, (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
 
-    char* serialized = json_serialize(doc.root, (Json_Options){0}, NULL);
-    Json_Document doc2 = json_parse(serialized, (Json_Options){0});
+    char* reWritten = json_write(doc.root, (Json_Options){0}, NULL);
+    Json_Document doc2 = json_parse(reWritten, (Json_Options){0});
     ASSERT_NO_ERRORS(doc2);
 
     // Verify the re-parsed values match
@@ -1835,7 +1835,7 @@ CTEST_CASE(serialize_roundtrip) {
     CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Bob") == 0);
     CTEST_ASSERT_TRUE(active != NULL && active->value.boolean == true);
 
-    free(serialized);
+    free(reWritten);
     json_free_document(&doc);
     json_free_document(&doc2);
 }
@@ -1880,9 +1880,9 @@ int main(void) {
     json_object_set(&doc.root, "active", json_bool(true));
     json_array_append(scores, json_int(95));
 
-    // Serialize with pretty printing
+    // Write with pretty printing
     Json_Options opts = { .newline_str = "\n", .indent_str = "  " };
-    char* output = json_serialize(doc.root, opts, NULL);
+    char* output = json_write(doc.root, opts, NULL);
     printf("\nModified JSON:\n%s\n", output);
 
     // Cleanup
