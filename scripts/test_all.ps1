@@ -115,9 +115,7 @@ Write-Host "running self-test for Collections library..."
 Compile-And-Run `
     -Sources @("../src/collections.h") `
     -Defines @("COLLECTIONS_SELF_TEST")
-#Write-Host "running example for Collections library..."
-#Compile-And-Run `
-#    -Sources @("../src/collections.h") `
-#    -Defines @("COLLECTIONS_EXAMPLE") `
-#    -AllowUnusedParameters `
-#    -AllowUnusedFunctions
+Write-Host "running example for Collections library..."
+Compile-And-Run `
+    -Sources @("../src/collections.h") `
+    -Defines @("COLLECTIONS_EXAMPLE")

@@ -2,10 +2,15 @@
  * collections.h is a single-header TODO.
  *
  * Configuration:
- *  - TODO
+ *  - #define COLLECTIONS_REALLOC and COLLECTIONS_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define COLLECTIONS_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
+ *  - #define COLLECTIONS_EXAMPLE before including this header to compile a simple example that demonstrates the library's usage
  *
  * API:
- *  - TODO
+ *  - Use DynamicArray(T) to define a dynamic array of the given type T, either inline or as a typedef
+ *  - Use DynamicArray_free, DynamicArray_length, DynamicArray_at, DynamicArray_clear, ... macros to manipulate the dynamic array
+ *  - Use HashTable(K, V) to define a hash table with key type K and value type V, either inline or as a typedef
+ *  - Use HashTable_set, HashTable_get, HashTable_remove, ... macros to manipulate the hash table
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -20,6 +25,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
 
 #ifndef COLLECTIONS_REALLOC
     #define COLLECTIONS_REALLOC realloc
@@ -389,40 +395,7 @@
         (table).entry_count = 0; \
     } while (false)
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// TODO: Public API declarations
-
-#ifdef __cplusplus
-}
-#endif
-
 #endif /* COLLECTIONS_H */
-
-////////////////////////////////////////////////////////////////////////////////
-// Implementation section                                                     //
-////////////////////////////////////////////////////////////////////////////////
-#ifdef COLLECTIONS_IMPLEMENTATION
-
-#include <assert.h>
-
-#define COLLECTIONS_ASSERT(condition, message) assert(((void)message, condition))
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// TODO: Implementation goes here
-
-#ifdef __cplusplus
-}
-#endif
-
-#undef COLLECTIONS_ASSERT
-
-#endif /* COLLECTIONS_IMPLEMENTATION */
 
 ////////////////////////////////////////////////////////////////////////////////
 // Self-testing section                                                       //
@@ -1464,13 +1437,32 @@ CTEST_CASE(hash_table_clear_with_many_entries) {
 #undef COLLECTIONS_EXAMPLE
 
 #include <stdio.h>
-
-#define COLLECTIONS_IMPLEMENTATION
-#define COLLECTIONS_STATIC
+#include <string.h>
 #include "collections.h"
 
+static size_t hash_str(char const* s) { size_t h = 5381; while (*s) h = h * 33 + (unsigned char)*s++; return h; }
+static bool eq_str(char const* a, char const* b) { return strcmp(a, b) == 0; }
+
 int main(void) {
-    // TODO: Example usage goes here
+    DynamicArray(int) nums = {0};
+    DynamicArray_append(nums, 10);
+    DynamicArray_append(nums, 20);
+    DynamicArray_append(nums, 30);
+    printf("Array: ");
+    for (size_t i = 0; i < DynamicArray_length(nums); ++i) {
+        printf("%d ", DynamicArray_at(nums, i));
+    }
+    printf("(length=%zu)\n", DynamicArray_length(nums));
+
+    HashTable(char const*, int) ages = { .hash_fn = hash_str, .eq_fn = eq_str };
+    HashTable_set(ages, "Alice", 30);
+    HashTable_set(ages, "Bob", 25);
+    int* age = NULL;
+    HashTable_get(ages, "Alice", age);
+    printf("Alice's age: %d\n", age ? *age : -1);
+
+    DynamicArray_free(nums);
+    HashTable_free(ages);
     return 0;
 }
 
