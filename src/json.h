@@ -319,7 +319,7 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
 // NOTE: Does not actually advance the parser, this function is designed to be called twice:
 //  - first with buffer = NULL to compute the required buffer size
 //  - then with an allocated buffer to fill it
-static size_t json_parse_string_value_impl(JsonParser* parser, char* buffer, size_t bufferSize, size_t* outParserAdvance) {
+static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, size_t bufferSize, size_t* outParserAdvance) {
     size_t parserOffset = 0;
     size_t bufferIndex = 0;
     if (json_parser_peek(parser, parserOffset, '\0') != '"') {
@@ -453,7 +453,7 @@ static void json_parse_identifier_value(Json_Parser* parser) {
     while (json_isident(json_parser_peek(parser, parserOffset, '\0'))) ++parserOffset;
 
     // Check if we match true/false/null
-    char const* ident = parser->text + parser->index;
+    char const* ident = parser->text + parser->position.index;
     if (parserOffset == 4 && strncmp(ident, "true", 4) == 0) {
         json_parser_advance(parser, 4);
         if (sax->on_bool != NULL) sax->on_bool(parser->user_data, true);
@@ -486,11 +486,20 @@ static void json_parse_number_value(Json_Parser* parser) {
         negate = true;
         ++parserOffset;
     }
+    size_t digitStart = parserOffset;
     while (true) {
         char c = json_parser_peek(parser, parserOffset, '\0');
         if (!isdigit(c)) break;
         intValue = intValue * 10 + (c - '0');
         ++parserOffset;
+    }
+    // Check that we have at least one digit
+    if (parserOffset == digitStart) {
+        char* message = json_format("expected digit in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+        json_parser_report_error(parser, parser->position, message);
+        json_parser_advance(parser, parserOffset);
+        if (sax->on_null != NULL) sax->on_null(parser->user_data);
+        return;
     }
     if (negate) intValue = -intValue;
     // From here on we have a fraction and exponent part, both optional
@@ -638,7 +647,11 @@ static void json_parse_object_value(Json_Parser* parser) {
         // After the key, we need a colon
         json_parser_skip_whitespace(parser);
         // Welp, let's skip to next iteration if there's no colon
-        if (!json_parser_expect_char(parser, ':')) continue;
+        if (!json_parser_expect_char(parser, ':')) {
+            // Still report a null value to keep callbacks balanced
+            if (sax->on_null != NULL) sax->on_null(parser->user_data);
+            continue;
+        }
         // After the colon, we need a value
         json_parser_skip_whitespace(parser);
         json_parse_value(parser);
@@ -687,7 +700,7 @@ static void json_parse_value(Json_Parser* parser) {
     }
     else {
         char* message = json_format("unexpected character '%c' while parsing value", c);
-        json_parser_report_error(parser, message);
+        json_parser_report_error(parser, parser->position, message);
         // Report null value to still give them a value
         if (parser->sax.on_null != NULL) parser->sax.on_null(parser->user_data);
     }
