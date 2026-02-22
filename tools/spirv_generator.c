@@ -4,6 +4,7 @@
 #define JSON_STATIC
 #include "../src/json.h"
 
+// TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
 char const* read_file(char const* path) {
     FILE* file = fopen(path, "rb");
     if (!file) return NULL;
