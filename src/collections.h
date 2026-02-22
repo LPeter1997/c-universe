@@ -123,7 +123,7 @@
  */
 #define DynamicArray_insert(array, index, element) \
     do { \
-        COLLECTIONS_ASSERT((index) <= (array).length, "index out of bounds for dynamic array insertion"); \
+        COLLECTIONS_ASSERT((size_t)(index) <= (array).length, "index out of bounds for dynamic array insertion"); \
         DynamicArray_reserve((array), (array).length + 1); \
         memmove(&(array).elements[(index) + 1], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         (array).elements[index] = (element); \
@@ -146,7 +146,7 @@
  */
 #define DynamicArray_insert_range(array, index, ins_elements, count) \
     do { \
-        COLLECTIONS_ASSERT((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
+        COLLECTIONS_ASSERT((size_t)(index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
         DynamicArray_reserve((array), (array).length + (count)); \
         memmove(&(array).elements[(index) + (count)], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         memcpy(&(array).elements[index], (ins_elements), (count) * sizeof(*(array).elements)); \
@@ -161,8 +161,8 @@
  */
 #define DynamicArray_remove_range(array, index, count) \
     do { \
-        COLLECTIONS_ASSERT((index) < (array).length, "index out of bounds for dynamic array range removal"); \
-        COLLECTIONS_ASSERT((index) + (count) <= (array).length, "range out of bounds for dynamic array range removal"); \
+        COLLECTIONS_ASSERT((size_t)(index) < (array).length, "index out of bounds for dynamic array range removal"); \
+        COLLECTIONS_ASSERT((size_t)(index) + (size_t)(count) <= (array).length, "range out of bounds for dynamic array range removal"); \
         memmove(&(array).elements[index], &(array).elements[(index) + (count)], ((array).length - (index) - (count)) * sizeof(*(array).elements)); \
         (array).length -= (count); \
     } while (false)
