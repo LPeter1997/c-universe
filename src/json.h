@@ -116,6 +116,7 @@ typedef struct Json_Document {
 
 JSON_DEF void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* user_data);
 JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
+
 JSON_DEF size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
 JSON_DEF char* json_serialize(Json_Value value, Json_Options options, size_t* out_length);
 
