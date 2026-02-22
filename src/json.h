@@ -377,6 +377,20 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 extern "C" {
 #endif
 
+typedef struct Json_HashEntry {
+    char* key;
+    Json_Value value;
+    size_t hash;
+} Json_HashEntry;
+
+typedef struct Json_HashBucket {
+    Json_HashEntry* entries;
+    size_t length;
+    size_t capacity;
+} Json_HashBucket;
+
+static const double Json_HashTable_UpsizeLoadFactor = 0.75;
+
 static bool json_isident(char c) {
     return isalpha((unsigned char)c) || isdigit((unsigned char)c) || c == '_';
 }
@@ -1282,20 +1296,6 @@ static size_t json_hash_string(char const* str) {
     }
     return hash;
 }
-
-typedef struct Json_HashEntry {
-    char* key;
-    Json_Value value;
-    size_t hash;
-} Json_HashEntry;
-
-typedef struct Json_HashBucket {
-    Json_HashEntry* entries;
-    size_t length;
-    size_t capacity;
-} Json_HashBucket;
-
-static const double Json_HashTable_UpsizeLoadFactor = 0.75;
 
 static double json_hash_table_load_factor(Json_Value* value) {
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to compute hash table load factor on non-object value");
