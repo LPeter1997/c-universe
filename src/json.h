@@ -127,8 +127,8 @@ JSON_DEF Json_Value json_double(double value);
 JSON_DEF Json_Value json_bool(bool value);
 JSON_DEF Json_Value json_null(void);
 
-JSON_DEF void json_value_free(Json_Value* value);
-JSON_DEF void json_document_free(Json_Document* doc);
+JSON_DEF void json_free_value(Json_Value* value);
+JSON_DEF void json_free_document(Json_Document* doc);
 
 JSON_DEF void json_object_set(Json_Value* object, char const* key, Json_Value value);
 JSON_DEF Json_Value* json_object_get(Json_Value* object, char const* key);
@@ -153,6 +153,10 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 
 #include <assert.h>
 #include <ctype.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define JSON_ASSERT(condition, message) assert(((void)message, condition))
 #define JSON_ADD_TO_ARRAY(array, length, capacity, element) \
@@ -172,7 +176,7 @@ extern "C" {
 #endif
 
 static bool json_isident(char c) {
-    return isalpha(c) || isdigit(c) || c == '_';
+    return isalpha((unsigned char)c) || isdigit((unsigned char)c) || c == '_';
 }
 
 static bool json_isxdigit(char ch, int* out_value) {
@@ -312,7 +316,7 @@ static void json_parser_advance(Json_Parser* parser, size_t count) {
 
 static void json_parser_skip_whitespace(Json_Parser* parser) {
 start:
-    while (isspace(json_parser_peek(parser, 0, '\0'))) json_parser_advance(parser, 1);
+    while (isspace((unsigned char)json_parser_peek(parser, 0, '\0'))) json_parser_advance(parser, 1);
 
     // We check for line comments here
     if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '/') {
@@ -509,7 +513,7 @@ static void json_parse_identifier_value(Json_Parser* parser) {
 
 static void json_parse_number_value(Json_Parser* parser) {
     Json_Sax* sax = &parser->sax;
-    long long intValue = 0;
+    unsigned long long intValue = 0;
     bool negate = false;
     size_t parserOffset = 0;
     // Minus sign has to stick to the number, no whitespace allowed in between
@@ -520,8 +524,8 @@ static void json_parse_number_value(Json_Parser* parser) {
     size_t digitStart = parserOffset;
     while (true) {
         char c = json_parser_peek(parser, parserOffset, '\0');
-        if (!isdigit(c)) break;
-        intValue = intValue * 10 + (c - '0');
+        if (!isdigit((unsigned char)c)) break;
+        intValue = intValue * 10 + (unsigned long long)(c - '0');
         ++parserOffset;
     }
     // Check that we have at least one digit
@@ -532,13 +536,13 @@ static void json_parse_number_value(Json_Parser* parser) {
         if (sax->on_null != NULL) sax->on_null(parser->user_data);
         return;
     }
-    if (negate) intValue = -intValue;
     // From here on we have a fraction and exponent part, both optional
     // Check, if either is coming up, if not, we can return an int value
     char next = json_parser_peek(parser, parserOffset, '\0');
     if (next != '.' && next != 'e' && next != 'E') {
         json_parser_advance(parser, parserOffset);
-        if (sax->on_int != NULL) sax->on_int(parser->user_data, intValue);
+        long long signedValue = negate ? -(long long)intValue : (long long)intValue;
+        if (sax->on_int != NULL) sax->on_int(parser->user_data, signedValue);
         return;
     }
     // We have a fraction or exponent part, we need to parse as double
@@ -546,13 +550,19 @@ static void json_parse_number_value(Json_Parser* parser) {
     if (next == '.') {
         // Fractional part is present, skip dot
         ++parserOffset;
+        size_t fractionDigitStart = parserOffset;
         double fractionMultiplier = 0.1;
         while (true) {
             char c = json_parser_peek(parser, parserOffset, '\0');
-            if (!isdigit(c)) break;
+            if (!isdigit((unsigned char)c)) break;
             doubleValue += (c - '0') * fractionMultiplier;
             fractionMultiplier *= 0.1;
             ++parserOffset;
+        }
+        // Check that we have at least one digit in the fractional part
+        if (parserOffset == fractionDigitStart) {
+            char* message = json_format("expected digit after '.' in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+            json_parser_report_error(parser, parser->position, message);
         }
     }
     next = json_parser_peek(parser, parserOffset, '\0');
@@ -567,16 +577,24 @@ static void json_parse_number_value(Json_Parser* parser) {
         else if (json_parser_peek(parser, parserOffset, '\0') == '+') {
             ++parserOffset;
         }
+        size_t exponentDigitStart = parserOffset;
         int exponent = 0;
         while (true) {
             char c = json_parser_peek(parser, parserOffset, '\0');
-            if (!isdigit(c)) break;
+            if (!isdigit((unsigned char)c)) break;
             exponent = exponent * 10 + (c - '0');
             ++parserOffset;
+        }
+        // Check that we have at least one digit in the exponent
+        if (parserOffset == exponentDigitStart) {
+            char* message = json_format("expected digit after exponent in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+            json_parser_report_error(parser, parser->position, message);
         }
         if (expNegate) exponent = -exponent;
         doubleValue *= pow(10, exponent);
     }
+    // Apply sign at the end
+    if (negate) doubleValue = -doubleValue;
     json_parser_advance(parser, parserOffset);
     if (sax->on_double != NULL) sax->on_double(parser->user_data, doubleValue);
 }
@@ -723,7 +741,7 @@ static void json_parse_value(Json_Parser* parser) {
     else if (c == '"') {
         json_parse_string_value(parser);
     }
-    else if (isdigit(c) || c == '-') {
+    else if (isdigit((unsigned char)c) || c == '-') {
         json_parse_number_value(parser);
     }
     else if (json_isident(c)) {
@@ -1133,7 +1151,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
 
 // Resource release ////////////////////////////////////////////////////////////
 
-void json_value_free(Json_Value* value) {
+void json_free_value(Json_Value* value) {
     switch (value->type) {
     case JSON_VALUE_STRING:
         JSON_FREE(value->string_value);
@@ -1141,7 +1159,7 @@ void json_value_free(Json_Value* value) {
     case JSON_VALUE_ARRAY:
     {
         for (size_t i = 0; i < value->array_value.length; ++i) {
-            json_value_free(&value->array_value.elements[i]);
+            json_free_value(&value->array_value.elements[i]);
         }
         JSON_FREE(value->array_value.elements);
     } break;
@@ -1152,7 +1170,7 @@ void json_value_free(Json_Value* value) {
             for (size_t j = 0; j < bucket->length; ++j) {
                 Json_HashEntry* entry = &bucket->entries[j];
                 // Free the value and the key
-                json_value_free(&entry->value);
+                json_free_value(&entry->value);
                 JSON_FREE(entry->key);
             }
             JSON_FREE(bucket->entries);
@@ -1165,8 +1183,12 @@ void json_value_free(Json_Value* value) {
     }
 }
 
-void json_document_free(Json_Document* doc) {
-    json_value_free(&doc->root);
+void json_free_document(Json_Document* doc) {
+    json_free_value(&doc->root);
+    // Free each error message
+    for (size_t i = 0; i < doc->errors.length; ++i) {
+        JSON_FREE(doc->errors.elements[i].message);
+    }
     JSON_FREE(doc->errors.elements);
 }
 
