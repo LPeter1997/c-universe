@@ -109,3 +109,15 @@ Compile-And-Run `
     -Defines @("JSON_EXAMPLE") `
     -AllowUnusedParameters `
     -AllowUnusedFunctions
+
+# 6. Collections library
+Write-Host "running self-test for Collections library..."
+Compile-And-Run `
+    -Sources @("../src/collections.h") `
+    -Defines @("COLLECTIONS_STATIC", "COLLECTIONS_IMPLEMENTATION", "COLLECTIONS_SELF_TEST")
+#Write-Host "running example for Collections library..."
+#Compile-And-Run `
+#    -Sources @("../src/collections.h") `
+#    -Defines @("COLLECTIONS_EXAMPLE") `
+#    -AllowUnusedParameters `
+#    -AllowUnusedFunctions

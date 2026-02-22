@@ -93,7 +93,7 @@
 
 #define DynamicArray_remove(array, index) DynamicArray_remove_range((array), (index), 1)
 
-#define DynamicArray_insert_range(array, index, elements, count) \
+#define DynamicArray_insert_range(array, index, ins_elements, count) \
     do { \
         COLLECTIONS_ASSERT((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
         DynamicArray_reserve((array), (array).length + (count)); \
