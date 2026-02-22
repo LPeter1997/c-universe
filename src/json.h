@@ -757,24 +757,31 @@ void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* 
 
 // DOM parsing
 
+typedef struct Json_DomFrame {
+    Json_Value value;
+    // Relevant for objects only
+    char const* last_key;
+} Json_DomFrame;
+
 typedef struct Json_DomBuilder {
     struct {
-        Json_Value* elements;
+        Json_DomFrame* elements;
         size_t length;
         size_t capacity;
     } stack;
-    char const* last_key;
     Json_Document document;
     bool document_root_set;
 } Json_DomBuilder;
 
 static void json_dom_builder_push(Json_DomBuilder* builder, Json_Value value) {
-    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, value);
+    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, (Json_DomFrame){ .value = value, .last_key = NULL });
 }
 
 static Json_Value json_dom_builder_pop(Json_DomBuilder* builder) {
     JSON_ASSERT(builder->stack.length > 0, "attempted to pop from empty DOM builder stack");
-    return builder->stack.elements[--builder->stack.length];
+    Json_DomFrame frame = builder->stack.elements[--builder->stack.length];
+    JSON_ASSERT(frame.last_key == NULL, "DOM builder frame has pending object key on pop");
+    return frame.value;
 }
 
 static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value value) {
@@ -786,14 +793,16 @@ static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value v
         return;
     }
     // Otherwise, we need to append it to the current container on top of the stack
-    Json_Value* current = &builder->stack.elements[builder->stack.length - 1];
-    if (current->type == JSON_VALUE_ARRAY) {
-        json_array_append(current, value);
+    Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
+    if (current->value.type == JSON_VALUE_ARRAY) {
+        json_array_append(&current->value, value);
     }
-    else if (current->type == JSON_VALUE_OBJECT) {
-        JSON_ASSERT(builder->last_key != NULL, "attempted to append value to object without a key in DOM builder");
-        json_object_set(current, builder->last_key, value);
-        builder->last_key = NULL;
+    else if (current->value.type == JSON_VALUE_OBJECT) {
+        JSON_ASSERT(current->last_key != NULL, "attempted to append value to object without a key in DOM builder");
+        json_object_set(&current->value, current->last_key, value);
+        // We assume that json_object_set copies, we need to free the key
+        JSON_FREE(current->last_key);
+        current->last_key = NULL;
     }
     else {
         JSON_ASSERT(false, "attempted to append value to non-container in DOM builder");
@@ -848,7 +857,8 @@ static void json_dom_builder_on_object_start(void* user_data) {
 static void json_dom_builder_on_object_key(void* user_data, char const* key, size_t length) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     // The key is owned already, we just need to keep track of it until we get the value
-    builder->last_key = key;
+    Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
+    current->last_key = key;
 }
 
 static void json_dom_builder_on_object_end(void* user_data) {
@@ -882,7 +892,6 @@ Json_Document json_parse(char const* json, Json_Options options) {
     json_parse_sax(json, sax, options, &builder);
     // We must have cleaned up everything properly
     JSON_ASSERT(builder.stack.length == 0, "DOM builder stack is not empty after parsing complete document");
-    JSON_ASSERT(builder.last_key == NULL, "DOM builder has pending object key after parsing complete document");
     // Deallocate the stack memory, we don't need it anymore
     JSON_FREE(builder.stack.elements);
     return builder.document;
