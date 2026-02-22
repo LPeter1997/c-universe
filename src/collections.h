@@ -40,6 +40,19 @@
     #define COLLECTIONS_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
+// Suppress -Wtype-limits for index checks (e.g., 0 <= size_t is always true)
+#if defined(__GNUC__) && !defined(__clang__)
+    #define COLLECTIONS_ASSERT_INDEX(condition, message) \
+        do { \
+            _Pragma("GCC diagnostic push") \
+            _Pragma("GCC diagnostic ignored \"-Wtype-limits\"") \
+            COLLECTIONS_ASSERT(condition, message); \
+            _Pragma("GCC diagnostic pop") \
+        } while (false)
+#else
+    #define COLLECTIONS_ASSERT_INDEX(condition, message) COLLECTIONS_ASSERT(condition, message)
+#endif
+
 #define __COLLECTIONS_ID(name) __collections_ ## name ## _ ## __LINE__
 
 /**
@@ -123,7 +136,7 @@
  */
 #define DynamicArray_insert(array, index, element) \
     do { \
-        COLLECTIONS_ASSERT((size_t)(index) <= (array).length, "index out of bounds for dynamic array insertion"); \
+        COLLECTIONS_ASSERT_INDEX((index) <= (array).length, "index out of bounds for dynamic array insertion"); \
         DynamicArray_reserve((array), (array).length + 1); \
         memmove(&(array).elements[(index) + 1], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         (array).elements[index] = (element); \
@@ -146,7 +159,7 @@
  */
 #define DynamicArray_insert_range(array, index, ins_elements, count) \
     do { \
-        COLLECTIONS_ASSERT((size_t)(index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
+        COLLECTIONS_ASSERT_INDEX((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
         DynamicArray_reserve((array), (array).length + (count)); \
         memmove(&(array).elements[(index) + (count)], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         memcpy(&(array).elements[index], (ins_elements), (count) * sizeof(*(array).elements)); \
@@ -161,8 +174,8 @@
  */
 #define DynamicArray_remove_range(array, index, count) \
     do { \
-        COLLECTIONS_ASSERT((size_t)(index) < (array).length, "index out of bounds for dynamic array range removal"); \
-        COLLECTIONS_ASSERT((size_t)(index) + (size_t)(count) <= (array).length, "range out of bounds for dynamic array range removal"); \
+        COLLECTIONS_ASSERT_INDEX((index) < (array).length, "index out of bounds for dynamic array range removal"); \
+        COLLECTIONS_ASSERT_INDEX((index) + (count) <= (array).length, "range out of bounds for dynamic array range removal"); \
         memmove(&(array).elements[index], &(array).elements[(index) + (count)], ((array).length - (index) - (count)) * sizeof(*(array).elements)); \
         (array).length -= (count); \
     } while (false)
