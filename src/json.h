@@ -132,6 +132,7 @@ JSON_DEF Json_Value json_int(long long value);
 JSON_DEF Json_Value json_double(double value);
 JSON_DEF Json_Value json_bool(bool value);
 JSON_DEF Json_Value json_null(void);
+JSON_DEF Json_Value json_copy(Json_Value value);
 
 JSON_DEF void json_free_value(Json_Value* value);
 JSON_DEF void json_free_document(Json_Document* doc);
@@ -960,6 +961,40 @@ Json_Document json_parse(char const* json, Json_Options options) {
 
 // Value constructors //////////////////////////////////////////////////////////
 
+Json_Value json_copy(Json_Value value) {
+    switch (value.type) {
+    case JSON_VALUE_NULL:
+    case JSON_VALUE_BOOL:
+    case JSON_VALUE_INT:
+    case JSON_VALUE_DOUBLE:
+        // Don't need any deep-copy
+        return value;
+    case JSON_VALUE_STRING:
+        return json_string(value.value.string);
+    case JSON_VALUE_ARRAY: {
+        Json_Value array = json_array();
+        for (size_t i = 0; i < value.value.array.length; ++i) {
+            json_array_append(&array, json_copy(value.value.array.elements[i]));
+        }
+        return array;
+    }
+    case JSON_VALUE_OBJECT: {
+        Json_Value object = json_object();
+        for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
+            Json_HashBucket* bucket = &value.value.object.buckets[i];
+            for (size_t j = 0; j < bucket->length; ++j) {
+                Json_HashEntry* entry = &bucket->entries[j];
+                json_object_set(&object, entry->key, json_copy(entry->value));
+            }
+        }
+        return object;
+    }
+    default:
+        JSON_ASSERT(false, "invalid value type in json_copy");
+        return json_null();
+    }
+}
+
 Json_Value json_object(void) {
     return (Json_Value){
         .type = JSON_VALUE_OBJECT,
@@ -1382,12 +1417,18 @@ void json_free_value(Json_Value* value) {
     switch (value->type) {
     case JSON_VALUE_STRING:
         JSON_FREE(value->value.string);
+        // NULL out in case it's shared somewhere
+        value->value.string = NULL;
         break;
     case JSON_VALUE_ARRAY: {
         for (size_t i = 0; i < value->value.array.length; ++i) {
             json_free_value(&value->value.array.elements[i]);
         }
         JSON_FREE(value->value.array.elements);
+        // NULL out in case it's shared somewhere
+        value->value.array.elements = NULL;
+        value->value.array.length = 0;
+        value->value.array.capacity = 0;
     } break;
     case JSON_VALUE_OBJECT: {
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
@@ -1401,6 +1442,9 @@ void json_free_value(Json_Value* value) {
             JSON_FREE(bucket->entries);
         }
         JSON_FREE(value->value.object.buckets);
+        // NULL out in case it's shared somewhere
+        value->value.object.buckets = NULL;
+        value->value.object.buckets_length = 0;
     } break;
     default:
         // No resources to free for other types
@@ -1415,6 +1459,9 @@ void json_free_document(Json_Document* doc) {
         JSON_FREE(doc->errors.elements[i].message);
     }
     JSON_FREE(doc->errors.elements);
+    doc->errors.elements = NULL;
+    doc->errors.length = 0;
+    doc->errors.capacity = 0;
 }
 
 #ifdef __cplusplus
