@@ -300,9 +300,8 @@
  * @param table The hash table to modify.
  * @param in_key The key to set in the hash table.
  * @param in_value The value to associate with the key.
- * @param old_value An optional output variable that will be set to the previous value associated with the key if it exists, or NULL if the key was not present.
  */
-#define HashTable_set(table, in_key, in_value, old_value) \
+#define HashTable_set(table, in_key, in_value) \
     do { \
         if (HashTable_load_factor(table) > 0.75 || (table).buckets_length == 0) { \
             HashTable_grow(table); \
@@ -312,9 +311,6 @@
         bool __COLLECTIONS_ID(found) = false; \
         for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
             if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, in_key)) { \
-                if (old_value != NULL) { \
-                    *(old_value) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value; \
-                } \
                 (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value = in_value; \
                 __COLLECTIONS_ID(found) = true; \
                 break; \
@@ -333,7 +329,6 @@
             (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].value = in_value; \
             (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].hash = __COLLECTIONS_ID(hash); \
             ++(table).entry_count; \
-            (old_value) = NULL; \
         } \
     } while (false)
 
