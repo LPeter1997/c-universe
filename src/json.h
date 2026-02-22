@@ -2,10 +2,21 @@
  * json.h is a single-header JSON library for parsing, building and writing JSON format.
  *
  * Configuration:
- *  - TODO
+ *  - #define JSON_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
+ *  - #define JSON_STATIC before including this header to make all functions have internal linkage
+ *  - #define JSON_REALLOC and JSON_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define JSON_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
+ *  - #define JSON_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * API:
- *  - TODO
+ *  - The core types to represent JSON values and documents are Json_Value and Json_Document, which can represent any legal JSON structure
+ *  - Use json_parse to parse a JSON string into a Json_Document, which contains the root JSON value and any errors encountered during parsing
+ *  - Use json_parse_sax to parse a JSON string in a streaming fashion, invoking callbacks for parsing events
+ *  - Use json_swrite or json_write to write a Json_Value into a JSON string
+ *  - Use the various json_* constructor functions to create and manipulate JSON values, including objects and arrays (like json_object and json_array)
+ *  - Use json_object_set, json_object_get and json_object_remove to manipulate key-value pairs in JSON objects
+ *  - Use json_array_append, json_array_set and json_array_get to manipulate values in JSON arrays
+ *  - Use json_free_value and json_free_document to free the memory associated with JSON values and documents when they are no longer needed
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -198,26 +209,136 @@ JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer
  */
 JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_length);
 
+/**
+ * Creates a new JSON object value.
+ * @returns A new, empty JSON object.
+ */
 JSON_DEF Json_Value json_object(void);
+
+/**
+ * Creates a new JSON array value.
+ * @returns A new, empty JSON array.
+ */
 JSON_DEF Json_Value json_array(void);
+
+/**
+ * Creates a new JSON string value by copying the given string.
+ * @param str The string to copy into the JSON value.
+ * @returns A new JSON string value containing a copy of the given string.
+ */
 JSON_DEF Json_Value json_string(char const* str);
+
+/**
+ * Creates a new JSON integer number value.
+ * @param value The integer value to store in the JSON value.
+ * @returns A new JSON integer value containing the given integer.
+ */
 JSON_DEF Json_Value json_int(long long value);
+
+/**
+ * Creates a new JSON double number value.
+ * @param value The double value to store in the JSON value.
+ * @returns A new JSON double value containing the given double.
+ */
 JSON_DEF Json_Value json_double(double value);
+
+/**
+ * Creates a new JSON boolean value.
+ * @param value The boolean value to store in the JSON value.
+ * @returns A new JSON boolean value containing the given boolean.
+ */
 JSON_DEF Json_Value json_bool(bool value);
+
+/**
+ * Creates a new JSON null value.
+ * @returns A new JSON null value.
+ */
 JSON_DEF Json_Value json_null(void);
+
+/**
+ * Creates a deep-copy of the given JSON value.
+ * @param value The JSON value to copy.
+ * @returns A new JSON value that is a deep copy of the given value.
+ */
 JSON_DEF Json_Value json_copy(Json_Value value);
 
+/**
+ * Frees the memory associated with the given JSON value, including any nested values for arrays and objects.
+ * @param value The JSON value to free.
+ */
 JSON_DEF void json_free_value(Json_Value* value);
+
+/**
+ * Frees the memory associated with the given JSON document, including the root value and any error messages.
+ * @param doc The JSON document to free.
+ */
 JSON_DEF void json_free_document(Json_Document* doc);
 
+/**
+ * Sets the value of the specified key in the given JSON object, replacing any existing value for that key.
+ * @param object The JSON object to modify.
+ * @param key The key to set in the object. It will be copied by the function, so the caller retains ownership of the key string.
+ * @param value The value to set for the specified key. It will be shallow-copied by the function.
+ */
 JSON_DEF void json_object_set(Json_Value* object, char const* key, Json_Value value);
+
+/**
+ * Retrieves the value associated with the specified key in the given JSON object.
+ * @param object The JSON object to query.
+ * @param key The key to look up in the object.
+ * @returns A pointer to the value associated with the specified key, or NULL if the key does not exist in the object.
+ */
 JSON_DEF Json_Value* json_object_get(Json_Value* object, char const* key);
+
+/**
+ * Retrieves the key and value at the specified index in the given JSON object.
+ * @param object The JSON object to query.
+ * @param index The index of the key-value pair to retrieve, starting from 0.
+ * @param out_key A pointer to a char* variable that will receive the key string. The library retains ownership of the key string, so the caller should not free it.
+ * @param out_value A pointer to a Json_Value variable that will receive the value. The library retains ownership of the value, so the caller should not free it.
+ * @returns true if a key-value pair exists at the specified index and was retrieved successfully, or false if the index is out of bounds.
+ */
 JSON_DEF bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, Json_Value* out_value);
+
+/**
+ * Removes the key-value pair with the specified key from the given JSON object.
+ * @param object The JSON object to modify.
+ * @param key The key of the key-value pair to remove from the object.
+ * @param out_value A pointer to a @see Json_Value variable that will receive the removed value if the key was found and removed.
+ * The caller takes ownership of the removed value and is responsible for freeing it using @see json_free_value.
+ * Can be NULL if the removed value is not needed, in which case the library will free the removed value itself.
+ */
 JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value);
 
+/**
+ * Appends a value to the end of the given JSON array.
+ * @param array The JSON array to modify.
+ * @param value The value to append to the array. It will be shallow-copied by the function.
+ */
 JSON_DEF void json_array_append(Json_Value* array, Json_Value value);
+
+/**
+ * Sets the value at the specified index in the given JSON array, replacing any existing value at that index.
+ * @param array The JSON array to modify.
+ * @param index The index at which to set the value, starting from 0. Must be less than or equal to the current length of the array.
+ * If equal to the current length of the array, the call is equivalent to @see json_array_append.
+ * @param value The value to set at the specified index. It will be shallow-copied by the function.
+ */
 JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
+
+/**
+ * Retrieves the value at the specified index in the given JSON array.
+ * @param array The JSON array to query.
+ * @param index The index of the value to retrieve, starting from 0.
+ * @returns A pointer to the value at the specified index.
+ */
 JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
+
+/**
+ * Removes the value at the specified index from the given JSON array, shifting any subsequent values down to fill the gap.
+ * @param array The JSON array to modify.
+ * @param index The index of the value to remove, starting from 0.
+ */
 JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 
 #ifdef __cplusplus
@@ -1124,7 +1245,12 @@ void json_array_append(Json_Value* array, Json_Value value) {
 
 void json_array_set(Json_Value* array, size_t index, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
-    JSON_ASSERT(index < array->value.array.length, "attempted to set index out of bounds in array");
+    JSON_ASSERT(index <= array->value.array.length, "attempted to set index out of bounds in array");
+    if (index == array->value.array.length) {
+        // Setting the index at the current length is equivalent to appending
+        json_array_append(array, value);
+        return;
+    }
     // Free old value if needed
     json_free_value(&array->value.array.elements[index]);
     array->value.array.elements[index] = value;
