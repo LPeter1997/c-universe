@@ -1213,6 +1213,7 @@ static void json_serializer_appendn(Json_Serializer* serializer, char const* str
 }
 
 static void json_serializer_append(Json_Serializer* serializer, char const* str) {
+    if (str == NULL) return;
     json_serializer_appendn(serializer, str, strlen(str));
 }
 
@@ -1452,7 +1453,6 @@ CTEST_CASE(parse_null) {
     json_free_document(&doc);
 }
 
-#if 0
 CTEST_CASE(parse_true) {
     Json_Document doc = json_parse("true", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
@@ -1721,7 +1721,6 @@ CTEST_CASE(serialize_roundtrip) {
     json_free_document(&doc);
     json_free_document(&doc2);
 }
-#endif
 
 #endif /* JSON_SELF_TEST */
 
