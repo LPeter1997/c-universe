@@ -161,7 +161,22 @@ typedef struct Json_Document {
     } errors;
 } Json_Document;
 
+/**
+ * Parses the given JSON string using a SAX-style approach, invoking the provided callbacks for parsing events.
+ * @param json The JSON string to parse.
+ * @param sax The set of callback functions to invoke for parsing events.
+ * @param options The options to customize the behavior of the parser.
+ * @param user_data A pointer to user-defined data that will be passed to the callback functions.
+ */
 JSON_DEF void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* user_data);
+
+/**
+ * Parses the given JSON string into a @see Json_Document structure, which contains the root JSON value and any errors encountered during parsing.
+ * @param json The JSON string to parse.
+ * @param options The options to customize the behavior of the parser.
+ * @returns A @see Json_Document containing the parsed JSON value and any errors encountered during parsing.
+ * The caller is responsible for freeing the document using @see json_free_document.
+ */
 JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
 
 JSON_DEF size_t json_serialize_to(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
