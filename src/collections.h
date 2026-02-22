@@ -243,6 +243,48 @@
         } \
     } while (false)
 
+#define HashTable_contains(table, searched_key, result) \
+    do { \
+        (result) = false; \
+        if ((table).buckets_length > 0) { \
+            size_t __COLLECTIONS_ID(hash) = (table).hash_fn(searched_key); \
+            size_t __COLLECTIONS_ID(bucket_idx) = __COLLECTIONS_ID(hash) % (table).buckets_length; \
+            for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
+                if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, searched_key)) { \
+                    (result) = true; \
+                    break; \
+                } \
+            } \
+        } \
+    } while (false)
+
+#define HashTable_remove(table, searched_key) \
+    do { \
+        if ((table).buckets_length > 0) { \
+            size_t __COLLECTIONS_ID(hash) = (table).hash_fn(searched_key); \
+            size_t __COLLECTIONS_ID(bucket_idx) = __COLLECTIONS_ID(hash) % (table).buckets_length; \
+            for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
+                if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, searched_key)) { \
+                    size_t __COLLECTIONS_ID(last_idx) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].length - 1; \
+                    if (__COLLECTIONS_ID(i) != __COLLECTIONS_ID(last_idx)) { \
+                        (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)] = (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(last_idx)]; \
+                    } \
+                    --(table).buckets[__COLLECTIONS_ID(bucket_idx)].length; \
+                    --(table).entry_count; \
+                    break; \
+                } \
+            } \
+        } \
+    } while (false)
+
+#define HashTable_clear(table) \
+    do { \
+        for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets_length; ++__COLLECTIONS_ID(i)) { \
+            (table).buckets[__COLLECTIONS_ID(i)].length = 0; \
+        } \
+        (table).entry_count = 0; \
+    } while (false)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1111,6 +1153,201 @@ CTEST_CASE(hash_table_modify_value_via_pointer) {
     result = NULL;
     HashTable_get(table, 42, result);
     CTEST_ASSERT_TRUE(result != NULL && *result == 999);
+    HashTable_free(table);
+}
+
+// HashTable_contains tests ////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_contains_existing_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    HashTable_set(table, 10, 200);
+    bool found = false;
+    HashTable_contains(table, 42, found);
+    CTEST_ASSERT_TRUE(found);
+    found = false;
+    HashTable_contains(table, 10, found);
+    CTEST_ASSERT_TRUE(found);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_contains_nonexistent_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    bool found = true;
+    HashTable_contains(table, 999, found);
+    CTEST_ASSERT_TRUE(!found);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_contains_on_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    bool found = true;
+    HashTable_contains(table, 42, found);
+    CTEST_ASSERT_TRUE(!found);
+}
+
+CTEST_CASE(hash_table_contains_with_string_keys) {
+    HashTable(const char*, int) table = { .hash_fn = test_hash_string, .eq_fn = test_eq_string };
+    HashTable_set(table, "hello", 1);
+    HashTable_set(table, "world", 2);
+    bool found = false;
+    HashTable_contains(table, "hello", found);
+    CTEST_ASSERT_TRUE(found);
+    found = false;
+    HashTable_contains(table, "world", found);
+    CTEST_ASSERT_TRUE(found);
+    found = true;
+    HashTable_contains(table, "missing", found);
+    CTEST_ASSERT_TRUE(!found);
+    HashTable_free(table);
+}
+
+// HashTable_remove tests //////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_remove_existing_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_set(table, 3, 30);
+    CTEST_ASSERT_TRUE(table.entry_count == 3);
+    HashTable_remove(table, 2);
+    CTEST_ASSERT_TRUE(table.entry_count == 2);
+    int* result = NULL;
+    HashTable_get(table, 2, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 10);
+    result = NULL;
+    HashTable_get(table, 3, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 30);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_remove_nonexistent_key) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    HashTable_remove(table, 999);
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    int* result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 10);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_remove_on_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_remove(table, 42);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+}
+
+CTEST_CASE(hash_table_remove_all_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_set(table, 3, 30);
+    HashTable_remove(table, 1);
+    HashTable_remove(table, 2);
+    HashTable_remove(table, 3);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+    int* result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_remove_then_reinsert) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 42, 100);
+    HashTable_remove(table, 42);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+    HashTable_set(table, 42, 200);
+    CTEST_ASSERT_TRUE(table.entry_count == 1);
+    int* result = NULL;
+    HashTable_get(table, 42, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 200);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_remove_with_collisions) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_resize(table, 4);
+    HashTable_set(table, 0, 100);
+    HashTable_set(table, 4, 200);
+    HashTable_set(table, 8, 300);
+    HashTable_remove(table, 4);
+    CTEST_ASSERT_TRUE(table.entry_count == 2);
+    int* result = NULL;
+    HashTable_get(table, 0, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 100);
+    result = NULL;
+    HashTable_get(table, 4, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    result = NULL;
+    HashTable_get(table, 8, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 300);
+    HashTable_free(table);
+}
+
+// HashTable_clear tests ///////////////////////////////////////////////////////
+
+CTEST_CASE(hash_table_clear_removes_all_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_set(table, 3, 30);
+    size_t buckets_before = table.buckets_length;
+    HashTable_clear(table);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+    CTEST_ASSERT_TRUE(table.buckets_length == buckets_before);
+    CTEST_ASSERT_TRUE(table.buckets != NULL);
+    int* result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_clear_on_empty) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_clear(table);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+}
+
+CTEST_CASE(hash_table_clear_allows_reuse) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    HashTable_set(table, 1, 10);
+    HashTable_set(table, 2, 20);
+    HashTable_clear(table);
+    HashTable_set(table, 100, 1000);
+    HashTable_set(table, 200, 2000);
+    CTEST_ASSERT_TRUE(table.entry_count == 2);
+    int* result = NULL;
+    HashTable_get(table, 100, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 1000);
+    result = NULL;
+    HashTable_get(table, 200, result);
+    CTEST_ASSERT_TRUE(result != NULL && *result == 2000);
+    result = NULL;
+    HashTable_get(table, 1, result);
+    CTEST_ASSERT_TRUE(result == NULL);
+    HashTable_free(table);
+}
+
+CTEST_CASE(hash_table_clear_with_many_entries) {
+    HashTable(int, int) table = { .hash_fn = test_hash_int, .eq_fn = test_eq_int };
+    for (int i = 0; i < 100; ++i) {
+        HashTable_set(table, i, i * 10);
+    }
+    CTEST_ASSERT_TRUE(table.entry_count == 100);
+    HashTable_clear(table);
+    CTEST_ASSERT_TRUE(table.entry_count == 0);
+    for (int i = 0; i < 100; ++i) {
+        int* result = NULL;
+        HashTable_get(table, i, result);
+        CTEST_ASSERT_TRUE(result == NULL);
+    }
     HashTable_free(table);
 }
 
