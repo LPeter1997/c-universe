@@ -543,7 +543,7 @@ static void json_parse_number_value(Json_Parser* parser) {
 
 static void json_parse_value(Json_Parser* parser);
 
-static void json_parse_array(Json_Parser* parser) {
+static void json_parse_array_value(Json_Parser* parser) {
     Json_Sax* sax = &parser->sax;
     if (!json_parser_expect_char(parser, '[')) return;
 
@@ -592,14 +592,89 @@ static void json_parse_array(Json_Parser* parser) {
     if (sax->on_array_end != NULL) sax->on_array_end(sax->user_data);
 }
 
+static void json_parse_object_value(Json_Parser* parser) {
+    Json_Sax* sax = &parser->sax;
+    if (!json_parser_expect_char(parser, '{')) return;
+
+    if (sax->on_object_start != NULL) sax->on_object_start(sax->user_data);
+
+    // Track these to report trailing comma errors
+    Json_Position lastCommaPosition = { 0 };
+    bool lastIsComma = false;
+
+    while (true) {
+        json_parser_skip_whitespace(parser);
+        char c = json_parser_peek(parser, 0, '\0');
+        // End of file
+        if (c == '\0') {
+            char* message = json_format("unexpected end of input while parsing object");
+            json_parser_report_error(parser, parser->position, message);
+            // Break out of the loop to report the object end regardless
+            break;
+        }
+        // End of object, consumed after the loop
+        if (c == '}') break;
+        // Must be a string key
+        if (c != '"') {
+            char* message = json_format("expected '\"' at start of object key, but got '%c'", c);
+            json_parser_report_error(parser, parser->position, message);
+            // We don't actually return here, for best-effort we just skip it and continue parsing
+            json_parser_advance(parser, 1);
+            continue;
+        }
+        // Parse the string key
+        // This is one of the places we actually need to allocate memory, since we need to report the processed string key to the consumer
+        size_t parserToAdvance;
+        size_t keyLength = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
+        if (sax->on_object_key != NULL) {
+            // We only actually allocate, if the consumer has a callback for the key, otherwise we can just skip it
+            char* keyBuffer = (char*)JSON_REALLOC(NULL, (keyLength + 1) * sizeof(char));
+            JSON_ASSERT(keyBuffer != NULL, "failed to allocate buffer for object key");
+            json_parse_string_value_impl(parser, keyBuffer, keyLength, &parserToAdvance);
+            keyBuffer[keyLength] = '\0';
+            sax->on_object_key(sax->user_data, keyBuffer, keyLength);
+        }
+        json_parser_advance(parser, parserToAdvance);
+        // After the key, we need a colon
+        json_parser_skip_whitespace(parser);
+        // Welp, let's skip to next iteration if there's no colon
+        if (!json_parser_expect_char(parser, ':')) continue;
+        // After the colon, we need a value
+        json_parser_skip_whitespace(parser);
+        json_parse_value(parser);
+        lastIsComma = false;
+        // After a key-value pair, we can have either a comma (more pairs coming) or a closing brace (end of object)
+        json_parser_skip_whitespace(parser);
+        c = json_parser_peek(parser, 0, '\0');
+        if (c == ',') {
+            lastCommaPosition = parser->position;
+            lastIsComma = true;
+            json_parser_advance(parser, 1);
+            continue;
+        }
+        // Was not a comma, must be end of object
+        break;
+    }
+
+    // If trailing comma extension is not enabled, report an error
+    if (lastIsComma && (parser->options.extensions & JSON_EXTENSION_TRAILING_COMMAS) == 0) {
+        char* message = json_format("trailing comma in object is not allowed");
+        json_parser_report_error(parser, lastCommaPosition, message);
+    }
+
+    // Done
+    json_parser_expect_char(parser, '}');
+    if (sax->on_object_end != NULL) sax->on_object_end(sax->user_data);
+}
+
 static void json_parse_value(Json_Parser* parser) {
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
     if (c == '{') {
-        // TODO: Parse object
+        json_parse_object_value(parser);
     }
     else if (c == '[') {
-        json_parse_array(parser);
+        json_parse_array_value(parser);
     }
     else if (c == '"') {
         json_parse_string_value(parser);
