@@ -947,6 +947,33 @@ Json_Value json_null(void) {
     };
 }
 
+// Array manipulation ////////////////////////////////////////////////////////////
+
+void json_array_append(Json_Value* array, Json_Value value) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to append to non-array value");
+    JSON_ADD_TO_ARRAY(array->array_value.elements, array->array_value.length, array->array_value.capacity, value);
+}
+
+void json_array_set(Json_Value* array, size_t index, Json_Value value) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
+    JSON_ASSERT(index < array->array_value.length, "attempted to set index out of bounds in array");
+    array->array_value.elements[index] = value;
+}
+
+Json_Value* json_array_get(Json_Value* array, size_t index) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to get index on non-array value");
+    JSON_ASSERT(index < array->array_value.length, "attempted to get index out of bounds in array");
+    return &array->array_value.elements[index];
+}
+
+void json_array_remove(Json_Value* array, size_t index) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to remove index on non-array value");
+    JSON_ASSERT(index < array->array_value.length, "attempted to remove index out of bounds in array");
+    Json_Value* elements = array->array_value.elements;
+    memmove(&elements[index], &elements[index + 1], (array->array_value.length - index - 1) * sizeof(Json_Value));
+    --array->array_value.length;
+}
+
 #ifdef __cplusplus
 }
 #endif
