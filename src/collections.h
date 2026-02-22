@@ -112,7 +112,6 @@
 
 // Hash table //////////////////////////////////////////////////////////////////
 
-/*
 #define HashTable(K, V, hash_fn, eq_fn) \
     struct { \
         struct { \
@@ -143,29 +142,76 @@
 
 #define HashTable_resize(table, new_buckets_length) \
     do { \
-        struct { K key; V value; size_t hash; }* newBuckets = (struct { K key; V value; size_t hash; }*)COLLECTIONS_REALLOC(NULL, (new_buckets_length) * sizeof(*(newBuckets))); \
-        COLLECTIONS_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets"); \
-        memset(newBuckets, 0, (new_buckets_length) * sizeof(*(newBuckets))); \
-        for (size_t i = 0; i < (table).buckets_length; ++i) { \
-            for (size_t j = 0; j < (table).buckets[i].length; ++j) { \
-                size_t newBucketIndex = (table).buckets[i].entries[j].hash % (new_buckets_length); \
-                struct { K key; V value; size_t hash; } entry = (table).buckets[i].entries[j]; \
-                if ((table).buckets[newBucketIndex].length == (table).buckets[newBucketIndex].capacity) { \
-                    size_t newCap = (table).buckets[newBucketIndex].capacity == 0 ? 8 : (table).buckets[newBucketIndex].capacity * 2; \
-                    void* newEntries = COLLECTIONS_REALLOC((table).buckets[newBucketIndex].entries, newCap * sizeof(*(table).buckets[newBucketIndex].entries)); \
-                    COLLECTIONS_ASSERT(newEntries != NULL, "failed to allocate memory for resized hash table bucket entries"); \
-                    (table).buckets[newBucketIndex].entries = newEntries; \
-                    (table).buckets[newBucketIndex].capacity = newCap; \
+        if ((new_buckets_length) != (table).buckets_length) { \
+            struct { K key; V value; size_t hash; }* newBuckets = (struct { K key; V value; size_t hash; }*)COLLECTIONS_REALLOC(NULL, (new_buckets_length) * sizeof(*(newBuckets))); \
+            COLLECTIONS_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets"); \
+            memset(newBuckets, 0, (new_buckets_length) * sizeof(*(newBuckets))); \
+            for (size_t i = 0; i < (table).buckets_length; ++i) { \
+                for (size_t j = 0; j < (table).buckets[i].length; ++j) { \
+                    size_t newBucketIndex = (table).buckets[i].entries[j].hash % (new_buckets_length); \
+                    struct { K key; V value; size_t hash; } entry = (table).buckets[i].entries[j]; \
+                    if ((table).buckets[newBucketIndex].length == (table).buckets[newBucketIndex].capacity) { \
+                        size_t newCap = (table).buckets[newBucketIndex].capacity == 0 ? 8 : (table).buckets[newBucketIndex].capacity * 2; \
+                        void* newEntries = COLLECTIONS_REALLOC((table).buckets[newBucketIndex].entries, newCap * sizeof(*(table).buckets[newBucketIndex].entries)); \
+                        COLLECTIONS_ASSERT(newEntries != NULL, "failed to allocate memory for resized hash table bucket entries"); \
+                        (table).buckets[newBucketIndex].entries = newEntries; \
+                        (table).buckets[newBucketIndex].capacity = newCap; \
+                    } \
+                    (table).buckets[newBucketIndex].entries[(table).buckets[newBucketIndex].length++] = entry; \
                 } \
-                (table).buckets[newBucketIndex].entries[(table).buckets[newBucketIndex].length++] = entry; \
+                COLLECTIONS_FREE((table).buckets[i].entries); \
             } \
-            COLLECTIONS_FREE((table).buckets[i].entries); \
+            COLLECTIONS_FREE((table).buckets); \
+            (table).buckets = newBuckets; \
+            (table).buckets_length = (new_buckets_length); \
         } \
-        COLLECTIONS_FREE((table).buckets); \
-        (table).buckets = newBuckets; \
-        (table).buckets_length = (new_buckets_length); \
     } while (false)
-*/
+
+#define HashTable_load_factor(table) ((table).buckets_length == 0 ? 1.0 : (double)(table).entry_count / (double)(table).buckets_length)
+
+#define HashTable_grow(table) HashTable_resize((table), (table).buckets_length == 0 ? 8 : (table).buckets_length * 2)
+
+#define HashTable_shrink(table) HashTable_resize((table), (table).buckets_length / 2)
+
+#define HashTable_get(table, key, result) \
+    do { \
+        if ((table).buckets_length > 0) { \
+            size_t hash = (table).hash_fn(key); \
+            size_t bucketIndex = hash % (table).buckets_length; \
+            for (size_t i = 0; i < (table).buckets[bucketIndex].length; ++i) { \
+                if ((table).buckets[bucketIndex].entries[i].hash == hash && (table).eq_fn((table).buckets[bucketIndex].entries[i].key, key)) { \
+                    (result) = &(table).buckets[bucketIndex].entries[i].value; \
+                    break; \
+                } \
+            } \
+        } else { \
+            (result) = NULL; \
+        } \
+    } while (false)
+
+#define HashTable_set(table, key, value) \
+    do { \
+        if (HashTable_load_factor(table) > 0.75) { \
+            HashTable_grow(table); \
+        } \
+        size_t hash = (table).hash_fn(key); \
+        size_t bucketIndex = hash % (table).buckets_length; \
+        for (size_t i = 0; i < (table).buckets[bucketIndex].length; ++i) { \
+            if ((table).buckets[bucketIndex].entries[i].hash == hash && (table).eq_fn((table).buckets[bucketIndex].entries[i].key, key)) { \
+                (table).buckets[bucketIndex].entries[i].value = value; \
+                return; \
+            } \
+        } \
+        if ((table).buckets[bucketIndex].length == (table).buckets[bucketIndex].capacity) { \
+            size_t newCap = (table).buckets[bucketIndex].capacity == 0 ? 8 : (table).buckets[bucketIndex].capacity * 2; \
+            void* newEntries = COLLECTIONS_REALLOC((table).buckets[bucketIndex].entries, newCap * sizeof(*(table).buckets[bucketIndex].entries)); \
+            COLLECTIONS_ASSERT(newEntries != NULL, "failed to allocate memory for hash table bucket entries during set"); \
+            (table).buckets[bucketIndex].entries = newEntries; \
+            (table).buckets[bucketIndex].capacity = newCap; \
+        } \
+        (table).buckets[bucketIndex].entries[(table).buckets[bucketIndex].length++] = ((struct { K key; V value; size_t hash; }){ .key = key, .value = value, .hash = hash }); \
+        ++(table).entry_count; \
+    } while (false)
 
 #ifdef __cplusplus
 extern "C" {
