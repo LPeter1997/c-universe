@@ -21,12 +21,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-#ifdef COLLECTIONS_STATIC
-    #define COLLECTIONS_DEF static
-#else
-    #define COLLECTIONS_DEF extern
-#endif
-
 #ifndef COLLECTIONS_REALLOC
     #define COLLECTIONS_REALLOC realloc
 #endif
@@ -42,6 +36,10 @@
 
 #define __COLLECTIONS_ID(name) __collections_ ## name ## _ ## __LINE__
 
+/**
+ * Defines a dynamic array of the given type.
+ * @param T The type of the elements in the array.
+ */
 #define DynamicArray(T) \
     struct { \
         T* elements; \
@@ -49,6 +47,10 @@
         size_t capacity; \
     }
 
+/**
+ * Frees the memory allocated for the dynamic array and resets its state.
+ * @param array The dynamic array to free.
+ */
 #define DynamicArray_free(array) \
     do { \
         COLLECTIONS_FREE((array).elements); \
@@ -57,15 +59,33 @@
         (array).capacity = 0; \
     } while (false)
 
+/**
+ * Gets the current length of the dynamic array.
+ * @param array The dynamic array to query.
+ * @return The current length of the dynamic array.
+ */
 #define DynamicArray_length(array) ((array).length)
 
+/**
+ * Gets the element at the specified index in the dynamic array.
+ * Can be used as an lvalue to set the element at the specified index.
+ * @param array The dynamic array to query.
+ * @param index The index of the element to retrieve.
+ * @return The element at the specified index.
+ */
 #define DynamicArray_at(array, index) (array).elements[(index)]
 
-#define DynamicArray_clear(array) \
-    do { \
-        (array).length = 0; \
-    } while (false)
+/**
+ * Clears the dynamic array, setting its length to 0 but keeping the allocated buffer for future use.
+ * @param array The dynamic array to clear.
+ */
+#define DynamicArray_clear(array) (array).length = 0
 
+/**
+ * Reserves capacity for at least the specified number of elements in the dynamic array, growing the allocated buffer if needed.
+ * @param array The dynamic array to reserve capacity for.
+ * @param new_capacity The minimum capacity to ensure for the dynamic array.
+ */
 #define DynamicArray_reserve(array, new_capacity) \
     do { \
         if ((new_capacity) > (array).capacity) { \
@@ -78,12 +98,23 @@
         } \
     } while (false)
 
+/**
+ * Appends an element to the end of the dynamic array.
+ * @param array The dynamic array to append to.
+ * @param element The element to append to the dynamic array.
+ */
 #define DynamicArray_append(array, element) \
     do { \
         DynamicArray_reserve((array), (array).length + 1); \
         (array).elements[(array).length++] = (element); \
     } while (false)
 
+/**
+ * Inserts an element at the specified index in the dynamic array.
+ * @param array The dynamic array to insert into.
+ * @param index The index at which to insert the element, starting from 0. Must be less than or equal to the current length of the array.
+ * @param element The element to insert into the dynamic array.
+ */
 #define DynamicArray_insert(array, index, element) \
     do { \
         COLLECTIONS_ASSERT((index) <= (array).length, "index out of bounds for dynamic array insertion"); \
@@ -93,8 +124,20 @@
         ++(array).length; \
     } while (false)
 
+/**
+ * Removes the element at the specified index from the dynamic array.
+ * @param array The dynamic array to remove from.
+ * @param index The index of the element to remove, starting from 0.
+ */
 #define DynamicArray_remove(array, index) DynamicArray_remove_range((array), (index), 1)
 
+/**
+ * Inserts a range of elements at the specified index in the dynamic array.
+ * @param array The dynamic array to insert into.
+ * @param index The index at which to insert the elements, starting from 0. Must be less than or equal to the current length of the array.
+ * @param ins_elements A pointer to the first element in the range of elements to insert into the dynamic array.
+ * @param count The number of elements in the range to insert.
+ */
 #define DynamicArray_insert_range(array, index, ins_elements, count) \
     do { \
         COLLECTIONS_ASSERT((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
@@ -104,6 +147,12 @@
         (array).length += (count); \
     } while (false)
 
+/**
+ * Removes a range of elements from the dynamic array.
+ * @param array The dynamic array to remove from.
+ * @param index The index of the first element in the range to remove, starting from 0.
+ * @param count The number of elements in the range to remove.
+ */
 #define DynamicArray_remove_range(array, index, count) \
     do { \
         COLLECTIONS_ASSERT((index) < (array).length, "index out of bounds for dynamic array range removal"); \
@@ -114,6 +163,11 @@
 
 // Hash table //////////////////////////////////////////////////////////////////
 
+/**
+ * Defines a hash table with the given key and value types.
+ * @param K The type of the keys in the hash table.
+ * @param V The type of the values in the hash table.
+ */
 #define HashTable(K, V) \
     struct { \
         struct { \
@@ -131,6 +185,10 @@
         bool (*eq_fn)(K, K); \
     }
 
+/**
+ * Frees the memory allocated for the hash table and resets its state.
+ * @param table The hash table to free.
+ */
 #define HashTable_free(table) \
     do { \
         for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets_length; ++__COLLECTIONS_ID(i)) { \
@@ -142,10 +200,15 @@
         (table).entry_count = 0; \
     } while (false)
 
+/**
+ * Resizes the hash table to have the specified number of buckets, redistributing all existing entries into the new buckets.
+ * @param table The hash table to resize.
+ * @param new_buckets_length The new number of buckets for the hash table.
+ */
 #define HashTable_resize(table, new_buckets_length) \
     do { \
         size_t __COLLECTIONS_ID(new_len) = (new_buckets_length); \
-        if (__COLLECTIONS_ID(new_len) != (table).buckets_length) { \
+        if (__COLLECTIONS_ID(new_len) != (table).buckets_length && __COLLECTIONS_ID(new_len) > 0) { \
             /* Allocate new buckets memory */ \
             void* __COLLECTIONS_ID(new_ptr) = COLLECTIONS_REALLOC(NULL, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
             COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_ptr) != NULL, "failed to allocate memory for resized hash table buckets"); \
@@ -190,12 +253,31 @@
         } \
     } while (false)
 
+/**
+ * Calculates the load factor of the hash table, defined as the number of entries divided by the number of buckets.
+ * @param table The hash table to calculate the load factor for.
+ * @return The load factor of the hash table.
+ */
 #define HashTable_load_factor(table) ((table).buckets_length == 0 ? 1.0 : (double)(table).entry_count / (double)(table).buckets_length)
 
+/**
+ * Grows the hash table by doubling the number of buckets and redistributing entries.
+ * @param table The hash table to grow.
+ */
 #define HashTable_grow(table) HashTable_resize((table), (table).buckets_length == 0 ? 8 : (table).buckets_length * 2)
 
+/**
+ * Shrinks the hash table by halving the number of buckets and redistributing entries.
+ * @param table The hash table to shrink.
+ */
 #define HashTable_shrink(table) HashTable_resize((table), (table).buckets_length / 2)
 
+/**
+ * Retrieves a pointer to the value associated with the specified key in the hash table, or NULL if the key is not present in the table.
+ * @param table The hash table to query.
+ * @param searched_key The key to search for in the hash table.
+ * @param result An output variable that will be set to point to the value associated with the specified key if found, or NULL if not found.
+ */
 #define HashTable_get(table, searched_key, result) \
     do { \
         if ((table).buckets_length > 0) { \
@@ -212,7 +294,15 @@
         } \
     } while (false)
 
-#define HashTable_set(table, in_key, in_value) \
+/**
+ * Sets the value associated with the specified key in the hash table, adding a new entry if the key is not already present
+ * or replacing the existing value if the key is already present.
+ * @param table The hash table to modify.
+ * @param in_key The key to set in the hash table.
+ * @param in_value The value to associate with the key.
+ * @param old_value An optional output variable that will be set to the previous value associated with the key if it exists, or NULL if the key was not present.
+ */
+#define HashTable_set(table, in_key, in_value, old_value) \
     do { \
         if (HashTable_load_factor(table) > 0.75 || (table).buckets_length == 0) { \
             HashTable_grow(table); \
@@ -222,6 +312,9 @@
         bool __COLLECTIONS_ID(found) = false; \
         for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets[__COLLECTIONS_ID(bucket_idx)].length; ++__COLLECTIONS_ID(i)) { \
             if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].hash == __COLLECTIONS_ID(hash) && (table).eq_fn((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].key, in_key)) { \
+                if (old_value != NULL) { \
+                    *(old_value) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value; \
+                } \
                 (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(i)].value = in_value; \
                 __COLLECTIONS_ID(found) = true; \
                 break; \
@@ -240,9 +333,16 @@
             (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].value = in_value; \
             (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries[__COLLECTIONS_ID(idx)].hash = __COLLECTIONS_ID(hash); \
             ++(table).entry_count; \
+            (old_value) = NULL; \
         } \
     } while (false)
 
+/**
+ * Checks if the specified key is present in the hash table.
+ * @param table The hash table to query.
+ * @param searched_key The key to search for in the hash table.
+ * @param result An output variable that will be set to true if the key is present in the hash table, or false if the key is not present.
+ */
 #define HashTable_contains(table, searched_key, result) \
     do { \
         (result) = false; \
@@ -258,6 +358,11 @@
         } \
     } while (false)
 
+/**
+ * Removes the specified key from the hash table.
+ * @param table The hash table to modify.
+ * @param searched_key The key to remove from the hash table.
+ */
 #define HashTable_remove(table, searched_key) \
     do { \
         if ((table).buckets_length > 0) { \
@@ -277,6 +382,10 @@
         } \
     } while (false)
 
+/**
+ * Clears all entries from the hash table, resetting the length of all buckets to 0 but keeping the allocated buffers for future use.
+ * @param table The hash table to clear.
+ */
 #define HashTable_clear(table) \
     do { \
         for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets_length; ++__COLLECTIONS_ID(i)) { \
