@@ -560,7 +560,8 @@ static void json_parse_number_value(Json_Parser* parser) {
         char c = json_parser_peek(parser, parserOffset, '\0');
         if (!isdigit((unsigned char)c)) break;
         if (c == '0' && parserOffset == digitStart) leadingZero = true;
-        if (leadingZero && parserOffset > digitStart && (parser->options.extensions & JSON_EXTENSION_LEADING_ZEROS) == 0) {
+        // NOTE: Check below is written in a way that it only gets triggered ONCE
+        if (leadingZero && parserOffset == digitStart + 1 && (parser->options.extensions & JSON_EXTENSION_LEADING_ZEROS) == 0) {
             char* message = json_format("leading zeros are not allowed in number values");
             json_parser_report_error(parser, parser->position, message);
             // We don't actually return here, for best-effort we just skip the leading zeros
