@@ -155,6 +155,17 @@ JSON_DEF void json_array_remove(Json_Value* array, size_t index);
 #include <ctype.h>
 
 #define JSON_ASSERT(condition, message) assert(((void)message, condition))
+#define JSON_ADD_TO_ARRAY(array, length, capacity, element) \
+    do { \
+        if ((length) + 1 > (capacity)) { \
+            size_t newCapacity = ((capacity) == 0) ? 8 : ((capacity) * 2); \
+            void* newElements = JSON_REALLOC((array), newCapacity * sizeof(*(array))); \
+            JSON_ASSERT(newElements != NULL, "failed to allocate memory for array"); \
+            (array) = newElements; \
+            (capacity) = newCapacity; \
+        } \
+        (array)[(length)++] = element; \
+    } while (false)
 
 #ifdef __cplusplus
 extern "C" {
@@ -736,6 +747,145 @@ void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* 
         .user_data = user_data,
     };
     json_parse_value(&parser);
+    // If we have remaining non-whitespace characters after parsing the value, that's an error
+    json_parser_skip_whitespace(&parser);
+    if (parser.position.index < parser.length) {
+        char* message = json_format("unexpected character '%c' after parsing complete value", json_parser_peek(&parser, 0, '\0'));
+        json_parser_report_error(&parser, parser.position, message);
+    }
+}
+
+// DOM parsing
+
+typedef struct Json_DomBuilder {
+    struct {
+        Json_Value* elements;
+        size_t length;
+        size_t capacity;
+    } stack;
+    char const* last_key;
+    Json_Document document;
+    bool document_root_set;
+} Json_DomBuilder;
+
+static void json_dom_builder_push(Json_DomBuilder* builder, Json_Value value) {
+    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, value);
+}
+
+static Json_Value json_dom_builder_pop(Json_DomBuilder* builder) {
+    JSON_ASSERT(builder->stack.length > 0, "attempted to pop from empty DOM builder stack");
+    return builder->stack.elements[--builder->stack.length];
+}
+
+static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value value) {
+    if (builder->stack.length == 0) {
+        // This is the root value, set it on the document
+        JSON_ASSERT(!builder->document_root_set, "multiple root values in JSON document");
+        builder->document.root = value;
+        builder->document_root_set = true;
+        return;
+    }
+    // Otherwise, we need to append it to the current container on top of the stack
+    Json_Value* current = &builder->stack.elements[builder->stack.length - 1];
+    if (current->type == JSON_VALUE_ARRAY) {
+        json_array_append(current, value);
+    }
+    else if (current->type == JSON_VALUE_OBJECT) {
+        JSON_ASSERT(builder->last_key != NULL, "attempted to append value to object without a key in DOM builder");
+        json_object_set(current, builder->last_key, value);
+        builder->last_key = NULL;
+    }
+    else {
+        JSON_ASSERT(false, "attempted to append value to non-container in DOM builder");
+    }
+}
+
+static void json_dom_builder_on_null(void* user_data) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_append_value(builder, json_null());
+}
+
+static void json_dom_builder_on_bool(void* user_data, bool value) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_append_value(builder, json_bool(value));
+}
+
+static void json_dom_builder_on_int(void* user_data, long long value) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_append_value(builder, json_int(value));
+}
+
+static void json_dom_builder_on_double(void* user_data, double value) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_append_value(builder, json_double(value));
+}
+
+static void json_dom_builder_on_string(void* user_data, char const* value, size_t length) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    // The string is owned already, don't use json_string here
+    json_dom_builder_append_value(builder, (Json_Value){
+        .type = JSON_VALUE_STRING,
+        .string_value = value,
+    });
+}
+
+static void json_dom_builder_on_array_start(void* user_data) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_push(builder, json_array());
+}
+
+static void json_dom_builder_on_array_end(void* user_data) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    Json_Value array = json_dom_builder_pop(builder);
+    json_dom_builder_append_value(builder, array);
+}
+
+static void json_dom_builder_on_object_start(void* user_data) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    json_dom_builder_push(builder, json_object());
+}
+
+static void json_dom_builder_on_object_key(void* user_data, char const* key, size_t length) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    // The key is owned already, we just need to keep track of it until we get the value
+    builder->last_key = key;
+}
+
+static void json_dom_builder_on_object_end(void* user_data) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    Json_Value object = json_dom_builder_pop(builder);
+    json_dom_builder_append_value(builder, object);
+}
+
+static void json_dom_builder_on_error(void* user_data, Json_Error error) {
+    Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
+    Json_Document* doc = &builder->document;
+    JSON_ADD_TO_ARRAY(doc->errors.elements, doc->errors.length, doc->errors.capacity, error);
+}
+
+Json_Document json_parse(char const* json, Json_Options options) {
+    // Configure our DOM builder as a SAX consumer
+    Json_DomBuilder builder = { 0 };
+    Json_Sax sax = {
+        .on_null = json_dom_builder_on_null,
+        .on_bool = json_dom_builder_on_bool,
+        .on_int = json_dom_builder_on_int,
+        .on_double = json_dom_builder_on_double,
+        .on_string = json_dom_builder_on_string,
+        .on_array_start = json_dom_builder_on_array_start,
+        .on_array_end = json_dom_builder_on_array_end,
+        .on_object_start = json_dom_builder_on_object_start,
+        .on_object_key = json_dom_builder_on_object_key,
+        .on_object_end = json_dom_builder_on_object_end,
+        .on_error = json_dom_builder_on_error,
+    };
+    json_parse_sax(json, sax, options, &builder);
+    // We must have cleaned up everything properly
+    JSON_ASSERT(builder.stack.length == 0, "DOM builder stack is not empty after parsing complete document");
+    JSON_ASSERT(builder.last_key == NULL, "DOM builder has pending object key after parsing complete document");
+    // Deallocate the stack memory, we don't need it anymore
+    JSON_FREE(builder.stack.elements);
+    return builder.document;
 }
 
 // Value constructors //////////////////////////////////////////////////////////
@@ -791,6 +941,7 @@ Json_Value json_null(void) {
 }
 #endif
 
+#undef JSON_ADD_TO_ARRAY
 #undef JSON_ASSERT
 
 #endif /* JSON_IMPLEMENTATION */
