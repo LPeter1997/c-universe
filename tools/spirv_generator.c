@@ -173,8 +173,6 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
             "    Spv_%sFlags flags;\n"
             "    // TODO: members\n"
             "} Spv_%s;\n\n", name, name, name);
-
-        code_builder_format(cb, "// TODO: bit enum %s has parametric members, need to decide how to represent them\n", name);
     }
     else {
         code_builder_format(cb, "typedef enum Spv_%s {\n", name);
