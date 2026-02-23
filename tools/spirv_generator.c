@@ -151,7 +151,7 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
                 code_builder_format(cb, "// TODO: enumerant %s of %s has parameters\n", enumerantName, name);
             }
             else {
-                code_builder_format(cb, "// TODO: enumerant %s of %s has no parameters\n", enumerantName, name);
+                code_builder_format(cb, "const SpirV_%s SpirV_%s_%s = { .value = %lld };\n", name, name, enumerantName, enumerantValue);
             }
         }
     }
