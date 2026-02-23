@@ -103,9 +103,48 @@ static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
     code_builder_putc(cb, '\n');
 }
 
+static void generate_c_bitenum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
+    char const* name = json_as_string(json_object_get(operandKind, "kind"));
+    Json_Value* enumerants = json_object_get(operandKind, "enumerants");
+    // Check, if any enumerant has parameters
+    bool hasParametricMembers = false;
+    for (size_t i = 0; i < json_length(enumerants); ++i) {
+        Json_Value* enumerant = json_array_at(enumerants, i);
+        Json_Value* parameters = json_object_get(enumerant, "parameters");
+        if (parameters == NULL) continue;
+        hasParametricMembers = true;
+        break;
+    }
+    if (hasParametricMembers) {
+        code_builder_format(cb, "// TODO parametric BitEnum %s\n", name);
+    }
+    else {
+        code_builder_format(cb, "// TODO simple BitEnum %s\n", name);
+    }
+}
+
+static void generate_c_typedef(CodeBuilder* cb, Json_Value* operandKind) {
+    char const* category = json_as_string(json_object_get(operandKind, "category"));
+    if (strcmp(category, "BitEnum") == 0) {
+        generate_c_bitenum_typedef(cb, operandKind);
+        return;
+    }
+    else {
+        char const* name = json_as_string(json_object_get(operandKind, "kind"));
+        code_builder_format(cb, "// TODO: %s (category: %s)\n", name, category);
+    }
+}
+
 static char* generate_c_code(Json_Document doc) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, doc);
+
+    // TODO: Would be nice to sort them by name or something
+    Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
+    for (size_t i = 0; i < json_length(operandKinds); ++i) {
+        Json_Value* operandKind = json_array_at(operandKinds, i);
+        generate_c_typedef(&cb, operandKind);
+    }
 
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
