@@ -6,6 +6,10 @@
 #define JSON_STATIC
 #include "../src/json.h"
 
+#define STRING_BUILDER_IMPLEMENTATION
+#define STRING_BUILDER_STATIC
+#include "../src/string_builder.h"
+
 // TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
 static char* read_file(char const* path) {
     FILE* file = fopen(path, "rb");
@@ -81,6 +85,33 @@ static void json_model_to_domain(Json_Document doc) {
     json_flatten_aliases(instructions, "opname");
 }
 
+static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
+    long long majorVersion = json_as_int(json_object_get(&doc.root, "major_version"));
+    long long minorVersion = json_as_int(json_object_get(&doc.root, "minor_version"));
+    long long revision = json_as_int(json_object_get(&doc.root, "revision"));
+    code_builder_format(cb, ""
+        "// This portion is auto-generated from the official SPIR-V grammar JSON.\n"
+        "//\n"
+        "// SPIR-V Version: %lld.%lld (revision %lld)\n"
+        "//\n"
+        "// KHRONOS COPYRIGHT NOTICE\n", majorVersion, minorVersion, revision);
+    Json_Value* copyright = json_object_get(&doc.root, "copyright");
+    for (size_t i = 0; i < json_length(copyright); ++i) {
+        Json_Value* line = json_array_at(copyright, i);
+        code_builder_format(cb, "// %s\n", json_as_string(line));
+    }
+    code_builder_putc(cb, '\n');
+}
+
+static char* generate_c_code(Json_Document doc) {
+    CodeBuilder cb = {0};
+    generate_c_header_comment(&cb, doc);
+
+    char* result = code_builder_to_cstr(&cb);
+    code_builder_free(&cb);
+    return result;
+}
+
 int main(void) {
     char* jsonStr = read_file("../third_party/spirv.core.grammar.json");
     if (!jsonStr) {
@@ -95,10 +126,8 @@ int main(void) {
         return 1;
     }
     json_model_to_domain(doc);
-    // For now this just manipulates the JSON, reprint to check
-    char* output = json_write(doc.root, (Json_Options){ .newline_str = "\n", .indent_str = "  " }, NULL);
-    printf("%s\n", output);
-    free(output);
+    char* cCode = generate_c_code(doc);
+    printf("%s", cCode);
     json_free_document(&doc);
     return 0;
 }
