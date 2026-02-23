@@ -24,6 +24,29 @@ static char* read_file(char const* path) {
     return content;
 }
 
+static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
+    if (array == NULL) return;
+    DynamicArray(Json_Value) newValues = {0};
+    for (size_t i = 0; i < json_length(array); ++i) {
+        Json_Value* value = json_array_at(array, i);
+        Json_Value* aliases = json_object_get(value, "aliases");
+        if (aliases == NULL) continue;
+        for (size_t j = 0; j < json_length(aliases); ++j) {
+            Json_Value* alias = json_array_at(aliases, j);
+            Json_Value newValue = json_copy(*value);
+            json_object_remove(&newValue, "aliases", NULL);
+            json_object_set(&newValue, nameKey, json_move(alias));
+            DynamicArray_append(newValues, json_move(&newValue));
+        }
+        json_object_remove(value, "aliases", NULL);
+    }
+    for (size_t i = 0; i < DynamicArray_length(newValues); ++i) {
+        Json_Value* newValue = &DynamicArray_at(newValues, i);
+        json_array_append(array, json_move(newValue));
+    }
+    DynamicArray_free(newValues);
+}
+
 static void json_model_to_domain(Json_Document doc) {
     // Reorder operand_kinds to have Composite at the end
     // TODO: Would be nice to have a generic sorting algo at hand, instead to put all composite types at the end,
@@ -51,49 +74,12 @@ static void json_model_to_domain(Json_Document doc) {
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
         Json_Value* enumerants = json_object_get(operandKind, "enumerants");
-        if (enumerants == NULL) continue;
-        DynamicArray(Json_Value) newEnumerants = {0};
-        for (size_t j = 0; j < json_length(enumerants); ++j) {
-            Json_Value* enumerant = json_array_at(enumerants, j);
-            Json_Value* aliases = json_object_get(enumerant, "aliases");
-            if (aliases == NULL) continue;
-            for (size_t k = 0; k < json_length(aliases); ++k) {
-                Json_Value* alias = json_array_at(aliases, k);
-                Json_Value newEnumerant = json_copy(*enumerant);
-                json_object_remove(&newEnumerant, "aliases", NULL);
-                json_object_set(&newEnumerant, "name", json_move(alias));
-                DynamicArray_append(newEnumerants, json_move(&newEnumerant));
-            }
-            json_object_remove(enumerant, "aliases", NULL);
-        }
-        for (size_t j = 0; j < DynamicArray_length(newEnumerants); ++j) {
-            Json_Value* newEnumerant = &DynamicArray_at(newEnumerants, j);
-            json_array_append(enumerants, json_move(newEnumerant));
-        }
-        DynamicArray_free(newEnumerants);
+        json_flatten_aliases(enumerants, "name");
     }
 
     // Do the literal same thing with instructions, but we have to look for the "opname" key instead of "name"
     Json_Value* instructions = json_object_get(&doc.root, "instructions");
-    for (size_t i = 0; i < json_length(instructions); ++i) {
-        Json_Value* instruction = json_array_at(instructions, i);
-        Json_Value* aliases = json_object_get(instruction, "aliases");
-        if (aliases == NULL) continue;
-        DynamicArray(Json_Value) newInstructions = {0};
-        for (size_t j = 0; j < json_length(aliases); ++j) {
-            Json_Value* alias = json_array_at(aliases, j);
-            Json_Value newInstruction = json_copy(*instruction);
-            json_object_remove(&newInstruction, "aliases", NULL);
-            json_object_set(&newInstruction, "opname", json_move(alias));
-            DynamicArray_append(newInstructions, json_move(&newInstruction));
-        }
-        json_object_remove(instruction, "aliases", NULL);
-        for (size_t j = 0; j < DynamicArray_length(newInstructions); ++j) {
-            Json_Value* newInstruction = &DynamicArray_at(newInstructions, j);
-            json_array_append(instructions, json_move(newInstruction));
-        }
-        DynamicArray_free(newInstructions);
-    }
+    json_flatten_aliases(instructions, "opname");
 }
 
 int main(void) {
