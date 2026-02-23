@@ -1324,20 +1324,21 @@ void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
 }
 
-void json_array_set(Json_Value* array, size_t index, Json_Value value) {
-    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
-    JSON_ASSERT(index <= array->value.array.length, "attempted to set index out of bounds in array");
+void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to insert index on non-array value");
+    JSON_ASSERT(index <= array->value.array.length, "attempted to insert index out of bounds in array");
     if (index == array->value.array.length) {
-        // Setting the index at the current length is equivalent to appending
+        // Inserting at the current length is equivalent to appending
         json_array_append(array, value);
         return;
     }
-    // Free old value if needed
-    json_free_value(&array->value.array.elements[index]);
+    // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
+    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    memmove(&array->value.array.elements[index + 1], &array->value.array.elements[index], (array->value.array.length - index - 1) * sizeof(Json_Value));
     array->value.array.elements[index] = value;
 }
 
-Json_Value* json_array_get(Json_Value* array, size_t index) {
+Json_Value* json_array_at(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to get index on non-array value");
     JSON_ASSERT(index < array->value.array.length, "attempted to get index out of bounds in array");
     return &array->value.array.elements[index];
@@ -1492,6 +1493,54 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
         }
     }
     return false;
+}
+
+// Safe accessors //////////////////////////////////////////////////////////////
+
+Json_Value json_move(Json_Value* value) {
+    Json_Value movedValue = *value;
+    *value = (Json_Value){ .type = JSON_VALUE_NULL };
+    return movedValue;
+}
+
+size_t json_length(Json_Value* value) {
+    switch (value->type) {
+    case JSON_VALUE_ARRAY:
+        return value->value.array.length;
+    case JSON_VALUE_OBJECT:
+        return value->value.object.entry_count;
+    case JSON_VALUE_STRING:
+        return strlen(value->value.string);
+    default:
+        JSON_ASSERT(false, "attempted to get length of non-array, non-object, non-string value");
+        return 0;
+    }
+}
+
+long long json_as_int(Json_Value* value) {
+    if (value->type == JSON_VALUE_INT) return value->value.integer;
+    if (value->type == JSON_VALUE_DOUBLE) return (long long)value->value.floating;
+    JSON_ASSERT(false, "attempted to get int value of non-int, non-double value");
+    return 0;
+}
+
+double json_as_double(Json_Value* value) {
+    if (value->type == JSON_VALUE_DOUBLE) return value->value.floating;
+    if (value->type == JSON_VALUE_INT) return (double)value->value.integer;
+    JSON_ASSERT(false, "attempted to get double value of non-double, non-int value");
+    return 0.0;
+}
+
+bool json_as_bool(Json_Value* value) {
+    if (value->type == JSON_VALUE_BOOL) return value->value.boolean;
+    JSON_ASSERT(false, "attempted to get bool value of non-bool value");
+    return false;
+}
+
+char const* json_as_string(Json_Value* value) {
+    if (value->type == JSON_VALUE_STRING) return value->value.string;
+    JSON_ASSERT(false, "attempted to get string value of non-string value");
+    return NULL;
 }
 
 // Writing /////////////////////////////////////////////////////////////////////
