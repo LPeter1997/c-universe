@@ -172,6 +172,8 @@ typedef struct Json_Document {
     } errors;
 } Json_Document;
 
+// Parsing and writing API /////////////////////////////////////////////////////
+
 /**
  * Parses the given JSON string using a SAX-style approach, invoking the provided callbacks for parsing events.
  * @param json The JSON string to parse.
@@ -208,6 +210,8 @@ JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer
  * @returns A newly allocated string containing the written JSON value.
  */
 JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_length);
+
+// Value construction //////////////////////////////////////////////////////////
 
 /**
  * Creates a new JSON object value.
@@ -262,6 +266,8 @@ JSON_DEF Json_Value json_null(void);
  */
 JSON_DEF Json_Value json_copy(Json_Value value);
 
+// Resource cleanup ////////////////////////////////////////////////////////////
+
 /**
  * Frees the memory associated with the given JSON value, including any nested values for arrays and objects.
  * @param value The JSON value to free.
@@ -273,6 +279,8 @@ JSON_DEF void json_free_value(Json_Value* value);
  * @param doc The JSON document to free.
  */
 JSON_DEF void json_free_document(Json_Document* doc);
+
+// JSON Object manipulation ////////////////////////////////////////////////////
 
 /**
  * Sets the value of the specified key in the given JSON object, replacing any existing value for that key.
@@ -310,6 +318,8 @@ JSON_DEF bool json_object_get_at(Json_Value* object, size_t index, char const** 
  */
 JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value);
 
+// Array manipulation //////////////////////////////////////////////////////////
+
 /**
  * Appends a value to the end of the given JSON array.
  * @param array The JSON array to modify.
@@ -318,13 +328,13 @@ JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value
 JSON_DEF void json_array_append(Json_Value* array, Json_Value value);
 
 /**
- * Sets the value at the specified index in the given JSON array, replacing any existing value at that index.
+ * Inserts a value at the specified index in the given JSON array.
  * @param array The JSON array to modify.
- * @param index The index at which to set the value, starting from 0. Must be less than or equal to the current length of the array.
+ * @param index The index at which to insert the value, starting from 0. Must be less than or equal to the current length of the array.
  * If equal to the current length of the array, the call is equivalent to @see json_array_append.
- * @param value The value to set at the specified index. It will be shallow-copied by the function.
+ * @param value The value to insert at the specified index. It will be shallow-copied by the function.
  */
-JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
+JSON_DEF void json_array_insert(Json_Value* array, size_t index, Json_Value value);
 
 /**
  * Retrieves the value at the specified index in the given JSON array.
@@ -332,7 +342,7 @@ JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
  * @param index The index of the value to retrieve, starting from 0.
  * @returns A pointer to the value at the specified index.
  */
-JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
+JSON_DEF Json_Value* json_array_at(Json_Value* array, size_t index);
 
 /**
  * Removes the value at the specified index from the given JSON array, shifting any subsequent values down to fill the gap.
@@ -340,6 +350,52 @@ JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
  * @param index The index of the value to remove, starting from 0.
  */
 JSON_DEF void json_array_remove(Json_Value* array, size_t index);
+
+// Safe accessors //////////////////////////////////////////////////////////////
+
+/**
+ * Moves the given JSON value out of its current location, leaving a null value in its place.
+ * Useful for moving out of arrays or objects without shifting elements if a null-value is acceptable in the original location.
+ * @param value The JSON value to move. It will be replaced with a null value.
+ * @returns The original JSON value before it was replaced with null.
+ */
+JSON_DEF Json_Value json_move(Json_Value* value);
+
+/**
+ * Retrieves the length of the given JSON string, array or object, i.e. the string length, the number of elements in the array or
+ * the number of key-value pairs in the object.
+ * @param value The JSON value to query.
+ * @returns The length of the JSON value if it is a string, array or object.
+ */
+JSON_DEF size_t json_length(Json_Value* value);
+
+/**
+ * Retrieves the integer value of the given JSON value if it is an integer.
+ * @param value The JSON value to query.
+ * @returns The integer value of the JSON value if it is an integer.
+ */
+JSON_DEF long long json_as_int(Json_Value* value);
+
+/**
+ * Retrieves the double value of the given JSON value if it is a double or an integer.
+ * @param value The JSON value to query.
+ * @returns The double value of the JSON value if it is a double or an integer.
+ */
+JSON_DEF double json_as_double(Json_Value* value);
+
+/**
+ * Retrieves the boolean value of the given JSON value if it is a boolean.
+ * @param value The JSON value to query.
+ * @returns The boolean value of the JSON value if it is a boolean.
+ */
+JSON_DEF bool json_as_bool(Json_Value* value);
+
+/**
+ * Retrieves the string value of the given JSON value if it is a string.
+ * @param value The JSON value to query.
+ * @returns The string value of the JSON value if it is a string. The returned string is null-terminated and owned by the library, so the caller should not free it.
+ */
+JSON_DEF char const* json_as_string(Json_Value* value);
 
 #ifdef __cplusplus
 }
