@@ -119,21 +119,21 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         code_builder_format(cb, "// TODO parametric BitEnum %s\n", name);
     }
     else {
-        code_builder_format(cb, "typedef enum %s {\n", name);
+        code_builder_format(cb, "typedef enum SpirV_%s {\n", name);
         code_builder_indent(cb);
         for (size_t i = 0; i < json_length(enumerants); ++i) {
             Json_Value* enumerant = json_array_at(enumerants, i);
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
             Json_Value* enumerantValue = json_object_get(enumerant, "value");
             if (enumerantValue->type == JSON_VALUE_STRING) {
-                code_builder_format(cb, "%s_%s = %s,\n", name, enumerantName, json_as_string(enumerantValue));
+                code_builder_format(cb, "SpirV_%s_%s = %s,\n", name, enumerantName, json_as_string(enumerantValue));
             }
             else {
-                code_builder_format(cb, "%s_%s = %lld,\n", name, enumerantName, json_as_int(enumerantValue));
+                code_builder_format(cb, "SpirV_%s_%s = %lld,\n", name, enumerantName, json_as_int(enumerantValue));
             }
         }
         code_builder_dedent(cb);
-        code_builder_format(cb, "} %s;\n\n", name);
+        code_builder_format(cb, "} SpirV_%s;\n\n", name);
     }
 }
 
