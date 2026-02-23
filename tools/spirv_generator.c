@@ -72,6 +72,28 @@ static void json_model_to_domain(Json_Document doc) {
         }
         DynamicArray_free(newEnumerants);
     }
+
+    // Do the literal same thing with instructions, but we have to look for the "opname" key instead of "name"
+    Json_Value* instructions = json_object_get(&doc.root, "instructions");
+    for (size_t i = 0; i < json_length(instructions); ++i) {
+        Json_Value* instruction = json_array_at(instructions, i);
+        Json_Value* aliases = json_object_get(instruction, "aliases");
+        if (aliases == NULL) continue;
+        DynamicArray(Json_Value) newInstructions = {0};
+        for (size_t j = 0; j < json_length(aliases); ++j) {
+            Json_Value* alias = json_array_at(aliases, j);
+            Json_Value newInstruction = json_copy(*instruction);
+            json_object_remove(&newInstruction, "aliases", NULL);
+            json_object_set(&newInstruction, "opname", json_move(alias));
+            DynamicArray_append(newInstructions, json_move(&newInstruction));
+        }
+        json_object_remove(instruction, "aliases", NULL);
+        for (size_t j = 0; j < DynamicArray_length(newInstructions); ++j) {
+            Json_Value* newInstruction = &DynamicArray_at(newInstructions, j);
+            json_array_append(instructions, json_move(newInstruction));
+        }
+        DynamicArray_free(newInstructions);
+    }
 }
 
 int main(void) {
