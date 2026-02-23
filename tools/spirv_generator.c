@@ -5,7 +5,7 @@
 #include "../src/json.h"
 
 // TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
-static char const* read_file(char const* path) {
+static char* read_file(char const* path) {
     FILE* file = fopen(path, "rb");
     if (!file) return NULL;
     fseek(file, 0, SEEK_END);
@@ -45,13 +45,13 @@ static void json_model_to_domain(Json_Document doc) {
 }
 
 int main(void) {
-    char const* jsonStr = read_file("../third_party/spirv.core.grammar.json");
+    char* jsonStr = read_file("../third_party/spirv.core.grammar.json");
     if (!jsonStr) {
         fprintf(stderr, "Failed to read JSON file\n");
         return 1;
     }
     Json_Document doc = json_parse(jsonStr, (Json_Options){0});
-    free((void*)jsonStr);
+    free(jsonStr);
     if (doc.errors.length > 0) {
         fprintf(stderr, "Failed to parse JSON: %s\n", doc.errors.elements[0].message);
         json_free_document(&doc);
