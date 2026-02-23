@@ -157,6 +157,23 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         }
     }
     else if (hasParametricMembers && isBitEnum) {
+        code_builder_format(cb, "typedef enum Spv_%sFlags {\n", name);
+        code_builder_indent(cb);
+        for (size_t i = 0; i < json_length(enumerants); ++i) {
+            Json_Value* enumerant = json_array_at(enumerants, i);
+            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
+            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
+            code_builder_format(cb, "Spv_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
+        }
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} Spv_%sFlags;\n\n", name);
+
+        code_builder_format(cb, ""
+            "typedef struct Spv_%s {\n"
+            "    Spv_%sFlags flags;\n"
+            "    // TODO: members\n"
+            "} Spv_%s;\n\n", name, name, name);
+
         code_builder_format(cb, "// TODO: bit enum %s has parametric members, need to decide how to represent them\n", name);
     }
     else {
