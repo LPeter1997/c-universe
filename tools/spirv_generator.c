@@ -103,7 +103,7 @@ static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
     code_builder_putc(cb, '\n');
 }
 
-static void generate_c_bitenum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
+static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
     Json_Value* enumerants = json_object_get(operandKind, "enumerants");
     // Check, if any enumerant has parameters
@@ -119,14 +119,28 @@ static void generate_c_bitenum_typedef(CodeBuilder* cb, Json_Value* operandKind)
         code_builder_format(cb, "// TODO parametric BitEnum %s\n", name);
     }
     else {
-        code_builder_format(cb, "// TODO simple BitEnum %s\n", name);
+        code_builder_format(cb, "typedef enum %s {\n", name);
+        code_builder_indent(cb);
+        for (size_t i = 0; i < json_length(enumerants); ++i) {
+            Json_Value* enumerant = json_array_at(enumerants, i);
+            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
+            Json_Value* enumerantValue = json_object_get(enumerant, "value");
+            if (enumerantValue->type == JSON_VALUE_STRING) {
+                code_builder_format(cb, "%s = %s,\n", enumerantName, json_as_string(enumerantValue));
+            }
+            else {
+                code_builder_format(cb, "%s = %lld,\n", enumerantName, json_as_int(enumerantValue));
+            }
+        }
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} %s;\n\n", name);
     }
 }
 
 static void generate_c_typedef(CodeBuilder* cb, Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
-    if (strcmp(category, "BitEnum") == 0) {
-        generate_c_bitenum_typedef(cb, operandKind);
+    if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
+        generate_c_enum_typedef(cb, operandKind);
         return;
     }
     else {
