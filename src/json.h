@@ -15,7 +15,9 @@
  *  - Use json_swrite or json_write to write a Json_Value into a JSON string
  *  - Use the various json_* constructor functions to create and manipulate JSON values, including objects and arrays (like json_object and json_array)
  *  - Use json_object_set, json_object_get and json_object_remove to manipulate key-value pairs in JSON objects
- *  - Use json_array_append, json_array_set and json_array_get to manipulate values in JSON arrays
+ *  - Use json_array_append, json_array_at, json_array_insert and json_array_remove to manipulate values in JSON arrays
+ *  - Use json_move to move a value out of a container while leaving a null in place
+ *  - Use json_length, json_as_int, json_as_double, json_as_bool and json_as_string for safe value access
  *  - Use json_free_value and json_free_document to free the memory associated with JSON values and documents when they are no longer needed
  *
  * Check the example section at the end of this file for a full example.
@@ -172,6 +174,8 @@ typedef struct Json_Document {
     } errors;
 } Json_Document;
 
+// Parsing and writing API /////////////////////////////////////////////////////
+
 /**
  * Parses the given JSON string using a SAX-style approach, invoking the provided callbacks for parsing events.
  * @param json The JSON string to parse.
@@ -208,6 +212,8 @@ JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer
  * @returns A newly allocated string containing the written JSON value.
  */
 JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_length);
+
+// Value construction //////////////////////////////////////////////////////////
 
 /**
  * Creates a new JSON object value.
@@ -262,6 +268,8 @@ JSON_DEF Json_Value json_null(void);
  */
 JSON_DEF Json_Value json_copy(Json_Value value);
 
+// Resource cleanup ////////////////////////////////////////////////////////////
+
 /**
  * Frees the memory associated with the given JSON value, including any nested values for arrays and objects.
  * @param value The JSON value to free.
@@ -273,6 +281,8 @@ JSON_DEF void json_free_value(Json_Value* value);
  * @param doc The JSON document to free.
  */
 JSON_DEF void json_free_document(Json_Document* doc);
+
+// JSON Object manipulation ////////////////////////////////////////////////////
 
 /**
  * Sets the value of the specified key in the given JSON object, replacing any existing value for that key.
@@ -310,6 +320,8 @@ JSON_DEF bool json_object_get_at(Json_Value* object, size_t index, char const** 
  */
 JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_value);
 
+// Array manipulation //////////////////////////////////////////////////////////
+
 /**
  * Appends a value to the end of the given JSON array.
  * @param array The JSON array to modify.
@@ -318,13 +330,13 @@ JSON_DEF bool json_object_remove(Json_Value* object, char const* key, Json_Value
 JSON_DEF void json_array_append(Json_Value* array, Json_Value value);
 
 /**
- * Sets the value at the specified index in the given JSON array, replacing any existing value at that index.
+ * Inserts a value at the specified index in the given JSON array.
  * @param array The JSON array to modify.
- * @param index The index at which to set the value, starting from 0. Must be less than or equal to the current length of the array.
+ * @param index The index at which to insert the value, starting from 0. Must be less than or equal to the current length of the array.
  * If equal to the current length of the array, the call is equivalent to @see json_array_append.
- * @param value The value to set at the specified index. It will be shallow-copied by the function.
+ * @param value The value to insert at the specified index. It will be shallow-copied by the function.
  */
-JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
+JSON_DEF void json_array_insert(Json_Value* array, size_t index, Json_Value value);
 
 /**
  * Retrieves the value at the specified index in the given JSON array.
@@ -332,7 +344,7 @@ JSON_DEF void json_array_set(Json_Value* array, size_t index, Json_Value value);
  * @param index The index of the value to retrieve, starting from 0.
  * @returns A pointer to the value at the specified index.
  */
-JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
+JSON_DEF Json_Value* json_array_at(Json_Value* array, size_t index);
 
 /**
  * Removes the value at the specified index from the given JSON array, shifting any subsequent values down to fill the gap.
@@ -340,6 +352,52 @@ JSON_DEF Json_Value* json_array_get(Json_Value* array, size_t index);
  * @param index The index of the value to remove, starting from 0.
  */
 JSON_DEF void json_array_remove(Json_Value* array, size_t index);
+
+// Safe accessors //////////////////////////////////////////////////////////////
+
+/**
+ * Moves the given JSON value out of its current location, leaving a null value in its place.
+ * Useful for moving out of arrays or objects without shifting elements if a null-value is acceptable in the original location.
+ * @param value The JSON value to move. It will be replaced with a null value.
+ * @returns The original JSON value before it was replaced with null.
+ */
+JSON_DEF Json_Value json_move(Json_Value* value);
+
+/**
+ * Retrieves the length of the given JSON string, array or object, i.e. the string length, the number of elements in the array or
+ * the number of key-value pairs in the object.
+ * @param value The JSON value to query.
+ * @returns The length of the JSON value if it is a string, array or object.
+ */
+JSON_DEF size_t json_length(Json_Value* value);
+
+/**
+ * Retrieves the integer value of the given JSON value if it is an integer.
+ * @param value The JSON value to query.
+ * @returns The integer value of the JSON value if it is an integer.
+ */
+JSON_DEF long long json_as_int(Json_Value* value);
+
+/**
+ * Retrieves the double value of the given JSON value if it is a double or an integer.
+ * @param value The JSON value to query.
+ * @returns The double value of the JSON value if it is a double or an integer.
+ */
+JSON_DEF double json_as_double(Json_Value* value);
+
+/**
+ * Retrieves the boolean value of the given JSON value if it is a boolean.
+ * @param value The JSON value to query.
+ * @returns The boolean value of the JSON value if it is a boolean.
+ */
+JSON_DEF bool json_as_bool(Json_Value* value);
+
+/**
+ * Retrieves the string value of the given JSON value if it is a string.
+ * @param value The JSON value to query.
+ * @returns The string value of the JSON value if it is a string. The returned string is null-terminated and owned by the library, so the caller should not free it.
+ */
+JSON_DEF char const* json_as_string(Json_Value* value);
 
 #ifdef __cplusplus
 }
@@ -1268,20 +1326,21 @@ void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
 }
 
-void json_array_set(Json_Value* array, size_t index, Json_Value value) {
-    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to set index on non-array value");
-    JSON_ASSERT(index <= array->value.array.length, "attempted to set index out of bounds in array");
+void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
+    JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to insert index on non-array value");
+    JSON_ASSERT(index <= array->value.array.length, "attempted to insert index out of bounds in array");
     if (index == array->value.array.length) {
-        // Setting the index at the current length is equivalent to appending
+        // Inserting at the current length is equivalent to appending
         json_array_append(array, value);
         return;
     }
-    // Free old value if needed
-    json_free_value(&array->value.array.elements[index]);
+    // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
+    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    memmove(&array->value.array.elements[index + 1], &array->value.array.elements[index], (array->value.array.length - index - 1) * sizeof(Json_Value));
     array->value.array.elements[index] = value;
 }
 
-Json_Value* json_array_get(Json_Value* array, size_t index) {
+Json_Value* json_array_at(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to get index on non-array value");
     JSON_ASSERT(index < array->value.array.length, "attempted to get index out of bounds in array");
     return &array->value.array.elements[index];
@@ -1436,6 +1495,54 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
         }
     }
     return false;
+}
+
+// Safe accessors //////////////////////////////////////////////////////////////
+
+Json_Value json_move(Json_Value* value) {
+    Json_Value movedValue = *value;
+    *value = (Json_Value){ .type = JSON_VALUE_NULL };
+    return movedValue;
+}
+
+size_t json_length(Json_Value* value) {
+    switch (value->type) {
+    case JSON_VALUE_ARRAY:
+        return value->value.array.length;
+    case JSON_VALUE_OBJECT:
+        return value->value.object.entry_count;
+    case JSON_VALUE_STRING:
+        return strlen(value->value.string);
+    default:
+        JSON_ASSERT(false, "attempted to get length of non-array, non-object, non-string value");
+        return 0;
+    }
+}
+
+long long json_as_int(Json_Value* value) {
+    if (value->type == JSON_VALUE_INT) return value->value.integer;
+    if (value->type == JSON_VALUE_DOUBLE) return (long long)value->value.floating;
+    JSON_ASSERT(false, "attempted to get int value of non-int, non-double value");
+    return 0;
+}
+
+double json_as_double(Json_Value* value) {
+    if (value->type == JSON_VALUE_DOUBLE) return value->value.floating;
+    if (value->type == JSON_VALUE_INT) return (double)value->value.integer;
+    JSON_ASSERT(false, "attempted to get double value of non-double, non-int value");
+    return 0.0;
+}
+
+bool json_as_bool(Json_Value* value) {
+    if (value->type == JSON_VALUE_BOOL) return value->value.boolean;
+    JSON_ASSERT(false, "attempted to get bool value of non-bool value");
+    return false;
+}
+
+char const* json_as_string(Json_Value* value) {
+    if (value->type == JSON_VALUE_STRING) return value->value.string;
+    JSON_ASSERT(false, "attempted to get string value of non-string value");
+    return NULL;
 }
 
 // Writing /////////////////////////////////////////////////////////////////////
@@ -1881,9 +1988,9 @@ CTEST_CASE(build_array_manually) {
     json_array_append(&arr, json_int(30));
 
     CTEST_ASSERT_TRUE(arr.value.array.length == 3);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 10);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 20);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 2)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
 
     json_free_value(&arr);
 }
@@ -1909,23 +2016,129 @@ CTEST_CASE(object_get_at_and_remove) {
     json_free_value(&obj);
 }
 
-CTEST_CASE(array_set_and_remove) {
+CTEST_CASE(array_at_and_remove) {
     Json_Value arr = json_array();
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
 
-    // Test set
-    json_array_set(&arr, 1, json_int(99));
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 99);
+    // Test assignment via json_array_at
+    *json_array_at(&arr, 1) = json_int(99);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 99);
 
     // Test remove
     json_array_remove(&arr, 0);
     CTEST_ASSERT_TRUE(arr.value.array.length == 2);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 99);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 99);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 30);
 
     json_free_value(&arr);
+}
+
+CTEST_CASE(array_insert) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(10));
+    json_array_append(&arr, json_int(30));
+
+    // Insert in the middle
+    json_array_insert(&arr, 1, json_int(20));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
+
+    // Insert at the beginning
+    json_array_insert(&arr, 0, json_int(5));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 4);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 5);
+
+    // Insert at the end (equivalent to append)
+    json_array_insert(&arr, 4, json_int(40));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 5);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 4)->value.integer == 40);
+
+    json_free_value(&arr);
+}
+
+CTEST_CASE(json_move_from_array) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_string("hello"));
+    json_array_append(&arr, json_int(42));
+
+    // Move the string out
+    Json_Value moved = json_move(json_array_at(&arr, 0));
+    CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "hello") == 0);
+
+    // Original location should now be null
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->type == JSON_VALUE_NULL);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 42);
+
+    json_free_value(&moved);
+    json_free_value(&arr);
+}
+
+CTEST_CASE(json_move_from_object) {
+    Json_Value obj = json_object();
+    json_object_set(&obj, "name", json_string("Alice"));
+    json_object_set(&obj, "age", json_int(30));
+
+    // Move the name value out
+    Json_Value moved = json_move(json_object_get(&obj, "name"));
+    CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "Alice") == 0);
+
+    // Original location should now be null
+    CTEST_ASSERT_TRUE(json_object_get(&obj, "name")->type == JSON_VALUE_NULL);
+    CTEST_ASSERT_TRUE(json_object_get(&obj, "age")->value.integer == 30);
+
+    json_free_value(&moved);
+    json_free_value(&obj);
+}
+
+CTEST_CASE(json_length_accessor) {
+    // Test string length
+    Json_Value str = json_string("hello");
+    CTEST_ASSERT_TRUE(json_length(&str) == 5);
+    json_free_value(&str);
+
+    // Test array length
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(1));
+    json_array_append(&arr, json_int(2));
+    json_array_append(&arr, json_int(3));
+    CTEST_ASSERT_TRUE(json_length(&arr) == 3);
+    json_free_value(&arr);
+
+    // Test object length
+    Json_Value obj = json_object();
+    json_object_set(&obj, "a", json_int(1));
+    json_object_set(&obj, "b", json_int(2));
+    CTEST_ASSERT_TRUE(json_length(&obj) == 2);
+    json_free_value(&obj);
+}
+
+CTEST_CASE(safe_accessors) {
+    // Test json_as_int
+    Json_Value int_val = json_int(42);
+    CTEST_ASSERT_TRUE(json_as_int(&int_val) == 42);
+
+    // Test json_as_double with double
+    Json_Value double_val = json_double(3.14);
+    CTEST_ASSERT_TRUE(json_as_double(&double_val) > 3.13 && json_as_double(&double_val) < 3.15);
+
+    // Test json_as_double with integer (should convert)
+    CTEST_ASSERT_TRUE(json_as_double(&int_val) == 42.0);
+
+    // Test json_as_bool
+    Json_Value bool_val = json_bool(true);
+    CTEST_ASSERT_TRUE(json_as_bool(&bool_val) == true);
+
+    // Test json_as_string
+    Json_Value str_val = json_string("test");
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&str_val), "test") == 0);
+
+    json_free_value(&str_val);
 }
 
 // Writing /////////////////////////////////////////////////////////////////////
@@ -2002,14 +2215,14 @@ int main(void) {
         return 1;
     }
 
-    // Access and print values
+    // Access and print values using safe accessors
     Json_Value* name = json_object_get(&doc.root, "name");
-    printf("Name: %s\n", name->value.string);
+    printf("Name: %s\n", json_as_string(name));
 
     Json_Value* scores = json_object_get(&doc.root, "scores");
     printf("Scores: ");
-    for (size_t i = 0; i < scores->value.array.length; ++i) {
-        printf("%lld ", scores->value.array.elements[i].value.integer);
+    for (size_t i = 0; i < json_length(scores); ++i) {
+        printf("%lld ", json_as_int(json_array_at(scores, i)));
     }
     printf("\n");
 
