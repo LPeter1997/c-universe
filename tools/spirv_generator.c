@@ -126,10 +126,10 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
             Json_Value* enumerantValue = json_object_get(enumerant, "value");
             if (enumerantValue->type == JSON_VALUE_STRING) {
-                code_builder_format(cb, "%s = %s,\n", enumerantName, json_as_string(enumerantValue));
+                code_builder_format(cb, "%s_%s = %s,\n", name, enumerantName, json_as_string(enumerantValue));
             }
             else {
-                code_builder_format(cb, "%s = %lld,\n", enumerantName, json_as_int(enumerantValue));
+                code_builder_format(cb, "%s_%s = %lld,\n", name, enumerantName, json_as_int(enumerantValue));
             }
         }
         code_builder_dedent(cb);
