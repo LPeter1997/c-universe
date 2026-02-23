@@ -27,24 +27,19 @@ static void json_model_to_domain(Json_Document doc) {
     // we remove them, collect them out to a separate list, then add them back at the end
     Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
     DynamicArray(Json_Value) compositeTypes = {0};
-    // TODO: Lackluster API, accessing array length should not involve diving into the guts of the union
-    // Also makes it EXTREMELY easy to cause UB as the access is not validated
-    for (size_t i = 0; i < operandKinds->value.array.length; ) {
-        Json_Value* operandKind = json_array_get(operandKinds, i);
+    for (size_t i = 0; i < json_length(operandKinds); ) {
+        Json_Value* operandKind = json_array_at(operandKinds, i);
         Json_Value* category = json_object_get(operandKind, "category");
-        // TODO: Same here, maybe add asserting accessors?
-        if (strcmp(category->value.string, "Composite") != 0) {
+        if (strcmp(json_as_string(category), "Composite") != 0) {
             ++i;
             continue;
         }
-        // TODO: We have no way to MOVE a value out of the structures without deallocating them
-        // We should consider fixing the API
-        DynamicArray_append(compositeTypes, json_copy(*operandKind));
+        DynamicArray_append(compositeTypes, json_move(operandKind));
         json_array_remove(operandKinds, i);
     }
     for (size_t i = 0; i < DynamicArray_length(compositeTypes); ++i) {
-        Json_Value operandKind = DynamicArray_at(compositeTypes, i);
-        json_array_append(operandKinds, operandKind);
+        Json_Value* operandKind = &DynamicArray_at(compositeTypes, i);
+        json_array_append(operandKinds, json_move(operandKind));
     }
     DynamicArray_free(compositeTypes);
 }
