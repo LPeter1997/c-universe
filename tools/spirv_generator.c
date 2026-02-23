@@ -121,7 +121,7 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         code_builder_puts(cb, "// TODO: members\n");
         code_builder_dedent(cb);
         code_builder_format(cb, "} SpirV_%s;\n\n", name);
-        code_builder_format(cb, "// TODO rest of parametric BitEnum %s\n", name);
+        code_builder_format(cb, "// TODO rest of parametric Enum %s\n", name);
     }
     else {
         code_builder_format(cb, "typedef enum SpirV_%s {\n", name);
