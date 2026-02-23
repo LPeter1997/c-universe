@@ -125,6 +125,7 @@ static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
 }
 
 static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
+    bool isBitEnum = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
     Json_Value* enumerants = json_object_get(operandKind, "enumerants");
     // Check, if any enumerant has parameters
@@ -136,12 +137,12 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         hasParametricMembers = true;
         break;
     }
-    if (hasParametricMembers) {
+    if (hasParametricMembers && !isBitEnum) {
         code_builder_format(cb, ""
-            "typedef struct SpirV_%s {\n"
+            "typedef struct Spv_%s {\n"
             "    uint32_t value;\n"
             "    // TODO: members\n"
-            "} SpirV_%s;\n\n", name, name);
+            "} Spv_%s;\n\n", name, name);
         for (size_t i = 0; i < json_length(enumerants); ++i) {
             Json_Value* enumerant = json_array_at(enumerants, i);
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
@@ -151,21 +152,24 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
                 code_builder_format(cb, "// TODO: enumerant %s of %s has parameters\n", enumerantName, name);
             }
             else {
-                code_builder_format(cb, "const SpirV_%s SpirV_%s_%s = { .value = %lld };\n", name, name, enumerantName, enumerantValue);
+                code_builder_format(cb, "const Spv_%s Spv_%s_%s = { .value = %lld };\n", name, name, enumerantName, enumerantValue);
             }
         }
     }
+    else if (hasParametricMembers && isBitEnum) {
+        code_builder_format(cb, "// TODO: bit enum %s has parametric members, need to decide how to represent them\n", name);
+    }
     else {
-        code_builder_format(cb, "typedef enum SpirV_%s {\n", name);
+        code_builder_format(cb, "typedef enum Spv_%s {\n", name);
         code_builder_indent(cb);
         for (size_t i = 0; i < json_length(enumerants); ++i) {
             Json_Value* enumerant = json_array_at(enumerants, i);
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
             long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
-            code_builder_format(cb, "SpirV_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
+            code_builder_format(cb, "Spv_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
         }
         code_builder_dedent(cb);
-        code_builder_format(cb, "} SpirV_%s;\n\n", name);
+        code_builder_format(cb, "} Spv_%s;\n\n", name);
     }
 }
 
