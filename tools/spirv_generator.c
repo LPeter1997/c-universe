@@ -116,12 +116,23 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         break;
     }
     if (hasParametricMembers) {
-        code_builder_format(cb, "typedef struct SpirV_%s {\n", name);
-        code_builder_indent(cb);
-        code_builder_puts(cb, "// TODO: members\n");
-        code_builder_dedent(cb);
-        code_builder_format(cb, "} SpirV_%s;\n\n", name);
-        code_builder_format(cb, "// TODO rest of parametric Enum %s\n", name);
+        code_builder_format(cb, ""
+            "typedef struct SpirV_%s {\n"
+            "    uint32_t value;\n"
+            "    // TODO: members\n"
+            "} SpirV_%s;\n\n", name, name);
+        for (size_t i = 0; i < json_length(enumerants); ++i) {
+            Json_Value* enumerant = json_array_at(enumerants, i);
+            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
+            Json_Value* enumerantValue = json_object_get(enumerant, "value");
+            bool hasParameters = json_object_get(enumerant, "parameters") != NULL;
+            if (hasParameters) {
+                code_builder_format(cb, "// TODO: enumerant %s of %s has parameters\n", enumerantName, name);
+            }
+            else {
+                code_builder_format(cb, "// TODO: enumerant %s of %s has no parameters\n", enumerantName, name);
+            }
+        }
     }
     else {
         code_builder_format(cb, "typedef enum SpirV_%s {\n", name);
