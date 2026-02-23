@@ -83,6 +83,27 @@ static void json_model_to_domain(Json_Document doc) {
     // Flatten out instructions with aliases
     Json_Value* instructions = json_object_get(&doc.root, "instructions");
     json_flatten_aliases(instructions, "opname");
+
+    // We go through each enumerant of each operand kind and if the value is a string,
+    // we assume it's a hex string starting with "0x" and convert it to an integer
+    for (size_t i = 0; i < json_length(operandKinds); ++i) {
+        Json_Value* operandKind = json_array_at(operandKinds, i);
+        Json_Value* enumerants = json_object_get(operandKind, "enumerants");
+        if (enumerants == NULL) continue;
+        for (size_t j = 0; j < json_length(enumerants); ++j) {
+            Json_Value* enumerant = json_array_at(enumerants, j);
+            Json_Value* value = json_object_get(enumerant, "value");
+            if (value == NULL || value->type != JSON_VALUE_STRING) continue;
+            char const* strValue = json_as_string(value);
+            if (strlen(strValue) > 2 && strValue[0] == '0' && strValue[1] == 'x') {
+                long long intValue = strtoll(strValue + 2, NULL, 16);
+                // Trick to avoid an extra lookup
+                Json_Value oldValue = json_move(value);
+                *value = json_int(intValue);
+                json_free_value(&oldValue);
+            }
+        }
+    }
 }
 
 static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
@@ -124,7 +145,7 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         for (size_t i = 0; i < json_length(enumerants); ++i) {
             Json_Value* enumerant = json_array_at(enumerants, i);
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
-            Json_Value* enumerantValue = json_object_get(enumerant, "value");
+            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
             bool hasParameters = json_object_get(enumerant, "parameters") != NULL;
             if (hasParameters) {
                 code_builder_format(cb, "// TODO: enumerant %s of %s has parameters\n", enumerantName, name);
@@ -140,13 +161,8 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
         for (size_t i = 0; i < json_length(enumerants); ++i) {
             Json_Value* enumerant = json_array_at(enumerants, i);
             char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
-            Json_Value* enumerantValue = json_object_get(enumerant, "value");
-            if (enumerantValue->type == JSON_VALUE_STRING) {
-                code_builder_format(cb, "SpirV_%s_%s = %s,\n", name, enumerantName, json_as_string(enumerantValue));
-            }
-            else {
-                code_builder_format(cb, "SpirV_%s_%s = %lld,\n", name, enumerantName, json_as_int(enumerantValue));
-            }
+            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
+            code_builder_format(cb, "SpirV_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
         }
         code_builder_dedent(cb);
         code_builder_format(cb, "} SpirV_%s;\n\n", name);
