@@ -149,7 +149,7 @@ static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
             long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
             bool hasParameters = json_object_get(enumerant, "parameters") != NULL;
             if (hasParameters) {
-                code_builder_format(cb, "// TODO: enumerant %s of %s has parameters\n", enumerantName, name);
+                code_builder_format(cb, "Spv_%s Spv_%s_%s(/* TODO: Parameters */) { /* TODO */ }\n", name, name, enumerantName);
             }
             else {
                 code_builder_format(cb, "const Spv_%s Spv_%s_%s = { .value = %lld };\n", name, name, enumerantName, enumerantValue);
