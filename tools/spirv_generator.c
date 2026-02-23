@@ -69,15 +69,14 @@ static void json_model_to_domain(Json_Document doc) {
     }
     DynamicArray_free(compositeTypes);
 
-    // We go through each enumerant of each operand_kind and if it has an "aliases" array, we unroll it by
-    // cloning the enumerant for each alias and replacing the name with the alias
+    // Flatten out enumerants with aliases
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
         Json_Value* enumerants = json_object_get(operandKind, "enumerants");
         json_flatten_aliases(enumerants, "name");
     }
 
-    // Do the literal same thing with instructions, but we have to look for the "opname" key instead of "name"
+    // Flatten out instructions with aliases
     Json_Value* instructions = json_object_get(&doc.root, "instructions");
     json_flatten_aliases(instructions, "opname");
 }
