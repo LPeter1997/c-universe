@@ -15,7 +15,9 @@
  *  - Use json_swrite or json_write to write a Json_Value into a JSON string
  *  - Use the various json_* constructor functions to create and manipulate JSON values, including objects and arrays (like json_object and json_array)
  *  - Use json_object_set, json_object_get and json_object_remove to manipulate key-value pairs in JSON objects
- *  - Use json_array_append, json_array_set and json_array_get to manipulate values in JSON arrays
+ *  - Use json_array_append, json_array_at, json_array_insert and json_array_remove to manipulate values in JSON arrays
+ *  - Use json_move to move a value out of a container while leaving a null in place
+ *  - Use json_length, json_as_int, json_as_double, json_as_bool and json_as_string for safe value access
  *  - Use json_free_value and json_free_document to free the memory associated with JSON values and documents when they are no longer needed
  *
  * Check the example section at the end of this file for a full example.
@@ -1986,9 +1988,9 @@ CTEST_CASE(build_array_manually) {
     json_array_append(&arr, json_int(30));
 
     CTEST_ASSERT_TRUE(arr.value.array.length == 3);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 10);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 20);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 2)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
 
     json_free_value(&arr);
 }
@@ -2014,23 +2016,129 @@ CTEST_CASE(object_get_at_and_remove) {
     json_free_value(&obj);
 }
 
-CTEST_CASE(array_set_and_remove) {
+CTEST_CASE(array_at_and_remove) {
     Json_Value arr = json_array();
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
 
-    // Test set
-    json_array_set(&arr, 1, json_int(99));
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 99);
+    // Test assignment via json_array_at
+    *json_array_at(&arr, 1) = json_int(99);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 99);
 
     // Test remove
     json_array_remove(&arr, 0);
     CTEST_ASSERT_TRUE(arr.value.array.length == 2);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 0)->value.integer == 99);
-    CTEST_ASSERT_TRUE(json_array_get(&arr, 1)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 99);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 30);
 
     json_free_value(&arr);
+}
+
+CTEST_CASE(array_insert) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(10));
+    json_array_append(&arr, json_int(30));
+
+    // Insert in the middle
+    json_array_insert(&arr, 1, json_int(20));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
+
+    // Insert at the beginning
+    json_array_insert(&arr, 0, json_int(5));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 4);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 5);
+
+    // Insert at the end (equivalent to append)
+    json_array_insert(&arr, 4, json_int(40));
+    CTEST_ASSERT_TRUE(arr.value.array.length == 5);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 4)->value.integer == 40);
+
+    json_free_value(&arr);
+}
+
+CTEST_CASE(json_move_from_array) {
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_string("hello"));
+    json_array_append(&arr, json_int(42));
+
+    // Move the string out
+    Json_Value moved = json_move(json_array_at(&arr, 0));
+    CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "hello") == 0);
+
+    // Original location should now be null
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->type == JSON_VALUE_NULL);
+    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 42);
+
+    json_free_value(&moved);
+    json_free_value(&arr);
+}
+
+CTEST_CASE(json_move_from_object) {
+    Json_Value obj = json_object();
+    json_object_set(&obj, "name", json_string("Alice"));
+    json_object_set(&obj, "age", json_int(30));
+
+    // Move the name value out
+    Json_Value moved = json_move(json_object_get(&obj, "name"));
+    CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
+    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "Alice") == 0);
+
+    // Original location should now be null
+    CTEST_ASSERT_TRUE(json_object_get(&obj, "name")->type == JSON_VALUE_NULL);
+    CTEST_ASSERT_TRUE(json_object_get(&obj, "age")->value.integer == 30);
+
+    json_free_value(&moved);
+    json_free_value(&obj);
+}
+
+CTEST_CASE(json_length_accessor) {
+    // Test string length
+    Json_Value str = json_string("hello");
+    CTEST_ASSERT_TRUE(json_length(&str) == 5);
+    json_free_value(&str);
+
+    // Test array length
+    Json_Value arr = json_array();
+    json_array_append(&arr, json_int(1));
+    json_array_append(&arr, json_int(2));
+    json_array_append(&arr, json_int(3));
+    CTEST_ASSERT_TRUE(json_length(&arr) == 3);
+    json_free_value(&arr);
+
+    // Test object length
+    Json_Value obj = json_object();
+    json_object_set(&obj, "a", json_int(1));
+    json_object_set(&obj, "b", json_int(2));
+    CTEST_ASSERT_TRUE(json_length(&obj) == 2);
+    json_free_value(&obj);
+}
+
+CTEST_CASE(safe_accessors) {
+    // Test json_as_int
+    Json_Value int_val = json_int(42);
+    CTEST_ASSERT_TRUE(json_as_int(&int_val) == 42);
+
+    // Test json_as_double with double
+    Json_Value double_val = json_double(3.14);
+    CTEST_ASSERT_TRUE(json_as_double(&double_val) > 3.13 && json_as_double(&double_val) < 3.15);
+
+    // Test json_as_double with integer (should convert)
+    CTEST_ASSERT_TRUE(json_as_double(&int_val) == 42.0);
+
+    // Test json_as_bool
+    Json_Value bool_val = json_bool(true);
+    CTEST_ASSERT_TRUE(json_as_bool(&bool_val) == true);
+
+    // Test json_as_string
+    Json_Value str_val = json_string("test");
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&str_val), "test") == 0);
+
+    json_free_value(&str_val);
 }
 
 // Writing /////////////////////////////////////////////////////////////////////
@@ -2107,14 +2215,14 @@ int main(void) {
         return 1;
     }
 
-    // Access and print values
+    // Access and print values using safe accessors
     Json_Value* name = json_object_get(&doc.root, "name");
-    printf("Name: %s\n", name->value.string);
+    printf("Name: %s\n", json_as_string(name));
 
     Json_Value* scores = json_object_get(&doc.root, "scores");
     printf("Scores: ");
-    for (size_t i = 0; i < scores->value.array.length; ++i) {
-        printf("%lld ", scores->value.array.elements[i].value.integer);
+    for (size_t i = 0; i < json_length(scores); ++i) {
+        printf("%lld ", json_as_int(json_array_at(scores, i)));
     }
     printf("\n");
 
