@@ -35,8 +35,8 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #ifdef STRING_BUILDER_STATIC
