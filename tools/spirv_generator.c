@@ -832,7 +832,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                     int bufferLength = snprintf(NULL, 0, "%s.variants.%s.%s", name, enumerant->name, param->name);
                     char* buffer = (char*)malloc(bufferLength + 1);
                     snprintf(buffer, bufferLength + 1, "%s.variants.%s.%s", name, enumerant->name, param->name);
-                    generate_c_operand_value_encoder(cb, model, find_type_by_name(model, param->typeName), buffer);
+                    generate_c_operand_encoder(cb, model, param, buffer);
                     free(buffer);
                 }
                 code_builder_format(cb, "break;\n");
