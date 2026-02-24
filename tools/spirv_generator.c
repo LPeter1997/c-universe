@@ -353,8 +353,9 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
 static char* operand_infer_name(Operand* operand, char const* hint) {
     StringBuilder sb = {0};
     if (hint == NULL) hint = operand->typeName;
-    // TODO: Needs more processing
     sb_puts(&sb, hint);
+    sb_replace(&sb, " ", "");
+    // TODO: Needs more processing
     char* result = sb_to_cstr(&sb);
     sb_free(&sb);
     return result;
