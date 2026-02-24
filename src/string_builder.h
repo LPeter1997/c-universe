@@ -9,7 +9,10 @@
  *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
  * StringBuilder API:
- *  - Use sb_puts, sb_putsn, sb_putc and sb_format to build the string as needed
+ *  - Use sb_puts, sb_putsn, sb_putc and sb_format to append content to the builder
+ *  - Use sb_insert, sb_insertn and sb_insertc to insert content at a specific position
+ *  - Use sb_remove to remove a portion of the string, and sb_replace to replace all occurrences of a target string
+ *  - Use sb_length to get the current length, and sb_char_at to access a character at a specific position
  *  - Use sb_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
  *  - Use sb_clear to clear the content of the builder without freeing the allocated buffer
  *  - Use sb_free to free the memory allocated for the builder when it is no longer needed
@@ -128,6 +131,63 @@ STRING_BUILDER_DEF void sb_format(StringBuilder* sb, char const* format, ...);
 STRING_BUILDER_DEF void sb_vformat(StringBuilder* sb, char const* format, va_list args);
 
 /**
+ * Inserts a null-terminated string at the specified position in the builder.
+ * @param sb The string builder to insert into.
+ * @param pos The position at which to insert the string.
+ * @param str The null-terminated string to insert.
+ */
+STRING_BUILDER_DEF void sb_insert(StringBuilder* sb, size_t pos, char const* str);
+
+/**
+ * Inserts a string with the given length at the specified position in the builder.
+ * @param sb The string builder to insert into.
+ * @param pos The position at which to insert the string.
+ * @param str The string to insert, not necessarily null-terminated.
+ * @param n The length of the string to insert.
+ */
+STRING_BUILDER_DEF void sb_insertn(StringBuilder* sb, size_t pos, char const* str, size_t n);
+
+/**
+ * Inserts a single character at the specified position in the builder.
+ * @param sb The string builder to insert into.
+ * @param pos The position at which to insert the character.
+ * @param c The character to insert.
+ */
+STRING_BUILDER_DEF void sb_insertc(StringBuilder* sb, size_t pos, char c);
+
+/**
+ * Returns the current length of the string in the builder.
+ * @param sb The string builder to get the length of.
+ * @return The current length of the string content.
+ */
+STRING_BUILDER_DEF size_t sb_length(StringBuilder* sb);
+
+/**
+ * Returns a pointer to the character at the specified position in the builder.
+ * This allows reading or modifying the character at that position.
+ * @param sb The string builder to access.
+ * @param pos The position of the character to access.
+ * @return A pointer to the character at the specified position.
+ */
+STRING_BUILDER_DEF char* sb_char_at(StringBuilder* sb, size_t pos);
+
+/**
+ * Removes a portion of the string from the builder.
+ * @param sb The string builder to remove from.
+ * @param pos The position at which to start removing.
+ * @param length The number of characters to remove.
+ */
+STRING_BUILDER_DEF void sb_remove(StringBuilder* sb, size_t pos, size_t length);
+
+/**
+ * Replaces all occurrences of a target string with a replacement string in the builder.
+ * @param sb The string builder to perform the replacement in.
+ * @param target The string to be replaced.
+ * @param replacement The string to replace the target with.
+ */
+STRING_BUILDER_DEF void sb_replace(StringBuilder* sb, char const* target, char const* replacement);
+
+/**
  * Utility for building code with indentation, using an underlying string builder.
  * Useful for code generation where the goal is producing a somewhat nicely formatted output.
  */
@@ -239,6 +299,77 @@ void sb_vformat(StringBuilder* sb, char const* format, va_list args) {
     sb_reserve(sb, sb->length + (size_t)formattedLength);
     vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
     sb->length += (size_t)formattedLength;
+}
+
+void sb_insert(StringBuilder* sb, size_t pos, char const* str) {
+    size_t strLength = strlen(str);
+    sb_insertn(sb, pos, str, strLength);
+}
+
+void sb_insertn(StringBuilder* sb, size_t pos, char const* str, size_t n) {
+    if (n == 0) return;
+    STRING_BUILDER_ASSERT(pos <= sb->length, "insert position out of bounds");
+    sb_reserve(sb, sb->length + n);
+    memmove(sb->buffer + pos + n, sb->buffer + pos, sb->length - pos);
+    memcpy(sb->buffer + pos, str, n);
+    sb->length += n;
+}
+
+void sb_insertc(StringBuilder* sb, size_t pos, char c) {
+    STRING_BUILDER_ASSERT(pos <= sb->length, "insert position out of bounds");
+    sb_reserve(sb, sb->length + 1);
+    memmove(sb->buffer + pos + 1, sb->buffer + pos, sb->length - pos);
+    sb->buffer[pos] = c;
+    sb->length += 1;
+}
+
+size_t sb_length(StringBuilder* sb) {
+    return sb->length;
+}
+
+char* sb_char_at(StringBuilder* sb, size_t pos) {
+    STRING_BUILDER_ASSERT(pos < sb->length, "char_at position out of bounds");
+    return &sb->buffer[pos];
+}
+
+void sb_remove(StringBuilder* sb, size_t pos, size_t length) {
+    if (length == 0) return;
+    STRING_BUILDER_ASSERT(pos <= sb->length, "remove position out of bounds");
+    if (pos + length > sb->length) length = sb->length - pos;
+    memmove(sb->buffer + pos, sb->buffer + pos + length, sb->length - pos - length);
+    sb->length -= length;
+}
+
+void sb_replace(StringBuilder* sb, char const* target, char const* replacement) {
+    size_t targetLen = strlen(target);
+    // Avoid replacing empty strings, just makes no sense
+    if (targetLen == 0) return;
+    size_t replacementLen = strlen(replacement);
+    size_t pos = 0;
+    while (pos + targetLen <= sb->length) {
+        if (memcmp(sb->buffer + pos, target, targetLen) != 0) {
+            ++pos;
+            continue;
+        }
+        if (targetLen == replacementLen) {
+            // Same length, no shifting needed
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+        } else if (replacementLen < targetLen) {
+            // Replacement is shorter, copy replacement, then shift rest left
+            size_t diff = targetLen - replacementLen;
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
+            sb->length -= diff;
+        } else {
+            // Replacement is longer, reserve, shift rest right, then copy replacement
+            size_t diff = replacementLen - targetLen;
+            sb_reserve(sb, sb->length + diff);
+            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+            sb->length += diff;
+        }
+        pos += replacementLen;
+    }
 }
 
 // Code builder ////////////////////////////////////////////////////////////////
@@ -653,6 +784,214 @@ CTEST_CASE(string_builder_repeated_clear_and_build) {
     }
     sb_puts(&sb, "final");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "final"));
+    sb_free(&sb);
+}
+
+// Insert tests ////////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_insert_at_beginning) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "World");
+    sb_insert(&sb, 0, "Hello ");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_at_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    sb_insert(&sb, 5, " World");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_in_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Helo");
+    sb_insert(&sb, 2, "l");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insertn_partial) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "AC");
+    sb_insertn(&sb, 1, "BXYZ", 1);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "ABC"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_empty_string) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_insert(&sb, 2, "");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insertc_beginning) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "ello");
+    sb_insertc(&sb, 0, 'H');
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insertc_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hllo");
+    sb_insertc(&sb, 1, 'e');
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insertc_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hell");
+    sb_insertc(&sb, 4, 'o');
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+// Length and char_at tests ////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_length_empty) {
+    StringBuilder sb = test_sb_create();
+    CTEST_ASSERT_TRUE(sb_length(&sb) == 0);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_length_after_puts) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(sb_length(&sb) == 5);
+    sb_puts(&sb, " World");
+    CTEST_ASSERT_TRUE(sb_length(&sb) == 11);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_char_at_read) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(*sb_char_at(&sb, 0) == 'H');
+    CTEST_ASSERT_TRUE(*sb_char_at(&sb, 1) == 'e');
+    CTEST_ASSERT_TRUE(*sb_char_at(&sb, 4) == 'o');
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_char_at_write) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hallo");
+    *sb_char_at(&sb, 1) = 'e';
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+// Remove tests ////////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_remove_from_beginning) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_remove(&sb, 0, 6);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_from_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_remove(&sb, 5, 6);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_from_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Helllo");
+    sb_remove(&sb, 2, 1);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_zero_length) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_remove(&sb, 2, 0);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_clamps_to_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    sb_remove(&sb, 3, 100);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hel"));
+    sb_free(&sb);
+}
+
+// Replace tests ///////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_replace_single_occurrence) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "World", "Universe");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello Universe"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_multiple_occurrences) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "foo bar foo baz foo");
+    sb_replace(&sb, "foo", "qux");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "qux bar qux baz qux"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_shorter) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "World", "You");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello You"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_longer) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hi");
+    sb_replace(&sb, "Hi", "Hello");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_same_length) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "cat and dog");
+    sb_replace(&sb, "cat", "bat");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "bat and dog"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_no_match) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "xyz", "abc");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_empty_target) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_replace(&sb, "", "x");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test")); // Empty target should be a no-op
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_empty) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, " World", "");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
     sb_free(&sb);
 }
 
