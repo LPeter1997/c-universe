@@ -334,7 +334,7 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
     return metadata;
 }
 
-static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
+static Operand json_operand_to_domain(Json_Value* operand) {
     // NOTE: Name is optional
     Json_Value* name = json_object_get(operand, "name");
     char const* kind = json_as_string(json_object_get(operand, "kind"));
@@ -352,7 +352,7 @@ static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
     };
 }
 
-static Enumerant json_enumerant_to_domain(Model* model, Json_Value* enumerant) {
+static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
     Json_Value* doc = json_object_get(enumerant, "doc");
     char const* name = json_as_string(json_object_get(enumerant, "enumerant"));
     long long value = json_as_int(json_object_get(enumerant, "value"));
@@ -366,13 +366,13 @@ static Enumerant json_enumerant_to_domain(Model* model, Json_Value* enumerant) {
     Json_Value* parameters = json_object_get(enumerant, "parameters");
     for (size_t i = 0; parameters != NULL && i < json_length(parameters); ++i) {
         Json_Value* parameter = json_array_at(parameters, i);
-        Operand operand = json_operand_to_domain(model, parameter);
+        Operand operand = json_operand_to_domain(parameter);
         DynamicArray_append(result.parameters, operand);
     }
     return result;
 }
 
-static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
+static Enum json_enum_to_domain(Json_Value* operandKind) {
     Json_Value* doc = json_object_get(operandKind, "doc");
     bool isFlags = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
     Enum result = {
@@ -382,13 +382,13 @@ static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
     Json_Value* enumerants = json_object_get(operandKind, "enumerants");
     for (size_t i = 0; i < json_length(enumerants); ++i) {
         Json_Value* enumerant = json_array_at(enumerants, i);
-        Enumerant enumerantStruct = json_enumerant_to_domain(model, enumerant);
+        Enumerant enumerantStruct = json_enumerant_to_domain(enumerant);
         DynamicArray_append(result.enumerants, enumerantStruct);
     }
     return result;
 }
 
-static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
+static Tuple json_tuple_to_domain(Json_Value* operandKind) {
     Tuple result = {0};
     Json_Value* members = json_object_get(operandKind, "bases");
     for (size_t i = 0; i < json_length(members); ++i) {
@@ -398,13 +398,13 @@ static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
     return result;
 }
 
-static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
+static Type json_operand_kind_to_domain(Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
     Json_Value* docJson = json_object_get(operandKind, "doc");
     char const* doc = docJson == NULL ? NULL : json_as_string(docJson);
     if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
-        Enum enumeration = json_enum_to_domain(model, operandKind);
+        Enum enumeration = json_enum_to_domain(operandKind);
         return (Type){
             .kind = TYPE_ENUM,
             .name = name,
@@ -442,7 +442,7 @@ static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
         };
     }
     else if (strcmp(category, "Composite") == 0) {
-        Tuple tuple = json_tuple_to_domain(model, operandKind);
+        Tuple tuple = json_tuple_to_domain(operandKind);
         return (Type){
             .kind = TYPE_TUPLE,
             .name = name,
@@ -483,7 +483,7 @@ static Model json_model_to_domain(Json_Document doc) {
     Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
-        Type type = json_operand_kind_to_domain(&model, operandKind);
+        Type type = json_operand_kind_to_domain(operandKind);
         DynamicArray_append(model.types, type);
     }
 
@@ -544,7 +544,29 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
         code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, memberName);
-        code_builder_format(cb, "// TODO\n");
+        if (!type->value.enumeration.flags) {
+            code_builder_puts(cb, "union {\n");
+            code_builder_indent(cb);
+        }
+        for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+            if (enumerant->parameters.length == 0) continue;
+            code_builder_format(cb, "struct {\n");
+            code_builder_indent(cb);
+            for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                if (param->quantifier != QUANTIFIER_ONE) {
+                    code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
+                }
+                code_builder_format(cb, "Spv_%s %s;\n", param->typeName, param->name);
+            }
+            code_builder_dedent(cb);
+            code_builder_format(cb, "} %s;\n", enumerant->name);
+        }
+        if (!type->value.enumeration.flags) {
+            code_builder_dedent(cb);
+            code_builder_format(cb, "} variants;\n\n", type->name);
+        }
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
     }
