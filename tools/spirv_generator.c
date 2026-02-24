@@ -645,8 +645,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                     code_builder_format(cb, "Spv_%s %s;\n", param->typeName, param->name);
                 }
                 else if (param->quantifier == QUANTIFIER_ANY) {
-                    code_builder_format(cb, "Spv_%s* %s;\n", param->typeName, param->name);
-                    code_builder_format(cb, "size_t %sCount;\n", param->name);
+                    code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s;\n", param->typeName, param->name);
                 }
                 else {
                     code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
@@ -678,7 +677,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                         code_builder_format(cb, "Spv_%s %s", param->typeName, param->name);
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "Spv_%s* %s, size_t %sCount", param->typeName, param->name, param->name);
+                        code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s", param->typeName, param->name);
                     }
                     else {
                         code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
@@ -699,7 +698,6 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
                         code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, ".variants.%s.%sCount = %sCount,\n", originalMember, param->name, param->name);
                     }
                     else {
                         code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
@@ -719,7 +717,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                         code_builder_format(cb, ", Spv_%s %s", param->typeName, param->name);
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, ", Spv_%s* %s, size_t %sCount", param->typeName, param->name, param->name);
+                        code_builder_format(cb, ", struct { Spv_%s* values; size_t count; } %s", param->typeName, param->name);
                     }
                     else {
                         code_builder_format(cb, ", // TODO: handle quantifier %d for parameter %s\n", param->quantifier, param->name);
@@ -735,7 +733,6 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
                         code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "operand->%s.%sCount = %sCount;\n", originalMember, param->name, param->name);
                     }
                     else {
                         code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
@@ -775,9 +772,9 @@ static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* o
         generate_c_operand_value_encoder(cb, model, operandType, name);
     }
     else if (operand->quantifier == QUANTIFIER_ANY) {
-        code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", name);
+        code_builder_format(cb, "for (size_t i = 0; i < %s.count; ++i) {\n", name);
         code_builder_indent(cb);
-        char* accessor = format_string("%s[i]", name);
+        char* accessor = format_string("%s.values[i]", name);
         generate_c_operand_value_encoder(cb, model, operandType, accessor);
         free(accessor);
         code_builder_dedent(cb);
@@ -870,7 +867,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
             code_builder_format(cb, ", Spv_%s %s", operand->typeName, operand->name);
         }
         else if (operand->quantifier == QUANTIFIER_ANY) {
-            code_builder_format(cb, ", Spv_%s* %s, size_t %sCount", operand->typeName, operand->name, operand->name);
+            code_builder_format(cb, ", struct { Spv_%s* values; size_t count; } %s", operand->typeName, operand->name);
         }
         else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
             code_builder_format(cb, ", struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
