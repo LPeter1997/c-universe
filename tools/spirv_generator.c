@@ -30,6 +30,16 @@ static char const* json_optional_string(Json_Value* value) {
     return value == NULL ? NULL : json_as_string(value);
 }
 
+static char const* tuple_member_name(size_t index) {
+    switch (index) {
+    case 0: return "first";
+    case 1: return "second";
+    case 2: return "third";
+    case 3: return "fourth";
+    default: return "TODO";
+    }
+}
+
 // Domain model definition /////////////////////////////////////////////////////
 
 typedef struct Metadata {
@@ -863,7 +873,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_indent(cb);
         for (size_t i = 0; i < DynamicArray_length(tuple->memberTypeNames); ++i) {
             char const* memberTypeName = DynamicArray_at(tuple->memberTypeNames, i);
-            code_builder_format(cb, "Spv_%s member%d;\n", memberTypeName, (int)i + 1);
+            code_builder_format(cb, "Spv_%s %s;\n", memberTypeName, tuple_member_name(i));
         }
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
@@ -961,6 +971,15 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
             }
+        }
+    }
+    else if (operandType->kind == TYPE_TUPLE) {
+        Tuple* tuple = &operandType->value.tuple;
+        for (size_t i = 0; i < DynamicArray_length(tuple->memberTypeNames); ++i) {
+            char* memberAccessor = format_string("%s.%s", name, tuple_member_name(i));
+            Type* memberType = find_type_by_name(model, DynamicArray_at(tuple->memberTypeNames, i));
+            generate_c_operand_value_encoder(cb, model, memberType, memberAccessor);
+            free(memberAccessor);
         }
     }
     else {
