@@ -514,13 +514,16 @@ static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_putc(cb, '\n');
 }
 
+static void generate_c_doc(CodeBuilder* cb, char const* doc) {
+    if (doc == NULL) return;
+    code_builder_format(cb, ""
+        "/**\n"
+        " * %s\n"
+        " */\n", doc);
+}
+
 static void generate_c_type(CodeBuilder* cb, Type* type) {
-    if (type->doc != NULL) {
-        code_builder_format(cb, ""
-            "/**\n"
-            " * %s.\n"
-            " */\n", type->doc);
-    }
+    generate_c_doc(cb, type->doc);
     if (type->kind == TYPE_STRONG_ID || type->kind == TYPE_NUMBER || type->kind == TYPE_STRING) {
         code_builder_format(cb, "typedef %s Spv_%s;\n\n", type->value.type_name, type->name);
     }
@@ -532,12 +535,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_indent(cb);
         for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
-            if (enumerant->doc != NULL) {
-                code_builder_format(cb, ""
-                    "/**\n"
-                    " * %s\n"
-                    " */\n", enumerant->doc);
-            }
+            generate_c_doc(cb, enumerant->doc);
             code_builder_format(cb, "Spv_%s_%s = %lld,\n", type->name, enumerant->name, enumerant->value);
         }
         code_builder_dedent(cb);
