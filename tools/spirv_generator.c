@@ -396,6 +396,30 @@ static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
     return result;
 }
 
+static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
+    Tuple result = {0};
+    Json_Value* members = json_object_get(operandKind, "bases");
+    for (size_t i = 0; i < json_length(members); ++i) {
+        char const* memberKind = json_as_string(json_array_at(members, i));
+        // TODO: Again, linear lookup...
+        Type* memberType = NULL;
+        for (size_t j = 0; j < DynamicArray_length(model->types); ++j) {
+            Type* candidate = &DynamicArray_at(model->types, j);
+            if (candidate->name == NULL) continue;
+            if (strcmp(candidate->name, memberKind) == 0) {
+                memberType = candidate;
+                break;
+            }
+        }
+        if (memberType == NULL) {
+            printf("Unknown type %s\n", memberKind);
+            assert(false);
+        }
+        DynamicArray_append(result.members, memberType);
+    }
+    return result;
+}
+
 static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
@@ -437,6 +461,15 @@ static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
             .name = name,
             .doc = doc,
             .value.type_name = typeName,
+        };
+    }
+    else if (strcmp(category, "Composite") == 0) {
+        Tuple tuple = json_tuple_to_domain(model, operandKind);
+        return (Type){
+            .kind = TYPE_TUPLE,
+            .name = name,
+            .doc = doc,
+            .value.tuple = tuple,
         };
     }
     else {
