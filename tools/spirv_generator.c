@@ -754,7 +754,44 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
     }
 }
 
-static void generate_c_operand_encoder(CodeBuilder* cb, Type* operandType, char const* name) {
+static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type* operandType, char const* name);
+
+static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* operand, char const* name) {
+    Type* operandType = find_type_by_name(model, operand->typeName);
+    if (operand->quantifier == QUANTIFIER_ONE) {
+        generate_c_operand_value_encoder(cb, model, operandType, operand->name);
+    }
+    else if (operand->quantifier == QUANTIFIER_ANY) {
+        code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", operand->name);
+        code_builder_indent(cb);
+        // Construct the name as an accessor to the current element, e.g. "myOperand[i]"
+        int bufferLength = snprintf(NULL, 0, "%s[i]", operand->name);
+        char* buffer = (char*)malloc(bufferLength + 1);
+        snprintf(buffer, bufferLength + 1, "%s[i]", operand->name);
+        generate_c_operand_value_encoder(cb, model, operandType, buffer);
+        free(buffer);
+        code_builder_dedent(cb);
+        code_builder_puts(cb, "}\n");
+    }
+    else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
+        // Only encode if present
+        code_builder_format(cb, "if (%s.present) {\n", operand->name);
+        code_builder_indent(cb);
+        // Construct the name as an accessor to the value, e.g. "myOperand.value"
+        int bufferLength = snprintf(NULL, 0, "%s.value", operand->name);
+        char* buffer = (char*)malloc(bufferLength + 1);
+        snprintf(buffer, bufferLength + 1, "%s.value", operand->name);
+        generate_c_operand_value_encoder(cb, model, operandType, buffer);
+        free(buffer);
+        code_builder_dedent(cb);
+        code_builder_puts(cb, "}\n");
+    }
+    else {
+        code_builder_format(cb, "// TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
+    }
+}
+
+static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type* operandType, char const* name) {
     if (operandType->kind == TYPE_STRONG_ID
      || operandType->kind == TYPE_UINT32) {
         code_builder_format(cb, "spv_encode_u32(encoder, %s);\n", name);
@@ -781,8 +818,29 @@ static void generate_c_operand_encoder(CodeBuilder* cb, Type* operandType, char 
                 break;
             }
         }
-        if (hasParameters) {
-            code_builder_format(cb, "// TODO handle parameters for enum %s\n", operandType->name);
+        if (hasParameters && !enumeration->flags) {
+            // Simpler, we can just do a singular switch on the tag and determine which alternative to write
+            code_builder_format(cb, "switch (%s.%s) {\n", name, "tag");
+            for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+                Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+                if (enumerant->parameters.length == 0) continue;
+                code_builder_format(cb, "case Spv_%s_%s:\n", operandType->name, enumerant->name);
+                code_builder_indent(cb);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    // Construct the accessor to this parameter, e.g. "myOperand.variants.MyEnumValue.myParam"
+                    int bufferLength = snprintf(NULL, 0, "%s.variants.%s.%s", name, enumerant->name, param->name);
+                    char* buffer = (char*)malloc(bufferLength + 1);
+                    snprintf(buffer, bufferLength + 1, "%s.variants.%s.%s", name, enumerant->name, param->name);
+                    generate_c_operand_value_encoder(cb, model, find_type_by_name(model, param->typeName), buffer);
+                    free(buffer);
+                }
+                code_builder_format(cb, "break;\n");
+                code_builder_dedent(cb);
+            }
+        }
+        else if (hasParameters && enumeration->flags) {
+            code_builder_format(cb, "// TODO handle parameters for flags enum %s\n", operandType->name);
         }
     }
     else {
@@ -816,34 +874,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_puts(cb, "spv_encode_u32(encoder, 0);\n");
     for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
         Operand* operand = &DynamicArray_at(instruction->operands, i);
-        Type* operandType = find_type_by_name(model, operand->typeName);
-        if (operand->quantifier == QUANTIFIER_ONE) {
-            generate_c_operand_encoder(cb, operandType, operand->name);
-        }
-        else if (operand->quantifier == QUANTIFIER_ANY) {
-            code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", operand->name);
-            code_builder_indent(cb);
-            // Construct the name as an accessor to the current element, e.g. "myOperand[i]"
-            char elementName[256];
-            snprintf(elementName, sizeof(elementName), "%s[i]", operand->name);
-            generate_c_operand_encoder(cb, operandType, elementName);
-            code_builder_dedent(cb);
-            code_builder_puts(cb, "}\n");
-        }
-        else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
-            // Only encode if present
-            code_builder_format(cb, "if (%s.present) {\n", operand->name);
-            code_builder_indent(cb);
-            // Construct the name as an accessor to the value, e.g. "myOperand.value"
-            char valueName[256];
-            snprintf(valueName, sizeof(valueName), "%s.value", operand->name);
-            generate_c_operand_encoder(cb, operandType, valueName);
-            code_builder_dedent(cb);
-            code_builder_puts(cb, "}\n");
-        }
-        else {
-            code_builder_format(cb, "// TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
-        }
+        generate_c_operand_encoder(cb, model, operand, operand->name);
     }
     // Patch instruction header with actual word count and opcode
     code_builder_format(cb, "size_t endOffset = encoder->builder.offset;\n");
