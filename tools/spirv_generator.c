@@ -12,6 +12,18 @@
 #define STRING_BUILDER_STATIC
 #include "../src/string_builder.h"
 
+static char* format_string(char const* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+    char* buffer = (char*)malloc(len + 1);
+    va_start(args, fmt);
+    vsnprintf(buffer, len + 1, fmt, args);
+    va_end(args);
+    return buffer;
+}
+
 // Domain model definition /////////////////////////////////////////////////////
 
 typedef struct Metadata {
@@ -107,6 +119,16 @@ static void free_enumerant(Enumerant* enumerant) {
         free_operand(operand);
     }
     DynamicArray_free(enumerant->parameters);
+}
+
+static bool enum_has_parameters(Enum* enumeration) {
+    for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+        Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+        if (enumerant->parameters.length > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void free_type(Type* type) {
@@ -411,7 +433,6 @@ static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
 }
 
 static Enum json_enum_to_domain(Json_Value* operandKind) {
-    Json_Value* doc = json_object_get(operandKind, "doc");
     bool isFlags = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
     Enum result = {
         .flags = isFlags,
@@ -602,15 +623,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s%s;\n\n", type->name, enumSuffix);
 
-        // TODO: Would be nice to have a general search algo
-        bool hasParameters = false;
-        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
-            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
-            if (enumerant->parameters.length > 0) {
-                hasParameters = true;
-                break;
-            }
-        }
+        bool hasParameters = enum_has_parameters(enumeration);
 
         // Define the struct describing the operand
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
@@ -644,7 +657,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         }
         if (hasParameters && !enumeration->flags) {
             code_builder_dedent(cb);
-            code_builder_format(cb, "} variants;\n\n", type->name);
+            code_builder_puts(cb, "} variants;\n");
         }
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
@@ -682,11 +695,11 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
                     if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, ".variants.%s.%s = %s;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, ".variants.%s.%s = %s;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, ".variants.%s.%sCount = %sCount;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, ".variants.%s.%sCount = %sCount,\n", originalMember, param->name, param->name);
                     }
                     else {
                         code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
@@ -764,25 +777,18 @@ static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* o
     else if (operand->quantifier == QUANTIFIER_ANY) {
         code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", name);
         code_builder_indent(cb);
-        // Construct the name as an accessor to the current element, e.g. "myOperand[i]"
-        int bufferLength = snprintf(NULL, 0, "%s[i]", name);
-        char* buffer = (char*)malloc(bufferLength + 1);
-        snprintf(buffer, bufferLength + 1, "%s[i]", name);
-        generate_c_operand_value_encoder(cb, model, operandType, buffer);
-        free(buffer);
+        char* accessor = format_string("%s[i]", name);
+        generate_c_operand_value_encoder(cb, model, operandType, accessor);
+        free(accessor);
         code_builder_dedent(cb);
         code_builder_puts(cb, "}\n");
     }
     else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
-        // Only encode if present
         code_builder_format(cb, "if (%s.present) {\n", name);
         code_builder_indent(cb);
-        // Construct the name as an accessor to the value, e.g. "myOperand.value"
-        int bufferLength = snprintf(NULL, 0, "%s.value", name);
-        char* buffer = (char*)malloc(bufferLength + 1);
-        snprintf(buffer, bufferLength + 1, "%s.value", name);
-        generate_c_operand_value_encoder(cb, model, operandType, buffer);
-        free(buffer);
+        char* accessor = format_string("%s.value", name);
+        generate_c_operand_value_encoder(cb, model, operandType, accessor);
+        free(accessor);
         code_builder_dedent(cb);
         code_builder_puts(cb, "}\n");
     }
@@ -810,14 +816,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
         // First we need to write the tag/flag
         code_builder_format(cb, "spv_encode_u32(encoder, %s.%s);\n", name, enumeration->flags ? "flags" : "tag");
 
-        bool hasParameters = false;
-        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
-            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
-            if (enumerant->parameters.length > 0) {
-                hasParameters = true;
-                break;
-            }
-        }
+        bool hasParameters = enum_has_parameters(enumeration);
         if (hasParameters && !enumeration->flags) {
             // Simpler, we can just do a singular switch on the tag and determine which alternative to write
             code_builder_format(cb, "switch (%s.%s) {\n", name, "tag");
@@ -829,16 +828,15 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                 code_builder_indent(cb);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    // Construct the accessor to this parameter, e.g. "myOperand.variants.MyEnumValue.myParam"
-                    int bufferLength = snprintf(NULL, 0, "%s.variants.%s.%s", name, enumerant->name, param->name);
-                    char* buffer = (char*)malloc(bufferLength + 1);
-                    snprintf(buffer, bufferLength + 1, "%s.variants.%s.%s", name, enumerant->name, param->name);
-                    generate_c_operand_encoder(cb, model, param, buffer);
-                    free(buffer);
+                    char* accessor = format_string("%s.variants.%s.%s", name, enumerant->name, param->name);
+                    generate_c_operand_encoder(cb, model, param, accessor);
+                    free(accessor);
                 }
                 code_builder_format(cb, "break;\n");
                 code_builder_dedent(cb);
             }
+            code_builder_puts(cb, "default: break;\n");
+            code_builder_puts(cb, "}\n");
         }
         else if (hasParameters && enumeration->flags) {
             // We actually need to go through EACH parametric flag and check if it's set and if so, write the parameters for it
@@ -850,12 +848,9 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                 code_builder_indent(cb);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    // Construct the accessor to this parameter, e.g. "myOperand.variants.MyFlagValue.myParam"
-                    int bufferLength = snprintf(NULL, 0, "%s.%s.%s", name, enumerant->name, param->name);
-                    char* buffer = (char*)malloc(bufferLength + 1);
-                    snprintf(buffer, bufferLength + 1, "%s.%s.%s", name, enumerant->name, param->name);
-                    generate_c_operand_encoder(cb, model, param, buffer);
-                    free(buffer);
+                    char* accessor = format_string("%s.%s.%s", name, enumerant->name, param->name);
+                    generate_c_operand_encoder(cb, model, param, accessor);
+                    free(accessor);
                 }
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
@@ -896,9 +891,9 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
         generate_c_operand_encoder(cb, model, operand, operand->name);
     }
     // Patch instruction header with actual word count and opcode
-    code_builder_format(cb, "size_t endOffset = encoder->builder.offset;\n");
+    code_builder_format(cb, "size_t endOffset = encoder->offset;\n");
     code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
-    code_builder_format(cb, "encoder->builder.words[startOffset] = (wordCount << 16) | %u;\n", instruction->opcode);
+    code_builder_format(cb, "encoder->words[startOffset] = (wordCount << 16) | %u;\n", instruction->opcode);
     code_builder_dedent(cb);
     code_builder_puts(cb, "}\n\n");
 }
