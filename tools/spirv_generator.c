@@ -1,4 +1,6 @@
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #include "../src/collections.h"
 
@@ -9,6 +11,119 @@
 #define STRING_BUILDER_IMPLEMENTATION
 #define STRING_BUILDER_STATIC
 #include "../src/string_builder.h"
+
+// Domain model definition
+
+typedef struct Metadata {
+    char const* min_version;
+    char const* max_version;
+    bool provisional;
+    DynamicArray(char const*) capabilities;
+    DynamicArray(char const*) extensions;
+} Metadata;
+
+typedef enum Quantifier {
+    QUANTIFIER_ONE,
+    QUANTIFIER_OPTIONAL,
+    QUANTIFIER_ANY,
+} Quantifier;
+
+struct Type;
+
+typedef struct Operand {
+    struct Type* type;
+    Quantifier quantifier;
+    char const* name;
+} Operand;
+
+typedef struct Enum {
+    char const* doc;
+    char const* name;
+    bool flags;
+    DynamicArray(Operand) parameters;
+} Enum;
+
+typedef struct Tuple {
+    char const* doc;
+    char const* name;
+    DynamicArray(struct Type*) members;
+} Tuple;
+
+typedef enum TypeKind {
+    TYPE_STRONG_ID,
+    TYPE_NUMBER,
+    TYPE_STRING,
+    TYPE_ENUM,
+    TYPE_TUPLE,
+} TypeKind;
+
+typedef struct Type {
+    TypeKind kind;
+    union {
+        char const* strong_id;
+        char const* number;
+        Enum enumeration;
+        Tuple tuple;
+    } value;
+} Type;
+
+typedef struct Instruction {
+    Metadata metadata;
+    char const* name;
+    uint32_t opcode;
+    DynamicArray(Operand) operands;
+} Instruction;
+
+typedef struct Model {
+    DynamicArray(char const*) copyright;
+    uint32_t magic;
+    long long major_version;
+    long long minor_version;
+    long long revision;
+    DynamicArray(Type) types;
+    DynamicArray(Instruction) instructions;
+} Model;
+
+static void free_metadata(Metadata* metadata) {
+    DynamicArray_free(metadata->capabilities);
+    DynamicArray_free(metadata->extensions);
+}
+
+static void free_type(Type* type) {
+    switch (type->kind) {
+    case TYPE_ENUM: {
+        Enum* enumeration = &type->value.enumeration;
+        DynamicArray_free(enumeration->parameters);
+        break;
+    }
+    case TYPE_TUPLE: {
+        Tuple* tuple = &type->value.tuple;
+        DynamicArray_free(tuple->members);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void free_instruction(Instruction* instruction) {
+    free_metadata(&instruction->metadata);
+    DynamicArray_free(instruction->operands);
+}
+
+static void free_model(Model* model) {
+    DynamicArray_free(model->copyright);
+    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
+        Type* type = &DynamicArray_at(model->types, i);
+        free_type(type);
+    }
+    DynamicArray_free(model->types);
+    for (size_t i = 0; i < DynamicArray_length(model->instructions); ++i) {
+        Instruction* instruction = &DynamicArray_at(model->instructions, i);
+        free_instruction(instruction);
+    }
+    DynamicArray_free(model->instructions);
+}
 
 // TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
 static char* read_file(char const* path) {
@@ -26,6 +141,18 @@ static char* read_file(char const* path) {
     content[length] = '\0';
     fclose(file);
     return content;
+}
+
+static void json_hex_string_to_number(Json_Value* value) {
+    if (value == NULL || value->type != JSON_VALUE_STRING) return;
+    char const* strValue = json_as_string(value);
+    if (strlen(strValue) > 2 && strValue[0] == '0' && strValue[1] == 'x') {
+        long long intValue = strtoll(strValue + 2, NULL, 16);
+        // Trick to avoid an extra lookup
+        Json_Value oldValue = json_move(value);
+        *value = json_int(intValue);
+        json_free_value(&oldValue);
+    }
 }
 
 static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
@@ -51,7 +178,7 @@ static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
     DynamicArray_free(newValues);
 }
 
-static void json_model_to_domain(Json_Document doc) {
+static void json_model_simplification(Json_Document doc) {
     // Reorder operand_kinds to have Composite at the end
     // TODO: Would be nice to have a generic sorting algo at hand, instead to put all composite types at the end,
     // we remove them, collect them out to a separate list, then add them back at the end
@@ -93,123 +220,53 @@ static void json_model_to_domain(Json_Document doc) {
         for (size_t j = 0; j < json_length(enumerants); ++j) {
             Json_Value* enumerant = json_array_at(enumerants, j);
             Json_Value* value = json_object_get(enumerant, "value");
-            if (value == NULL || value->type != JSON_VALUE_STRING) continue;
-            char const* strValue = json_as_string(value);
-            if (strlen(strValue) > 2 && strValue[0] == '0' && strValue[1] == 'x') {
-                long long intValue = strtoll(strValue + 2, NULL, 16);
-                // Trick to avoid an extra lookup
-                Json_Value oldValue = json_move(value);
-                *value = json_int(intValue);
-                json_free_value(&oldValue);
-            }
+            json_hex_string_to_number(value);
         }
     }
+
+    // Convert magic number from hex string to number
+    Json_Value* magicValue = json_object_get(&doc.root, "magic_number");
+    json_hex_string_to_number(magicValue);
 }
 
-static void generate_c_header_comment(CodeBuilder* cb, Json_Document doc) {
-    long long majorVersion = json_as_int(json_object_get(&doc.root, "major_version"));
-    long long minorVersion = json_as_int(json_object_get(&doc.root, "minor_version"));
-    long long revision = json_as_int(json_object_get(&doc.root, "revision"));
+static Model json_model_to_domain(Json_Document doc) {
+    json_model_simplification(doc);
+
+    Model model = {0};
+
+    // Copyright
+    Json_Value* copyright = json_object_get(&doc.root, "copyright");
+    for (size_t i = 0; i < json_length(copyright); ++i) {
+        Json_Value* line = json_array_at(copyright, i);
+        DynamicArray_append(model.copyright, json_as_string(line));
+    }
+
+    // Magic number and version
+    model.magic = (uint32_t)json_as_int(json_object_get(&doc.root, "magic_number"));
+    model.major_version = json_as_int(json_object_get(&doc.root, "major_version"));
+    model.minor_version = json_as_int(json_object_get(&doc.root, "minor_version"));
+    model.revision = json_as_int(json_object_get(&doc.root, "revision"));
+
+    return model;
+}
+
+static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_format(cb, ""
         "// This portion is auto-generated from the official SPIR-V grammar JSON.\n"
         "//\n"
         "// SPIR-V Version: %lld.%lld (revision %lld)\n"
         "//\n"
-        "// KHRONOS COPYRIGHT NOTICE\n", majorVersion, minorVersion, revision);
-    Json_Value* copyright = json_object_get(&doc.root, "copyright");
-    for (size_t i = 0; i < json_length(copyright); ++i) {
-        Json_Value* line = json_array_at(copyright, i);
-        code_builder_format(cb, "// %s\n", json_as_string(line));
+        "// KHRONOS COPYRIGHT NOTICE\n", model->major_version, model->minor_version, model->revision);
+    for (size_t i = 0; i < DynamicArray_length(model->copyright); ++i) {
+        char const* line = DynamicArray_at(model->copyright, i);
+        code_builder_format(cb, "// %s\n", line);
     }
     code_builder_putc(cb, '\n');
 }
 
-static void generate_c_enum_typedef(CodeBuilder* cb, Json_Value* operandKind) {
-    bool isBitEnum = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
-    char const* name = json_as_string(json_object_get(operandKind, "kind"));
-    Json_Value* enumerants = json_object_get(operandKind, "enumerants");
-    // Check, if any enumerant has parameters
-    bool hasParametricMembers = false;
-    for (size_t i = 0; i < json_length(enumerants); ++i) {
-        Json_Value* enumerant = json_array_at(enumerants, i);
-        Json_Value* parameters = json_object_get(enumerant, "parameters");
-        if (parameters == NULL) continue;
-        hasParametricMembers = true;
-        break;
-    }
-    if (hasParametricMembers && !isBitEnum) {
-        code_builder_format(cb, ""
-            "typedef struct Spv_%s {\n"
-            "    uint32_t value;\n"
-            "    // TODO: members\n"
-            "} Spv_%s;\n\n", name, name);
-        for (size_t i = 0; i < json_length(enumerants); ++i) {
-            Json_Value* enumerant = json_array_at(enumerants, i);
-            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
-            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
-            bool hasParameters = json_object_get(enumerant, "parameters") != NULL;
-            if (hasParameters) {
-                code_builder_format(cb, "Spv_%s Spv_%s_%s(/* TODO: Parameters */) { /* TODO */ }\n", name, name, enumerantName);
-            }
-            else {
-                code_builder_format(cb, "const Spv_%s Spv_%s_%s = { .value = %lld };\n", name, name, enumerantName, enumerantValue);
-            }
-        }
-    }
-    else if (hasParametricMembers && isBitEnum) {
-        code_builder_format(cb, "typedef enum Spv_%sFlags {\n", name);
-        code_builder_indent(cb);
-        for (size_t i = 0; i < json_length(enumerants); ++i) {
-            Json_Value* enumerant = json_array_at(enumerants, i);
-            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
-            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
-            code_builder_format(cb, "Spv_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
-        }
-        code_builder_dedent(cb);
-        code_builder_format(cb, "} Spv_%sFlags;\n\n", name);
-
-        code_builder_format(cb, ""
-            "typedef struct Spv_%s {\n"
-            "    Spv_%sFlags flags;\n"
-            "    // TODO: members\n"
-            "} Spv_%s;\n\n", name, name, name);
-    }
-    else {
-        code_builder_format(cb, "typedef enum Spv_%s {\n", name);
-        code_builder_indent(cb);
-        for (size_t i = 0; i < json_length(enumerants); ++i) {
-            Json_Value* enumerant = json_array_at(enumerants, i);
-            char const* enumerantName = json_as_string(json_object_get(enumerant, "enumerant"));
-            long long enumerantValue = json_as_int(json_object_get(enumerant, "value"));
-            code_builder_format(cb, "Spv_%s_%s = %lld,\n", name, enumerantName, enumerantValue);
-        }
-        code_builder_dedent(cb);
-        code_builder_format(cb, "} Spv_%s;\n\n", name);
-    }
-}
-
-static void generate_c_typedef(CodeBuilder* cb, Json_Value* operandKind) {
-    char const* category = json_as_string(json_object_get(operandKind, "category"));
-    if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
-        generate_c_enum_typedef(cb, operandKind);
-        return;
-    }
-    else {
-        char const* name = json_as_string(json_object_get(operandKind, "kind"));
-        code_builder_format(cb, "// TODO: %s (category: %s)\n", name, category);
-    }
-}
-
-static char* generate_c_code(Json_Document doc) {
+static char* generate_c_code(Model* model) {
     CodeBuilder cb = {0};
-    generate_c_header_comment(&cb, doc);
-
-    // TODO: Would be nice to sort them by name or something
-    Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
-    for (size_t i = 0; i < json_length(operandKinds); ++i) {
-        Json_Value* operandKind = json_array_at(operandKinds, i);
-        generate_c_typedef(&cb, operandKind);
-    }
+    generate_c_header_comment(&cb, model);
 
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
@@ -229,8 +286,8 @@ int main(void) {
         json_free_document(&doc);
         return 1;
     }
-    json_model_to_domain(doc);
-    char* cCode = generate_c_code(doc);
+    Model model = json_model_to_domain(doc);
+    char* cCode = generate_c_code(&model);
     printf("%s", cCode);
     json_free_document(&doc);
     return 0;
