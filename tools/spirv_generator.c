@@ -352,7 +352,9 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
 
 static char* operand_infer_name(Operand* operand, char const* hint) {
     StringBuilder sb = {0};
-    // TODO
+    if (hint == NULL) hint = operand->typeName;
+    // TODO: Needs more processing
+    sb_puts(&sb, hint);
     char* result = sb_to_cstr(&sb);
     sb_free(&sb);
     return result;
@@ -567,10 +569,19 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s%s;\n\n", type->name, enumSuffix);
 
+        bool hasParameters = false;
+        for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+            if (enumerant->parameters.length > 0) {
+                hasParameters = true;
+                break;
+            }
+        }
+
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
         code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, memberName);
-        if (!type->value.enumeration.flags) {
+        if (hasParameters && !type->value.enumeration.flags) {
             code_builder_puts(cb, "union {\n");
             code_builder_indent(cb);
         }
@@ -589,7 +600,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             code_builder_dedent(cb);
             code_builder_format(cb, "} %s;\n", enumerant->name);
         }
-        if (!type->value.enumeration.flags) {
+        if (hasParameters && !type->value.enumeration.flags) {
             code_builder_dedent(cb);
             code_builder_format(cb, "} variants;\n\n", type->name);
         }
