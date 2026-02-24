@@ -229,6 +229,14 @@ static void json_model_simplification(Json_Document doc) {
     json_hex_string_to_number(magicValue);
 }
 
+static Type json_operand_kind_to_domain(Json_Value operandKind) {
+    // TODO
+}
+
+static Instruction json_instruction_to_domain(Json_Value instruction) {
+    // TODO
+}
+
 static Model json_model_to_domain(Json_Document doc) {
     json_model_simplification(doc);
 
@@ -246,6 +254,22 @@ static Model json_model_to_domain(Json_Document doc) {
     model.major_version = json_as_int(json_object_get(&doc.root, "major_version"));
     model.minor_version = json_as_int(json_object_get(&doc.root, "minor_version"));
     model.revision = json_as_int(json_object_get(&doc.root, "revision"));
+
+    // Types
+    Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
+    for (size_t i = 0; i < json_length(operandKinds); ++i) {
+        Json_Value* operandKind = json_array_at(operandKinds, i);
+        Type type = json_operand_kind_to_domain(*operandKind);
+        DynamicArray_append(model.types, type);
+    }
+
+    // Instructions
+    Json_Value* instructions = json_object_get(&doc.root, "instructions");
+    for (size_t i = 0; i < json_length(instructions); ++i) {
+        Json_Value* instruction = json_array_at(instructions, i);
+        Instruction instr = json_instruction_to_domain(*instruction);
+        DynamicArray_append(model.instructions, instr);
+    }
 
     return model;
 }
