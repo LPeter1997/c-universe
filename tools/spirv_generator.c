@@ -24,6 +24,10 @@ static char* format_string(char const* fmt, ...) {
     return buffer;
 }
 
+static char const* json_optional_string(Json_Value* value) {
+    return value == NULL ? NULL : json_as_string(value);
+}
+
 // Domain model definition /////////////////////////////////////////////////////
 
 typedef struct Metadata {
@@ -410,18 +414,15 @@ static Operand json_operand_to_domain(Json_Value* operand) {
 }
 
 static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
-    Json_Value* doc = json_object_get(enumerant, "doc");
     char const* name = json_as_string(json_object_get(enumerant, "enumerant"));
     long long value = json_as_int(json_object_get(enumerant, "value"));
-    Json_Value* aliasOf = json_object_get(enumerant, "alias_of");
-    Metadata metadata = json_metadata_to_domain(enumerant);
     Enumerant result = {
         .name = name,
-        .metadata = metadata,
+        .metadata = json_metadata_to_domain(enumerant),
         .value = value,
-        .doc = doc == NULL ? NULL : json_as_string(doc),
+        .doc = json_optional_string(json_object_get(enumerant, "doc")),
         .parameters = {0},
-        .alias_of = aliasOf == NULL ? NULL : json_as_string(aliasOf),
+        .alias_of = json_optional_string(json_object_get(enumerant, "alias_of")),
     };
     Json_Value* parameters = json_object_get(enumerant, "parameters");
     for (size_t i = 0; parameters != NULL && i < json_length(parameters); ++i) {
@@ -460,8 +461,7 @@ static Tuple json_tuple_to_domain(Json_Value* operandKind) {
 static Type json_operand_kind_to_domain(Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
-    Json_Value* docJson = json_object_get(operandKind, "doc");
-    char const* doc = docJson == NULL ? NULL : json_as_string(docJson);
+    char const* doc = json_optional_string(json_object_get(operandKind, "doc"));
     if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
         Enum enumeration = json_enum_to_domain(operandKind);
         return (Type){
@@ -518,15 +518,11 @@ static Type json_operand_kind_to_domain(Json_Value* operandKind) {
 }
 
 static Instruction json_instruction_to_domain(Json_Value* instruction) {
-    char const* name = json_as_string(json_object_get(instruction, "opname"));
-    uint32_t opcode = (uint32_t)json_as_int(json_object_get(instruction, "opcode"));
-    Metadata metadata = json_metadata_to_domain(instruction);
-    Json_Value* aliasOf = json_object_get(instruction, "alias_of");
     Instruction result = {
-        .name = name,
-        .opcode = opcode,
-        .alias_of = aliasOf == NULL ? NULL : json_as_string(aliasOf),
-        .metadata = metadata,
+        .name = json_as_string(json_object_get(instruction, "opname")),
+        .opcode = (uint32_t)json_as_int(json_object_get(instruction, "opcode")),
+        .alias_of = json_optional_string(json_object_get(instruction, "alias_of")),
+        .metadata = json_metadata_to_domain(instruction),
         .operands = {0},
     };
     Json_Value* operands = json_object_get(instruction, "operands");
@@ -576,6 +572,20 @@ static Model json_model_to_domain(Json_Document doc) {
 }
 
 // C code generation ///////////////////////////////////////////////////////////
+
+static void generate_c_operand_declaration(CodeBuilder* cb, Operand* operand) {
+    switch (operand->quantifier) {
+    case QUANTIFIER_ONE:
+        code_builder_format(cb, "Spv_%s %s", operand->typeName, operand->name);
+        break;
+    case QUANTIFIER_ANY:
+        code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s", operand->typeName, operand->name);
+        break;
+    case QUANTIFIER_OPTIONAL:
+        code_builder_format(cb, "struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
+        break;
+    }
+}
 
 static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_format(cb, ""
@@ -641,15 +651,8 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             code_builder_indent(cb);
             for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                 Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                if (param->quantifier == QUANTIFIER_ONE) {
-                    code_builder_format(cb, "Spv_%s %s;\n", param->typeName, param->name);
-                }
-                else if (param->quantifier == QUANTIFIER_ANY) {
-                    code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s;\n", param->typeName, param->name);
-                }
-                else {
-                    code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
-                }
+                generate_c_operand_declaration(cb, param);
+                code_builder_puts(cb, ";\n");
             }
             code_builder_dedent(cb);
             code_builder_format(cb, "} %s;\n", enumerant->name);
@@ -673,15 +676,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "static inline Spv_%s spv_%s_%s(", type->name, type->name, enumerant->name);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, "Spv_%s %s", param->typeName, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s", param->typeName, param->name);
-                    }
-                    else {
-                        code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
-                    }
+                    generate_c_operand_declaration(cb, param);
                     if (j < DynamicArray_length(enumerant->parameters) - 1) {
                         code_builder_puts(cb, ", ");
                     }
@@ -693,15 +688,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, ".%s = Spv_%s_%s,\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
-                    }
-                    else {
-                        code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
-                    }
+                    code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
                 }
                 code_builder_dedent(cb);
                 code_builder_format(cb, "};\n");
@@ -713,30 +700,15 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "static inline void spv_%s_set_%s(Spv_%s* operand", type->name, enumerant->name, type->name);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, ", Spv_%s %s", param->typeName, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, ", struct { Spv_%s* values; size_t count; } %s", param->typeName, param->name);
-                    }
-                    else {
-                        code_builder_format(cb, ", // TODO: handle quantifier %d for parameter %s\n", param->quantifier, param->name);
-                    }
+                    code_builder_puts(cb, ", ");
+                    generate_c_operand_declaration(cb, param);
                 }
                 code_builder_puts(cb, ") {\n");
                 code_builder_indent(cb);
                 code_builder_format(cb, "operand->%s |= Spv_%s_%s;\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
-                    }
-                    else {
-                        code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
-                    }
+                    code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
                 }
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
@@ -863,18 +835,8 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_format(cb, "static inline void spv_%s(Spv_InstructionEncoder* encoder", instruction->name);
     for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
         Operand* operand = &DynamicArray_at(instruction->operands, i);
-        if (operand->quantifier == QUANTIFIER_ONE) {
-            code_builder_format(cb, ", Spv_%s %s", operand->typeName, operand->name);
-        }
-        else if (operand->quantifier == QUANTIFIER_ANY) {
-            code_builder_format(cb, ", struct { Spv_%s* values; size_t count; } %s", operand->typeName, operand->name);
-        }
-        else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
-            code_builder_format(cb, ", struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
-        }
-        else {
-            code_builder_format(cb, ", // TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
-        }
+        code_builder_puts(cb, ", ");
+        generate_c_operand_declaration(cb, operand);
     }
     code_builder_puts(cb, ") {\n");
     code_builder_indent(cb);
