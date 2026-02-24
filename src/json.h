@@ -266,7 +266,7 @@ JSON_DEF Json_Value json_null(void);
  * @param value The JSON value to copy.
  * @returns A new JSON value that is a deep copy of the given value.
  */
-JSON_DEF Json_Value json_copy(Json_Value value);
+JSON_DEF Json_Value json_copy(Json_Value* value);
 
 // Resource cleanup ////////////////////////////////////////////////////////////
 
@@ -1238,30 +1238,30 @@ Json_Document json_parse(char const* json, Json_Options options) {
 
 // Value constructors //////////////////////////////////////////////////////////
 
-Json_Value json_copy(Json_Value value) {
-    switch (value.type) {
+Json_Value json_copy(Json_Value* value) {
+    switch (value->type) {
     case JSON_VALUE_NULL:
     case JSON_VALUE_BOOL:
     case JSON_VALUE_INT:
     case JSON_VALUE_DOUBLE:
         // Don't need any deep-copy
-        return value;
+        return *value;
     case JSON_VALUE_STRING:
-        return json_string(value.value.string);
+        return json_string(value->value.string);
     case JSON_VALUE_ARRAY: {
         Json_Value array = json_array();
-        for (size_t i = 0; i < value.value.array.length; ++i) {
-            json_array_append(&array, json_copy(value.value.array.elements[i]));
+        for (size_t i = 0; i < value->value.array.length; ++i) {
+            json_array_append(&array, json_copy(&value->value.array.elements[i]));
         }
         return array;
     }
     case JSON_VALUE_OBJECT: {
         Json_Value object = json_object();
-        for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
-            Json_HashBucket* bucket = &value.value.object.buckets[i];
+        for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
+            Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
                 Json_HashEntry* entry = &bucket->entries[j];
-                json_object_set(&object, entry->key, json_copy(entry->value));
+                json_object_set(&object, entry->key, json_copy(&entry->value));
             }
         }
         return object;
