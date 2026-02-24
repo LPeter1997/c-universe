@@ -576,6 +576,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s%s;\n\n", type->name, enumSuffix);
 
+        // TODO: Would be nice to have a general search algo
         bool hasParameters = false;
         for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
