@@ -128,6 +128,39 @@ STRING_BUILDER_DEF void sb_format(StringBuilder* sb, char const* format, ...);
 STRING_BUILDER_DEF void sb_vformat(StringBuilder* sb, char const* format, va_list args);
 
 /**
+ * Inserts a null-terminated string at the specified position in the builder.
+ * @param sb The string builder to insert into.
+ * @param pos The position at which to insert the string.
+ * @param str The null-terminated string to insert.
+ */
+STRING_BUILDER_DEF void sb_insert(StringBuilder* sb, size_t pos, char const* str);
+
+/**
+ * Inserts a string with the given length at the specified position in the builder.
+ * @param sb The string builder to insert into.
+ * @param pos The position at which to insert the string.
+ * @param str The string to insert, not necessarily null-terminated.
+ * @param n The length of the string to insert.
+ */
+STRING_BUILDER_DEF void sb_insertn(StringBuilder* sb, size_t pos, char const* str, size_t n);
+
+/**
+ * Removes a portion of the string from the builder.
+ * @param sb The string builder to remove from.
+ * @param pos The position at which to start removing.
+ * @param length The number of characters to remove.
+ */
+STRING_BUILDER_DEF void sb_remove(StringBuilder* sb, size_t pos, size_t length);
+
+/**
+ * Replaces all occurrences of a target string with a replacement string in the builder.
+ * @param sb The string builder to perform the replacement in.
+ * @param target The string to be replaced.
+ * @param replacement The string to replace the target with.
+ */
+STRING_BUILDER_DEF void sb_replace(StringBuilder* sb, char const* target, char const* replacement);
+
+/**
  * Utility for building code with indentation, using an underlying string builder.
  * Useful for code generation where the goal is producing a somewhat nicely formatted output.
  */
