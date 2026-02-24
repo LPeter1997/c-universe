@@ -768,6 +768,23 @@ static void generate_c_operand_encoder(CodeBuilder* cb, Type* operandType, char 
     else if (operandType->kind == TYPE_STRING) {
         code_builder_format(cb, "spv_encode_string(encoder, %s);\n", name);
     }
+    else if (operandType->kind == TYPE_ENUM) {
+        Enum* enumeration = &operandType->value.enumeration;
+        // First we need to write the tag/flag
+        code_builder_format(cb, "spv_encode_u32(encoder, %s.%s);\n", name, enumeration->flags ? "flags" : "tag");
+
+        bool hasParameters = false;
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+            if (enumerant->parameters.length > 0) {
+                hasParameters = true;
+                break;
+            }
+        }
+        if (hasParameters) {
+            code_builder_format(cb, "// TODO handle parameters for enum %s\n", operandType->name);
+        }
+    }
     else {
         code_builder_format(cb, "// TODO: encode %s of type %s\n", name, operandType->name);
     }
@@ -817,7 +834,10 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
             // Only encode if present
             code_builder_format(cb, "if (%s.present) {\n", operand->name);
             code_builder_indent(cb);
-            generate_c_operand_encoder(cb, operandType, operand->name);
+            // Construct the name as an accessor to the value, e.g. "myOperand.value"
+            char valueName[256];
+            snprintf(valueName, sizeof(valueName), "%s.value", operand->name);
+            generate_c_operand_encoder(cb, operandType, valueName);
             code_builder_dedent(cb);
             code_builder_puts(cb, "}\n");
         }
