@@ -12,7 +12,7 @@
 #define STRING_BUILDER_STATIC
 #include "../src/string_builder.h"
 
-// Domain model definition
+// Domain model definition /////////////////////////////////////////////////////
 
 typedef struct Metadata {
     char const* min_version;
@@ -67,9 +67,9 @@ typedef enum TypeKind {
 
 typedef struct Type {
     TypeKind kind;
+    char const* name;
     union {
-        char const* strong_id;
-        char const* number;
+        char const* type_name; // For strong IDs and primitives
         Enum enumeration;
         Tuple tuple;
     } value;
@@ -138,23 +138,7 @@ static void free_model(Model* model) {
     DynamicArray_free(model->instructions);
 }
 
-// TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
-static char* read_file(char const* path) {
-    FILE* file = fopen(path, "rb");
-    if (!file) return NULL;
-    fseek(file, 0, SEEK_END);
-    long length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    char* content = malloc(length + 1);
-    if (!content) {
-        fclose(file);
-        return NULL;
-    }
-    fread(content, 1, length, file);
-    content[length] = '\0';
-    fclose(file);
-    return content;
-}
+// JSON document manipulation //////////////////////////////////////////////////
 
 static void json_hex_string_to_number(Json_Value* value) {
     if (value == NULL || value->type != JSON_VALUE_STRING) return;
@@ -191,27 +175,104 @@ static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
     DynamicArray_free(newValues);
 }
 
-static void json_model_simplification(Json_Document doc) {
-    // Reorder operand_kinds to have Composite at the end
-    // TODO: Would be nice to have a generic sorting algo at hand, instead to put all composite types at the end,
-    // we remove them, collect them out to a separate list, then add them back at the end
-    Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
-    DynamicArray(Json_Value) compositeTypes = {0};
-    for (size_t i = 0; i < json_length(operandKinds); ) {
-        Json_Value* operandKind = json_array_at(operandKinds, i);
-        Json_Value* category = json_object_get(operandKind, "category");
-        if (strcmp(json_as_string(category), "Composite") != 0) {
-            ++i;
-            continue;
+// Check if a kind name is already in the sorted array
+static bool kind_is_sorted(Json_Value* sortedArray, char const* kindName) {
+    for (size_t i = 0; i < json_length(sortedArray); ++i) {
+        Json_Value* item = json_array_at(sortedArray, i);
+        char const* name = json_as_string(json_object_get(item, "kind"));
+        if (strcmp(name, kindName) == 0) return true;
+    }
+    return false;
+}
+
+// Check if all dependencies of an operand kind are already sorted
+static bool dependencies_satisfied(Json_Value* operandKind, Json_Value* sortedArray) {
+    // Collect dependencies inline to avoid DynamicArray pointer issues
+    DynamicArray(char const*) deps = {0};
+
+    // Composite kinds reference other kinds via "bases"
+    Json_Value* bases = json_object_get(operandKind, "bases");
+    if (bases != NULL) {
+        for (size_t i = 0; i < json_length(bases); ++i) {
+            DynamicArray_append(deps, json_as_string(json_array_at(bases, i)));
         }
-        DynamicArray_append(compositeTypes, json_move(operandKind));
-        json_array_remove(operandKinds, i);
     }
-    for (size_t i = 0; i < DynamicArray_length(compositeTypes); ++i) {
-        Json_Value* operandKind = &DynamicArray_at(compositeTypes, i);
-        json_array_append(operandKinds, json_move(operandKind));
+    // Enums can have parameters on enumerants that reference other kinds
+    Json_Value* enumerants = json_object_get(operandKind, "enumerants");
+    if (enumerants != NULL) {
+        for (size_t i = 0; i < json_length(enumerants); ++i) {
+            Json_Value* enumerant = json_array_at(enumerants, i);
+            Json_Value* parameters = json_object_get(enumerant, "parameters");
+            if (parameters == NULL) continue;
+            for (size_t j = 0; j < json_length(parameters); ++j) {
+                Json_Value* param = json_array_at(parameters, j);
+                Json_Value* kindVal = json_object_get(param, "kind");
+                if (kindVal != NULL) {
+                    DynamicArray_append(deps, json_as_string(kindVal));
+                }
+            }
+        }
     }
-    DynamicArray_free(compositeTypes);
+
+    bool satisfied = true;
+    for (size_t i = 0; i < DynamicArray_length(deps); ++i) {
+        if (!kind_is_sorted(sortedArray, DynamicArray_at(deps, i))) {
+            satisfied = false;
+            break;
+        }
+    }
+    DynamicArray_free(deps);
+    return satisfied;
+}
+
+// Topological sort of operand_kinds (simple O(n^2) approach)
+static void json_topological_sort_operand_kinds(Json_Value* operandKinds) {
+    Json_Value sorted = json_array();
+    size_t remaining = json_length(operandKinds);
+
+    while (remaining > 0) {
+        bool progress = false;
+        for (size_t i = 0; i < json_length(operandKinds); ++i) {
+            Json_Value* item = json_array_at(operandKinds, i);
+            if (item->type == JSON_VALUE_NULL) continue;  // Already moved
+
+            char const* kindName = json_as_string(json_object_get(item, "kind"));
+            if (kind_is_sorted(&sorted, kindName)) continue;
+
+            if (dependencies_satisfied(item, &sorted)) {
+                json_array_append(&sorted, json_copy(*item));
+                // Mark as moved by replacing with null
+                Json_Value old = json_move(item);
+                *item = json_null();
+                json_free_value(&old);
+                remaining--;
+                progress = true;
+            }
+        }
+        if (!progress && remaining > 0) {
+            fprintf(stderr, "Warning: circular dependency detected in operand_kinds\n");
+            // Append remaining items as-is to avoid infinite loop
+            for (size_t i = 0; i < json_length(operandKinds); ++i) {
+                Json_Value* item = json_array_at(operandKinds, i);
+                if (item->type != JSON_VALUE_NULL) {
+                    json_array_append(&sorted, json_copy(*item));
+                }
+            }
+            break;
+        }
+    }
+
+    // Replace original array contents with sorted
+    Json_Value old = json_move(operandKinds);
+    *operandKinds = json_move(&sorted);
+    json_free_value(&old);
+}
+
+static void json_model_simplification(Json_Document doc) {
+    // Reorder operand_kinds to a topological order
+    // This is so we adhere to C definition order
+    Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
+    json_topological_sort_operand_kinds(operandKinds);
 
     // Flatten out enumerants with aliases
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
@@ -241,6 +302,8 @@ static void json_model_simplification(Json_Document doc) {
     Json_Value* magicValue = json_object_get(&doc.root, "magic_number");
     json_hex_string_to_number(magicValue);
 }
+
+// Domain conversion ///////////////////////////////////////////////////////////
 
 static Metadata json_metadata_to_domain(Json_Value* value) {
     Metadata metadata = {0};
@@ -281,7 +344,9 @@ static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
     // TODO: Linear lookup, but the API of our HashTable is kinda bad, so we'll stick to array for now
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* candidate = &DynamicArray_at(model->types, i);
-        if (strcmp(candidate->value.strong_id, json_as_string(json_object_get(operand, "kind"))) == 0) {
+        // TODO: Should not be null, just as long as we don't support all types we will have them...
+        if (candidate->name == NULL) continue;
+        if (strcmp(candidate->name, json_as_string(json_object_get(operand, "kind"))) == 0) {
             type = candidate;
             break;
         }
@@ -343,6 +408,7 @@ static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
         Enum enumeration = json_enum_to_domain(model, operandKind);
         return (Type){
             .kind = TYPE_ENUM,
+            .name = enumeration.name,
             .value.enumeration = enumeration,
         };
     }
@@ -394,6 +460,8 @@ static Model json_model_to_domain(Json_Document doc) {
     return model;
 }
 
+// C code generation ///////////////////////////////////////////////////////////
+
 static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_format(cb, ""
         "// This portion is auto-generated from the official SPIR-V grammar JSON.\n"
@@ -415,6 +483,24 @@ static char* generate_c_code(Model* model) {
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
     return result;
+}
+
+// TODO: It would be very nice if a library provided easier IO functions that could let me do all this in one go
+static char* read_file(char const* path) {
+    FILE* file = fopen(path, "rb");
+    if (!file) return NULL;
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char* content = malloc(length + 1);
+    if (!content) {
+        fclose(file);
+        return NULL;
+    }
+    fread(content, 1, length, file);
+    content[length] = '\0';
+    fclose(file);
+    return content;
 }
 
 int main(void) {
