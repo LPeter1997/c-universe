@@ -175,10 +175,10 @@ static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
         if (aliases == NULL) continue;
         for (size_t j = 0; j < json_length(aliases); ++j) {
             Json_Value* alias = json_array_at(aliases, j);
-            Json_Value newValue = json_copy(*value);
+            Json_Value newValue = json_copy(value);
             json_object_remove(&newValue, "aliases", NULL);
             json_object_set(&newValue, nameKey, json_move(alias));
-            json_object_set(&newValue, "alias_of", json_copy(*valueName));
+            json_object_set(&newValue, "alias_of", json_copy(valueName));
             DynamicArray_append(newValues, json_move(&newValue));
         }
         json_object_remove(value, "aliases", NULL);
@@ -255,7 +255,7 @@ static void json_topological_sort_operand_kinds(Json_Value* operandKinds) {
             if (kind_is_sorted(&sorted, kindName)) continue;
 
             if (dependencies_satisfied(item, &sorted)) {
-                json_array_append(&sorted, json_copy(*item));
+                json_array_append(&sorted, json_copy(item));
                 // Mark as moved by replacing with null
                 Json_Value old = json_move(item);
                 *item = json_null();
@@ -270,7 +270,7 @@ static void json_topological_sort_operand_kinds(Json_Value* operandKinds) {
             for (size_t i = 0; i < json_length(operandKinds); ++i) {
                 Json_Value* item = json_array_at(operandKinds, i);
                 if (item->type != JSON_VALUE_NULL) {
-                    json_array_append(&sorted, json_copy(*item));
+                    json_array_append(&sorted, json_copy(item));
                 }
             }
             break;
