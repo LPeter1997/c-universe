@@ -693,11 +693,11 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
                     if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, "operand->variants.%s.%s = %s;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
                     }
                     else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "operand->variants.%s.%s = %s;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "operand->variants.%s.%sCount = %sCount;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, "operand->%s.%sCount = %sCount;\n", originalMember, param->name, param->name);
                     }
                     else {
                         code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
