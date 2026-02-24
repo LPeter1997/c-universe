@@ -278,7 +278,7 @@ static void json_model_simplification(Json_Document doc) {
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
         Json_Value* enumerants = json_object_get(operandKind, "enumerants");
-        json_flatten_aliases(enumerants, "name");
+        json_flatten_aliases(enumerants, "enumerant");
     }
 
     // Flatten out instructions with aliases
