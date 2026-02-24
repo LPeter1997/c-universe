@@ -759,15 +759,15 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
 static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* operand, char const* name) {
     Type* operandType = find_type_by_name(model, operand->typeName);
     if (operand->quantifier == QUANTIFIER_ONE) {
-        generate_c_operand_value_encoder(cb, model, operandType, operand->name);
+        generate_c_operand_value_encoder(cb, model, operandType, name);
     }
     else if (operand->quantifier == QUANTIFIER_ANY) {
-        code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", operand->name);
+        code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", name);
         code_builder_indent(cb);
         // Construct the name as an accessor to the current element, e.g. "myOperand[i]"
-        int bufferLength = snprintf(NULL, 0, "%s[i]", operand->name);
+        int bufferLength = snprintf(NULL, 0, "%s[i]", name);
         char* buffer = (char*)malloc(bufferLength + 1);
-        snprintf(buffer, bufferLength + 1, "%s[i]", operand->name);
+        snprintf(buffer, bufferLength + 1, "%s[i]", name);
         generate_c_operand_value_encoder(cb, model, operandType, buffer);
         free(buffer);
         code_builder_dedent(cb);
@@ -775,19 +775,19 @@ static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* o
     }
     else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
         // Only encode if present
-        code_builder_format(cb, "if (%s.present) {\n", operand->name);
+        code_builder_format(cb, "if (%s.present) {\n", name);
         code_builder_indent(cb);
         // Construct the name as an accessor to the value, e.g. "myOperand.value"
-        int bufferLength = snprintf(NULL, 0, "%s.value", operand->name);
+        int bufferLength = snprintf(NULL, 0, "%s.value", name);
         char* buffer = (char*)malloc(bufferLength + 1);
-        snprintf(buffer, bufferLength + 1, "%s.value", operand->name);
+        snprintf(buffer, bufferLength + 1, "%s.value", name);
         generate_c_operand_value_encoder(cb, model, operandType, buffer);
         free(buffer);
         code_builder_dedent(cb);
         code_builder_puts(cb, "}\n");
     }
     else {
-        code_builder_format(cb, "// TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
+        code_builder_format(cb, "// TODO: handle quantifier %d for operand %s\n", operand->quantifier, name);
     }
 }
 
@@ -823,6 +823,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
             code_builder_format(cb, "switch (%s.%s) {\n", name, "tag");
             for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
                 Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+                if (enumerant->alias_of != NULL) continue;
                 if (enumerant->parameters.length == 0) continue;
                 code_builder_format(cb, "case Spv_%s_%s:\n", operandType->name, enumerant->name);
                 code_builder_indent(cb);
@@ -840,7 +841,25 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
             }
         }
         else if (hasParameters && enumeration->flags) {
-            code_builder_format(cb, "// TODO handle parameters for flags enum %s\n", operandType->name);
+            // We actually need to go through EACH parametric flag and check if it's set and if so, write the parameters for it
+            for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+                Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+                if (enumerant->alias_of != NULL) continue;
+                if (enumerant->parameters.length == 0) continue;
+                code_builder_format(cb, "if ((%s.flags & Spv_%s_%s) != 0) {\n", name, operandType->name, enumerant->name);
+                code_builder_indent(cb);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    // Construct the accessor to this parameter, e.g. "myOperand.variants.MyFlagValue.myParam"
+                    int bufferLength = snprintf(NULL, 0, "%s.%s.%s", name, enumerant->name, param->name);
+                    char* buffer = (char*)malloc(bufferLength + 1);
+                    snprintf(buffer, bufferLength + 1, "%s.%s.%s", name, enumerant->name, param->name);
+                    generate_c_operand_encoder(cb, model, param, buffer);
+                    free(buffer);
+                }
+                code_builder_dedent(cb);
+                code_builder_puts(cb, "}\n");
+            }
         }
     }
     else {
