@@ -37,7 +37,6 @@ typedef struct Operand {
 } Operand;
 
 typedef struct Enumerant {
-    char const* doc;
     Metadata metadata;
     char const* name;
     long long value;
@@ -45,15 +44,11 @@ typedef struct Enumerant {
 } Enumerant;
 
 typedef struct Enum {
-    char const* doc;
-    char const* name;
     bool flags;
     DynamicArray(Enumerant) enumerants;
 } Enum;
 
 typedef struct Tuple {
-    char const* doc;
-    char const* name;
     DynamicArray(struct Type*) members;
 } Tuple;
 
@@ -67,6 +62,7 @@ typedef enum TypeKind {
 
 typedef struct Type {
     TypeKind kind;
+    char const* doc;
     char const* name;
     union {
         char const* type_name; // For strong IDs and primitives
@@ -385,12 +381,9 @@ static Enumerant json_enumerant_to_domain(Model* model, Json_Value* enumerant) {
 
 static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
     Json_Value* doc = json_object_get(operandKind, "doc");
-    char const* name = json_as_string(json_object_get(operandKind, "kind"));
     bool isFlags = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
     Enum result = {
-        .name = name,
         .flags = isFlags,
-        .doc = doc == NULL ? NULL : json_as_string(doc),
         .enumerants = {0},
     };
     Json_Value* enumerants = json_object_get(operandKind, "enumerants");
@@ -404,12 +397,45 @@ static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
 
 static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
+    char const* name = json_as_string(json_object_get(operandKind, "kind"));
+    Json_Value* docJson = json_object_get(operandKind, "doc");
+    char const* doc = docJson == NULL ? NULL : json_as_string(docJson);
     if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
         Enum enumeration = json_enum_to_domain(model, operandKind);
         return (Type){
             .kind = TYPE_ENUM,
-            .name = enumeration.name,
+            .name = name,
+            .doc = doc,
             .value.enumeration = enumeration,
+        };
+    }
+    else if (strcmp(category, "Id") == 0) {
+        // Strongly-typed ID
+        return (Type){
+            .kind = TYPE_STRONG_ID,
+            .name = name,
+            .doc = doc,
+            .value.type_name = "uint32_t",
+        };
+    }
+    else if (strcmp(category, "Literal") == 0) {
+        TypeKind kind = TYPE_NUMBER;
+        char const* typeName = "uint32_t";
+        if (strcmp(name, "LiteralString") == 0) {
+            kind = TYPE_STRING;
+            typeName = "char const*";
+        }
+        else if (strcmp(name, "LiteralFloat") == 0) {
+            typeName = "float";
+        }
+        else if (strcmp(name, "LiteralInteger") == 0) {
+            typeName = "int32_t";
+        }
+        return (Type){
+            .kind = kind,
+            .name = name,
+            .doc = doc,
+            .value.type_name = typeName,
         };
     }
     else {
