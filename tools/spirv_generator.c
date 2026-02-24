@@ -390,9 +390,10 @@ static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
     char const* name = json_as_string(json_object_get(enumerant, "enumerant"));
     long long value = json_as_int(json_object_get(enumerant, "value"));
     Json_Value* aliasOf = json_object_get(enumerant, "alias_of");
+    Metadata metadata = json_metadata_to_domain(enumerant);
     Enumerant result = {
         .name = name,
-        .metadata = json_metadata_to_domain(enumerant),
+        .metadata = metadata,
         .value = value,
         .doc = doc == NULL ? NULL : json_as_string(doc),
         .parameters = {0},
@@ -492,8 +493,24 @@ static Type json_operand_kind_to_domain(Json_Value* operandKind) {
 }
 
 static Instruction json_instruction_to_domain(Json_Value* instruction) {
-    // TODO
-    return (Instruction){0};
+    char const* name = json_as_string(json_object_get(instruction, "opname"));
+    uint32_t opcode = (uint32_t)json_as_int(json_object_get(instruction, "opcode"));
+    Metadata metadata = json_metadata_to_domain(instruction);
+    Json_Value* aliasOf = json_object_get(instruction, "alias_of");
+    Instruction result = {
+        .name = name,
+        .opcode = opcode,
+        .alias_of = aliasOf == NULL ? NULL : json_as_string(aliasOf),
+        .metadata = metadata,
+        .operands = {0},
+    };
+    Json_Value* operands = json_object_get(instruction, "operands");
+    for (size_t i = 0; operands != NULL && i < json_length(operands); ++i) {
+        Json_Value* operand = json_array_at(operands, i);
+        Operand operandStruct = json_operand_to_domain(operand);
+        DynamicArray_append(result.operands, operandStruct);
+    }
+    return result;
 }
 
 static Model json_model_to_domain(Json_Document doc) {
@@ -729,12 +746,82 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
     }
 }
 
+static void generate_c_operand_encoder(CodeBuilder* cb, Type* operandType, char const* name) {
+    code_builder_format(cb, "// TODO: encode %s of type %s\n", name, operandType->name);
+}
+
+static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instruction* instruction) {
+    code_builder_format(cb, "static inline void spv_%s(Spv_InstructionEncoder* encoder", instruction->name);
+    for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
+        Operand* operand = &DynamicArray_at(instruction->operands, i);
+        if (operand->quantifier == QUANTIFIER_ONE) {
+            code_builder_format(cb, ", Spv_%s %s", operand->typeName, operand->name);
+        }
+        else if (operand->quantifier == QUANTIFIER_ANY) {
+            code_builder_format(cb, ", Spv_%s* %s, size_t %sCount", operand->typeName, operand->name, operand->name);
+        }
+        else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
+            code_builder_format(cb, ", struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
+        }
+        else {
+            code_builder_format(cb, ", // TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
+        }
+    }
+    code_builder_puts(cb, ") {\n");
+    code_builder_indent(cb);
+    // Save encoder offset
+    code_builder_puts(cb, "size_t startOffset = encoder->offset;\n");
+    // We skip one word for the instruction header which is (wordCount << 16) | opcode
+    // We will need to come back to this to patch it at the end, when we actually know the number of words
+    code_builder_puts(cb, "spv_encode_u32(encoder, 0);\n");
+    for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
+        Operand* operand = &DynamicArray_at(instruction->operands, i);
+        Type* operandType = find_type_by_name(model, operand->typeName);
+        if (operand->quantifier == QUANTIFIER_ONE) {
+            generate_c_operand_encoder(cb, operandType, operand->name);
+        }
+        else if (operand->quantifier == QUANTIFIER_ANY) {
+            code_builder_format(cb, "for (size_t i = 0; i < %sCount; ++i) {\n", operand->name);
+            code_builder_indent(cb);
+            // Construct the name as an accessor to the current element, e.g. "myOperand[i]"
+            char elementName[256];
+            snprintf(elementName, sizeof(elementName), "%s[i]", operand->name);
+            generate_c_operand_encoder(cb, operandType, elementName);
+            code_builder_dedent(cb);
+            code_builder_puts(cb, "}\n");
+        }
+        else if (operand->quantifier == QUANTIFIER_OPTIONAL) {
+            // Only encode if present
+            code_builder_format(cb, "if (%s.present) {\n", operand->name);
+            code_builder_indent(cb);
+            generate_c_operand_encoder(cb, operandType, operand->name);
+            code_builder_dedent(cb);
+            code_builder_puts(cb, "}\n");
+        }
+        else {
+            code_builder_format(cb, "// TODO: handle quantifier %d for operand %s\n", operand->quantifier, operand->name);
+        }
+    }
+    // Patch instruction header with actual word count and opcode
+    code_builder_format(cb, "size_t endOffset = encoder->builder.offset;\n");
+    code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
+    code_builder_format(cb, "encoder->builder.words[startOffset] = (wordCount << 16) | %u;\n", instruction->opcode);
+    code_builder_dedent(cb);
+    code_builder_puts(cb, "}\n\n");
+}
+
 static char* generate_c_code(Model* model) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, model);
+
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
         generate_c_type(&cb, type);
+    }
+
+    for (size_t i = 0; i < DynamicArray_length(model->instructions); ++i) {
+        Instruction* instruction = &DynamicArray_at(model->instructions, i);
+        generate_c_instruction_encoder(&cb, model, instruction);
     }
 
     char* result = code_builder_to_cstr(&cb);
