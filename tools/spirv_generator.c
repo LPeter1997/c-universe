@@ -28,10 +28,8 @@ typedef enum Quantifier {
     QUANTIFIER_ANY,
 } Quantifier;
 
-struct Type;
-
 typedef struct Operand {
-    struct Type* type;
+    char const* typeName;
     Quantifier quantifier;
     char const* name;
 } Operand;
@@ -50,7 +48,7 @@ typedef struct Enum {
 } Enum;
 
 typedef struct Tuple {
-    DynamicArray(struct Type*) members;
+    DynamicArray(char const*) memberTypeNames;
 } Tuple;
 
 typedef enum TypeKind {
@@ -108,7 +106,7 @@ static void free_type(Type* type) {
     }
     case TYPE_TUPLE: {
         Tuple* tuple = &type->value.tuple;
-        DynamicArray_free(tuple->members);
+        DynamicArray_free(tuple->memberTypeNames);
         break;
     }
     default:
@@ -347,11 +345,10 @@ static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
         if (strcmp(quantifierStr, "?") == 0) quantifier = QUANTIFIER_OPTIONAL;
         else if (strcmp(quantifierStr, "*") == 0) quantifier = QUANTIFIER_ANY;
     }
-    Type* type = find_type_by_name(model, kind);
     return (Operand){
         .name = name == NULL ? NULL : json_as_string(name),
         .quantifier = quantifier,
-        .type = type,
+        .typeName = kind,
     };
 }
 
@@ -396,8 +393,7 @@ static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
     Json_Value* members = json_object_get(operandKind, "bases");
     for (size_t i = 0; i < json_length(members); ++i) {
         char const* memberKind = json_as_string(json_array_at(members, i));
-        Type* memberType = find_type_by_name(model, memberKind);
-        DynamicArray_append(result.members, memberType);
+        DynamicArray_append(result.memberTypeNames, memberKind);
     }
     return result;
 }
@@ -526,7 +522,24 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             " */\n", type->doc);
     }
     if (type->kind == TYPE_STRONG_ID || type->kind == TYPE_NUMBER || type->kind == TYPE_STRING) {
-        code_builder_format(cb, "typedef %s Spv%s;\n\n", type->value.type_name, type->name);
+        code_builder_format(cb, "typedef %s Spv_%s;\n\n", type->value.type_name, type->name);
+    }
+    else if (type->kind == TYPE_ENUM) {
+        code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
+        code_builder_indent(cb);
+        code_builder_format(cb, "// TODO\n");
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} Spv_%s;\n\n", type->name);
+    }
+    else if (type->kind == TYPE_TUPLE) {
+        code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
+        code_builder_indent(cb);
+        for (size_t i = 0; i < DynamicArray_length(type->value.tuple.memberTypeNames); ++i) {
+            char const* memberTypeName = DynamicArray_at(type->value.tuple.memberTypeNames, i);
+            code_builder_format(cb, "Spv_%s member%d;\n", memberTypeName, (int)i + 1);
+        }
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} Spv_%s;\n\n", type->name);
     }
     else {
         code_builder_format(cb, "// TODO: %s\n", type->name);
