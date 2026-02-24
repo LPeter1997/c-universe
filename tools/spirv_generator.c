@@ -1,4 +1,6 @@
+#include <ctype.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdint.h>
 
@@ -382,12 +384,52 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
     return metadata;
 }
 
+static void operand_unhinged_naming_handler(StringBuilder* sb) {
+    // For arbitrary length operand lists, there's a chance the specs uses a list
+    // There are 2 kinds of lists:
+    //  1. Simple comma-separated lists: 'Foo1, Foo2, ...'
+    //  2. Lists of tuples separated by newline and plus: 'Foo1, Bar1, +\nFoo2, Bar2, +\n...'
+    // We'll need to turn this into a somewhat human-friendly name
+    //  - for case 1 we can use 'Foos'
+    //  - for case 2 we can use 'FooAndBars'
+    // Sewriously, who the hell thought putting crap like this into a machine-readable grammar was a good idea?
+
+    if (!sb_contains(sb, "...")) return;
+
+    int tupleSeparatorPos = sb_index_of(sb, ", +\n");
+    if (tupleSeparatorPos >= 0) {
+        // We remove EVERYTHING after the first tuple
+        sb_remove(sb, (size_t)tupleSeparatorPos, sb->length - (size_t)tupleSeparatorPos);
+        // Turn digits into 's'-es for pluralization
+        for (size_t i = 0; i < sb->length; ++i) {
+            char c = *sb_char_at(sb, i);
+            if (!isdigit((unsigned char)c)) continue;
+            *sb_char_at(sb, i) = 's';
+        }
+        // And we replace the comma with 'And' for better readability
+        sb_replace(sb, ",", "And");
+    }
+    else {
+        // Just take until the first digit, then slap a 's' for pluralization at the end
+        for (size_t i = 0; i < sb->length; ++i) {
+            if (isdigit((unsigned char)*sb_char_at(sb, i))) {
+                sb_remove(sb, i, sb->length - i);
+                break;
+            }
+        }
+        sb_putc(sb, 's');
+    }
+}
+
 static char* operand_infer_name(Operand* operand, char const* hint) {
     StringBuilder sb = {0};
     if (hint == NULL) hint = operand->typeName;
     sb_puts(&sb, hint);
 
+    operand_unhinged_naming_handler(&sb);
+
     sb_replace(&sb, " ", "");
+    sb_replace(&sb, "-", "");
 
     // For some bizarre reason the grammar uses <<Invocation,invocations>> as a name, we get rid of the crud and just extract plural
     int openAnglePos = sb_indexofc(&sb, '<');
