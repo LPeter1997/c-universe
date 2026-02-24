@@ -302,6 +302,19 @@ static void json_model_simplification(Json_Document doc) {
 
 // Domain conversion ///////////////////////////////////////////////////////////
 
+static Type* find_type_by_name(Model* model, char const* name) {
+    // TODO: Linear lookup, but the API of our HashTable is kinda bad, so we'll stick to array for now
+    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
+        Type* candidate = &DynamicArray_at(model->types, i);
+        if (candidate->name != NULL && strcmp(candidate->name, name) == 0) {
+            return candidate;
+        }
+    }
+    fprintf(stderr, "Unknown type %s\n", name);
+    assert(false);
+    return NULL;
+}
+
 static Metadata json_metadata_to_domain(Json_Value* value) {
     Metadata metadata = {0};
     Json_Value* minVersion = json_object_get(value, "version");
@@ -311,18 +324,14 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
     Json_Value* provisional = json_object_get(value, "provisional");
     if (provisional != NULL) metadata.provisional = json_as_bool(provisional);
     Json_Value* capabilities = json_object_get(value, "capabilities");
-    if (capabilities != NULL) {
-        for (size_t i = 0; i < json_length(capabilities); ++i) {
-            Json_Value* capability = json_array_at(capabilities, i);
-            DynamicArray_append(metadata.capabilities, json_as_string(capability));
-        }
+    for (size_t i = 0; capabilities != NULL && i < json_length(capabilities); ++i) {
+        Json_Value* capability = json_array_at(capabilities, i);
+        DynamicArray_append(metadata.capabilities, json_as_string(capability));
     }
     Json_Value* extensions = json_object_get(value, "extensions");
-    if (extensions != NULL) {
-        for (size_t i = 0; i < json_length(extensions); ++i) {
-            Json_Value* extension = json_array_at(extensions, i);
-            DynamicArray_append(metadata.extensions, json_as_string(extension));
-        }
+    for (size_t i = 0; extensions != NULL && i < json_length(extensions); ++i) {
+        Json_Value* extension = json_array_at(extensions, i);
+        DynamicArray_append(metadata.extensions, json_as_string(extension));
     }
     return metadata;
 }
@@ -330,6 +339,7 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
 static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
     // NOTE: Name is optional
     Json_Value* name = json_object_get(operand, "name");
+    char const* kind = json_as_string(json_object_get(operand, "kind"));
     Json_Value* quantifierValue = json_object_get(operand, "quantifier");
     Quantifier quantifier = QUANTIFIER_ONE;
     if (quantifierValue != NULL) {
@@ -337,22 +347,7 @@ static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
         if (strcmp(quantifierStr, "?") == 0) quantifier = QUANTIFIER_OPTIONAL;
         else if (strcmp(quantifierStr, "*") == 0) quantifier = QUANTIFIER_ANY;
     }
-    Type* type = NULL;
-    // TODO: Linear lookup, but the API of our HashTable is kinda bad, so we'll stick to array for now
-    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
-        Type* candidate = &DynamicArray_at(model->types, i);
-        // TODO: Should not be null, just as long as we don't support all types we will have them...
-        if (candidate->name == NULL) continue;
-        if (strcmp(candidate->name, json_as_string(json_object_get(operand, "kind"))) == 0) {
-            type = candidate;
-            break;
-        }
-    }
-    if (type == NULL) {
-        printf("Unknown type %s\n", json_as_string(json_object_get(operand, "kind")));
-        // We return a dummy operand with NULL type, but we should probably report an error instead
-        assert(false);
-    }
+    Type* type = find_type_by_name(model, kind);
     return (Operand){
         .name = name == NULL ? NULL : json_as_string(name),
         .quantifier = quantifier,
@@ -402,19 +397,7 @@ static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
     for (size_t i = 0; i < json_length(members); ++i) {
         char const* memberKind = json_as_string(json_array_at(members, i));
         // TODO: Again, linear lookup...
-        Type* memberType = NULL;
-        for (size_t j = 0; j < DynamicArray_length(model->types); ++j) {
-            Type* candidate = &DynamicArray_at(model->types, j);
-            if (candidate->name == NULL) continue;
-            if (strcmp(candidate->name, memberKind) == 0) {
-                memberType = candidate;
-                break;
-            }
-        }
-        if (memberType == NULL) {
-            printf("Unknown type %s\n", memberKind);
-            assert(false);
-        }
+        Type* memberType = find_type_by_name(model, memberKind);
         DynamicArray_append(result.members, memberType);
     }
     return result;
