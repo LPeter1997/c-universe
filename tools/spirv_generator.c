@@ -652,8 +652,30 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
             }
+            else if (enumerant->value != 0) {
+                // If it's a flags enum, we generate a function that takes in a pointer to the struct and sets the flag and parameters on it
+                code_builder_format(cb, "static inline void spv_%s_set_%s(Spv_%s* operand", type->name, enumerant->name, type->name);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    code_builder_format(cb, ", Spv_%s %s", param->typeName, param->name);
+                }
+                code_builder_puts(cb, ") {\n");
+                code_builder_indent(cb);
+                code_builder_format(cb, "operand->%s |= Spv_%s_%s;\n", tagName, type->name, originalMember);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    if (param->quantifier != QUANTIFIER_ONE) {
+                        code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
+                    }
+                    code_builder_format(cb, "operand->variants.%s.%s = %s;\n", originalMember, param->name, param->name);
+                }
+                code_builder_dedent(cb);
+                code_builder_puts(cb, "}\n");
+            }
             else {
-                // If it's a flags enum, we generate a function that can set a flag with the parameters
+                // We expect 0 to be a special case, define a constant for it
+                assert(DynamicArray_length(enumerant->parameters) == 0);
+                code_builder_format(cb, "const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
             }
         }
     }
