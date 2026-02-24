@@ -534,6 +534,34 @@ static Instruction json_instruction_to_domain(Json_Value* instruction) {
     return result;
 }
 
+static void deduplicate_operand_names(Operand* operands, size_t operandCount, char const* name) {
+    size_t operandIndex = 0;
+    for (size_t i = 0; i < operandCount; ++i) {
+        Operand* operand = &operands[i];
+        if (strcmp(operand->name, name) != 0) continue;
+        char* newName = format_string("%s%zu", name, ++operandIndex);
+        free(operand->name);
+        operand->name = newName;
+    }
+}
+
+static void fix_operand_names(Operand* operands, size_t operandCount) {
+    // Detect duplication
+start:
+    for (size_t i = 0; i < operandCount; ++i) {
+        Operand* operand = &operands[i];
+        for (size_t j = i + 1; j < operandCount; ++j) {
+            Operand* other = &operands[j];
+            if (strcmp(operand->name, other->name) != 0) continue;
+
+            // A duplication is found, rename
+            deduplicate_operand_names(operands, operandCount, operand->name);
+            // We lazily restart, efficiency is not a thing here :^)
+            goto start;
+        }
+    }
+}
+
 static Model json_model_to_domain(Json_Document doc) {
     json_model_simplification(doc);
 
@@ -566,6 +594,21 @@ static Model json_model_to_domain(Json_Document doc) {
         Json_Value* instruction = json_array_at(instructions, i);
         Instruction instr = json_instruction_to_domain(instruction);
         DynamicArray_append(model.instructions, instr);
+    }
+
+    // We need to go through each operand list in types and instructions, as there's a chance we have duplicate names...
+    for (size_t i = 0; i < DynamicArray_length(model.types); ++i) {
+        Type* type = &DynamicArray_at(model.types, i);
+        if (type->kind != TYPE_ENUM) continue;
+        Enum* enumeration = &type->value.enumeration;
+        for (size_t j = 0; j < DynamicArray_length(enumeration->enumerants); ++j) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, j);
+            fix_operand_names(enumerant->parameters.elements, enumerant->parameters.length);
+        }
+    }
+    for (size_t i = 0; i < DynamicArray_length(model.instructions); ++i) {
+        Instruction* instruction = &DynamicArray_at(model.instructions, i);
+        fix_operand_names(instruction->operands.elements, instruction->operands.length);
     }
 
     return model;
@@ -669,7 +712,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
             if (!enumeration->flags && enumerant->parameters.length == 0) {
                 // Value-enum element without parameters, we generate a constant for it
-                code_builder_format(cb, "static inline const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
+                code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
             }
             else if (!enumeration->flags) {
                 // Value-enum element with parameters, we generate a function that can create the struct with the parameters
@@ -716,7 +759,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             else {
                 // We expect 0 to be a special case, define a constant for it
                 assert(DynamicArray_length(enumerant->parameters) == 0);
-                code_builder_format(cb, "static inline const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
+                code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
             }
         }
     }
