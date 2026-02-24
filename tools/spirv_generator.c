@@ -36,11 +36,19 @@ typedef struct Operand {
     char const* name;
 } Operand;
 
+typedef struct Enumerant {
+    char const* doc;
+    Metadata metadata;
+    char const* name;
+    long long value;
+    DynamicArray(Operand) parameters;
+} Enumerant;
+
 typedef struct Enum {
     char const* doc;
     char const* name;
     bool flags;
-    DynamicArray(Operand) parameters;
+    DynamicArray(Enumerant) enumerants;
 } Enum;
 
 typedef struct Tuple {
@@ -93,7 +101,12 @@ static void free_type(Type* type) {
     switch (type->kind) {
     case TYPE_ENUM: {
         Enum* enumeration = &type->value.enumeration;
-        DynamicArray_free(enumeration->parameters);
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+            free_metadata(&enumerant->metadata);
+            DynamicArray_free(enumerant->parameters);
+        }
+        DynamicArray_free(enumeration->enumerants);
         break;
     }
     case TYPE_TUPLE: {
@@ -229,12 +242,118 @@ static void json_model_simplification(Json_Document doc) {
     json_hex_string_to_number(magicValue);
 }
 
-static Type json_operand_kind_to_domain(Json_Value operandKind) {
-    // TODO
+static Metadata json_metadata_to_domain(Json_Value* value) {
+    Metadata metadata = {0};
+    Json_Value* minVersion = json_object_get(value, "version");
+    if (minVersion != NULL) metadata.min_version = json_as_string(minVersion);
+    Json_Value* maxVersion = json_object_get(value, "lastVersion");
+    if (maxVersion != NULL) metadata.max_version = json_as_string(maxVersion);
+    Json_Value* provisional = json_object_get(value, "provisional");
+    if (provisional != NULL) metadata.provisional = json_as_bool(provisional);
+    Json_Value* capabilities = json_object_get(value, "capabilities");
+    if (capabilities != NULL) {
+        for (size_t i = 0; i < json_length(capabilities); ++i) {
+            Json_Value* capability = json_array_at(capabilities, i);
+            DynamicArray_append(metadata.capabilities, json_as_string(capability));
+        }
+    }
+    Json_Value* extensions = json_object_get(value, "extensions");
+    if (extensions != NULL) {
+        for (size_t i = 0; i < json_length(extensions); ++i) {
+            Json_Value* extension = json_array_at(extensions, i);
+            DynamicArray_append(metadata.extensions, json_as_string(extension));
+        }
+    }
+    return metadata;
 }
 
-static Instruction json_instruction_to_domain(Json_Value instruction) {
+static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
+    char const* name = json_as_string(json_object_get(operand, "name"));
+    Json_Value* quantifierValue = json_object_get(operand, "quantifier");
+    Quantifier quantifier = QUANTIFIER_ONE;
+    if (quantifierValue != NULL) {
+        char const* quantifierStr = json_as_string(quantifierValue);
+        if (strcmp(quantifierStr, "?") == 0) quantifier = QUANTIFIER_OPTIONAL;
+        else if (strcmp(quantifierStr, "*") == 0) quantifier = QUANTIFIER_ANY;
+    }
+    Type* type = NULL;
+    // TODO: Linear lookup, but the API of our HashTable is kinda bad, so we'll stick to array for now
+    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
+        Type* candidate = &DynamicArray_at(model->types, i);
+        if (strcmp(candidate->value.strong_id, json_as_string(json_object_get(operand, "type"))) == 0) {
+            type = candidate;
+            break;
+        }
+    }
+    if (type == NULL) {
+        printf("Unknown type %s for operand %s\n", json_as_string(json_object_get(operand, "type")), name);
+        // We return a dummy operand with NULL type, but we should probably report an error instead
+        assert(false);
+    }
+    return (Operand){
+        .name = name,
+        .quantifier = quantifier,
+        .type = type,
+    };
+}
+
+static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
+    Json_Value* doc = json_object_get(enumerant, "doc");
+    char const* name = json_as_string(json_object_get(enumerant, "name"));
+    long long value = json_as_int(json_object_get(enumerant, "value"));
+    Enumerant result = {
+        .name = name,
+        .metadata = json_metadata_to_domain(enumerant),
+        .value = value,
+        .doc = doc == NULL ? NULL : json_as_string(doc),
+        .parameters = {0},
+    };
+    Json_Value* parameters = json_object_get(enumerant, "parameters");
+    for (size_t i = 0; i < json_length(parameters); ++i) {
+        Json_Value* parameter = json_array_at(parameters, i);
+        Operand operand = json_operand_to_domain(NULL, parameter);
+        DynamicArray_append(result.parameters, operand);
+    }
+    return result;
+}
+
+static Enum json_enum_to_domain(Json_Value* operandKind) {
+    Json_Value* doc = json_object_get(operandKind, "doc");
+    char const* name = json_as_string(json_object_get(operandKind, "kind"));
+    bool isFlags = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
+    Enum result = {
+        .name = name,
+        .flags = isFlags,
+        .doc = doc == NULL ? NULL : json_as_string(doc),
+        .enumerants = {0},
+    };
+    Json_Value* enumerants = json_object_get(operandKind, "enumerants");
+    for (size_t i = 0; i < json_length(enumerants); ++i) {
+        Json_Value* enumerant = json_array_at(enumerants, i);
+        Enumerant enumerantStruct = json_enumerant_to_domain(enumerant);
+        DynamicArray_append(result.enumerants, enumerantStruct);
+    }
+    return result;
+}
+
+static Type json_operand_kind_to_domain(Json_Value* operandKind) {
+    char const* category = json_as_string(json_object_get(operandKind, "category"));
+    if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
+        Enum enumeration = json_enum_to_domain(operandKind);
+        return (Type){
+            .kind = TYPE_ENUM,
+            .value.enumeration = enumeration,
+        };
+    }
+    else {
+        printf("TODO %s\n", category);
+        return (Type){0};
+    }
+}
+
+static Instruction json_instruction_to_domain(Json_Value* instruction) {
     // TODO
+    return (Instruction){0};
 }
 
 static Model json_model_to_domain(Json_Document doc) {
@@ -259,7 +378,7 @@ static Model json_model_to_domain(Json_Document doc) {
     Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
-        Type type = json_operand_kind_to_domain(*operandKind);
+        Type type = json_operand_kind_to_domain(operandKind);
         DynamicArray_append(model.types, type);
     }
 
@@ -267,7 +386,7 @@ static Model json_model_to_domain(Json_Document doc) {
     Json_Value* instructions = json_object_get(&doc.root, "instructions");
     for (size_t i = 0; i < json_length(instructions); ++i) {
         Json_Value* instruction = json_array_at(instructions, i);
-        Instruction instr = json_instruction_to_domain(*instruction);
+        Instruction instr = json_instruction_to_domain(instruction);
         DynamicArray_append(model.instructions, instr);
     }
 
@@ -312,6 +431,7 @@ int main(void) {
     }
     Model model = json_model_to_domain(doc);
     char* cCode = generate_c_code(&model);
+    free_model(&model);
     printf("%s", cCode);
     json_free_document(&doc);
     return 0;
