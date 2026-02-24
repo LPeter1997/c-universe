@@ -735,6 +735,21 @@ static void generate_c_doc(CodeBuilder* cb, char const* doc) {
         " */\n", doc);
 }
 
+static void generate_c_param_assignment(CodeBuilder* cb, char const* prefix, char const* memberName, Operand* param) {
+    // Unfortunately C99 doesn't have anonymous struct compatibility, so for ANY and OPTIONAL we need to special-case
+    if (param->quantifier == QUANTIFIER_ONE) {
+        code_builder_format(cb, "%s%s.%s = %s;\n", prefix, memberName, param->name, param->name);
+    }
+    else if (param->quantifier == QUANTIFIER_ANY) {
+        code_builder_format(cb, "%s%s.%s.values = %s.values;\n", prefix, memberName, param->name, param->name);
+        code_builder_format(cb, "%s%s.%s.count = %s.count;\n", prefix, memberName, param->name, param->name);
+    }
+    else if (param->quantifier == QUANTIFIER_OPTIONAL) {
+        code_builder_format(cb, "%s%s.%s.present = %s.present;\n", prefix, memberName, param->name, param->name);
+        code_builder_format(cb, "%s%s.%s.value = %s.value;\n", prefix, memberName, param->name, param->name);
+    }
+}
+
 static void generate_c_type(CodeBuilder* cb, Type* type) {
     generate_c_doc(cb, type->doc);
     if (type->kind == TYPE_STRONG_ID
@@ -813,18 +828,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "result.%s = Spv_%s_%s;\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    // Unfortunately C99 doesn't have anonymous struct compatibility, so for ANY and OPTIONAL we need to special-case
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, "result.variants.%s.%s = %s;\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "result.variants.%s.%s.values = %s.values;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "result.variants.%s.%s.count = %s.count;\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_OPTIONAL) {
-                        code_builder_format(cb, "result.variants.%s.%s.present = %s.present;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "result.variants.%s.%s.value = %s.value;\n", originalMember, param->name, param->name);
-                    }
+                    generate_c_param_assignment(cb, "result.variants.", originalMember, param);
                 }
                 code_builder_format(cb, "return result;\n");
                 code_builder_dedent(cb);
@@ -843,18 +847,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "operand->%s |= Spv_%s_%s;\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    // Unfortunately C99 doesn't have anonymous struct compatibility, so for ANY and OPTIONAL we need to special-case
-                    if (param->quantifier == QUANTIFIER_ONE) {
-                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_ANY) {
-                        code_builder_format(cb, "operand->%s.%s.values = %s.values;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "operand->%s.%s.count = %s.count;\n", originalMember, param->name, param->name);
-                    }
-                    else if (param->quantifier == QUANTIFIER_OPTIONAL) {
-                        code_builder_format(cb, "operand->%s.%s.present = %s.present;\n", originalMember, param->name, param->name);
-                        code_builder_format(cb, "operand->%s.%s.value = %s.value;\n", originalMember, param->name, param->name);
-                    }
+                    generate_c_param_assignment(cb, "operand->", originalMember, param);
                 }
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
