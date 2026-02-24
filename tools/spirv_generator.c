@@ -54,7 +54,9 @@ typedef struct Tuple {
 
 typedef enum TypeKind {
     TYPE_STRONG_ID,
-    TYPE_NUMBER,
+    TYPE_UINT32,
+    TYPE_INT32,
+    TYPE_FLOAT32,
     TYPE_STRING,
     TYPE_ENUM,
     TYPE_TUPLE,
@@ -458,16 +460,18 @@ static Type json_operand_kind_to_domain(Json_Value* operandKind) {
         };
     }
     else if (strcmp(category, "Literal") == 0) {
-        TypeKind kind = TYPE_NUMBER;
+        TypeKind kind = TYPE_UINT32;
         char const* typeName = "uint32_t";
         if (strcmp(name, "LiteralString") == 0) {
             kind = TYPE_STRING;
             typeName = "char const*";
         }
         else if (strcmp(name, "LiteralFloat") == 0) {
+            kind = TYPE_FLOAT32;
             typeName = "float";
         }
         else if (strcmp(name, "LiteralInteger") == 0) {
+            kind = TYPE_INT32;
             typeName = "int32_t";
         }
         return (Type){
@@ -576,7 +580,11 @@ static void generate_c_doc(CodeBuilder* cb, char const* doc) {
 
 static void generate_c_type(CodeBuilder* cb, Type* type) {
     generate_c_doc(cb, type->doc);
-    if (type->kind == TYPE_STRONG_ID || type->kind == TYPE_NUMBER || type->kind == TYPE_STRING) {
+    if (type->kind == TYPE_STRONG_ID
+     || type->kind == TYPE_UINT32
+     || type->kind == TYPE_INT32
+     || type->kind == TYPE_FLOAT32
+     || type->kind == TYPE_STRING) {
         code_builder_format(cb, "typedef %s Spv_%s;\n\n", type->value.type_name, type->name);
     }
     else if (type->kind == TYPE_ENUM) {
@@ -747,7 +755,22 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
 }
 
 static void generate_c_operand_encoder(CodeBuilder* cb, Type* operandType, char const* name) {
-    code_builder_format(cb, "// TODO: encode %s of type %s\n", name, operandType->name);
+    if (operandType->kind == TYPE_STRONG_ID
+     || operandType->kind == TYPE_UINT32) {
+        code_builder_format(cb, "spv_encode_u32(encoder, %s);\n", name);
+    }
+    else if (operandType->kind == TYPE_INT32) {
+        code_builder_format(cb, "spv_encode_i32(encoder, %s);\n", name);
+    }
+    else if (operandType->kind == TYPE_FLOAT32) {
+        code_builder_format(cb, "spv_encode_f32(encoder, %s);\n", name);
+    }
+    else if (operandType->kind == TYPE_STRING) {
+        code_builder_format(cb, "spv_encode_string(encoder, %s);\n", name);
+    }
+    else {
+        code_builder_format(cb, "// TODO: encode %s of type %s\n", name, operandType->name);
+    }
 }
 
 static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instruction* instruction) {
