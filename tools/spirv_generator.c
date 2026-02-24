@@ -629,7 +629,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
             if (!enumeration->flags && enumerant->parameters.length == 0) {
                 // Value-enum element without parameters, we generate a constant for it
-                code_builder_format(cb, "const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
+                code_builder_format(cb, "static inline const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
             }
             else if (!enumeration->flags) {
                 // Value-enum element with parameters, we generate a function that can create the struct with the parameters
@@ -709,7 +709,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             else {
                 // We expect 0 to be a special case, define a constant for it
                 assert(DynamicArray_length(enumerant->parameters) == 0);
-                code_builder_format(cb, "const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
+                code_builder_format(cb, "static inline const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
             }
         }
     }
