@@ -743,6 +743,156 @@ CTEST_CASE(string_builder_repeated_clear_and_build) {
     sb_free(&sb);
 }
 
+// Insert tests ////////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_insert_at_beginning) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "World");
+    sb_insert(&sb, 0, "Hello ");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_at_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    sb_insert(&sb, 5, " World");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_in_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Helo");
+    sb_insert(&sb, 2, "l");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insertn_partial) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "AC");
+    sb_insertn(&sb, 1, "BXYZ", 1);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "ABC"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_insert_empty_string) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_insert(&sb, 2, "");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
+    sb_free(&sb);
+}
+
+// Remove tests ////////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_remove_from_beginning) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_remove(&sb, 0, 6);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_from_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_remove(&sb, 5, 6);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_from_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Helllo");
+    sb_remove(&sb, 2, 1);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_zero_length) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_remove(&sb, 2, 0);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_remove_clamps_to_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    sb_remove(&sb, 3, 100);
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hel"));
+    sb_free(&sb);
+}
+
+// Replace tests ///////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_replace_single_occurrence) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "World", "Universe");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello Universe"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_multiple_occurrences) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "foo bar foo baz foo");
+    sb_replace(&sb, "foo", "qux");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "qux bar qux baz qux"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_shorter) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "World", "You");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello You"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_longer) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hi");
+    sb_replace(&sb, "Hi", "Hello");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_same_length) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "cat and dog");
+    sb_replace(&sb, "cat", "bat");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "bat and dog"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_no_match) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, "xyz", "abc");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello World"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_empty_target) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    sb_replace(&sb, "", "x");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test")); // Empty target should be a no-op
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_replace_with_empty) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    sb_replace(&sb, " World", "");
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
 // Code builder tests //////////////////////////////////////////////////////////
 
 CTEST_CASE(code_builder_no_indent_at_level_zero) {
