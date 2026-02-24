@@ -40,6 +40,7 @@ typedef struct Enumerant {
     char const* doc;
     long long value;
     DynamicArray(Operand) parameters;
+    char const* alias_of;
 } Enumerant;
 
 typedef struct Enum {
@@ -75,6 +76,7 @@ typedef struct Instruction {
     char const* name;
     uint32_t opcode;
     DynamicArray(Operand) operands;
+    char const* alias_of;
 } Instruction;
 
 typedef struct Model {
@@ -169,12 +171,14 @@ static void json_flatten_aliases(Json_Value* array, char const* nameKey) {
     for (size_t i = 0; i < json_length(array); ++i) {
         Json_Value* value = json_array_at(array, i);
         Json_Value* aliases = json_object_get(value, "aliases");
+        Json_Value* valueName = json_object_get(value, nameKey);
         if (aliases == NULL) continue;
         for (size_t j = 0; j < json_length(aliases); ++j) {
             Json_Value* alias = json_array_at(aliases, j);
             Json_Value newValue = json_copy(*value);
             json_object_remove(&newValue, "aliases", NULL);
             json_object_set(&newValue, nameKey, json_move(alias));
+            json_object_set(&newValue, "alias_of", json_copy(*valueName));
             DynamicArray_append(newValues, json_move(&newValue));
         }
         json_object_remove(value, "aliases", NULL);
@@ -385,12 +389,14 @@ static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
     Json_Value* doc = json_object_get(enumerant, "doc");
     char const* name = json_as_string(json_object_get(enumerant, "enumerant"));
     long long value = json_as_int(json_object_get(enumerant, "value"));
+    Json_Value* aliasOf = json_object_get(enumerant, "alias_of");
     Enumerant result = {
         .name = name,
         .metadata = json_metadata_to_domain(enumerant),
         .value = value,
         .doc = doc == NULL ? NULL : json_as_string(doc),
         .parameters = {0},
+        .alias_of = aliasOf == NULL ? NULL : json_as_string(aliasOf),
     };
     Json_Value* parameters = json_object_get(enumerant, "parameters");
     for (size_t i = 0; parameters != NULL && i < json_length(parameters); ++i) {
@@ -588,6 +594,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         }
         for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+            if (enumerant->alias_of != NULL) continue;
             if (enumerant->parameters.length == 0) continue;
             code_builder_format(cb, "struct {\n");
             code_builder_indent(cb);
