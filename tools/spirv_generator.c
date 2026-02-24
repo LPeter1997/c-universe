@@ -386,7 +386,18 @@ static char* operand_infer_name(Operand* operand, char const* hint) {
     StringBuilder sb = {0};
     if (hint == NULL) hint = operand->typeName;
     sb_puts(&sb, hint);
+
     sb_replace(&sb, " ", "");
+
+    // For some bizarre reason the grammar uses <<Invocation,invocations>> as a name, we get rid of the crud and just extract plural
+    int openAnglePos = sb_indexofc(&sb, '<');
+    int commaPos = sb_indexofc(&sb, ',');
+    int closeAnglePos = sb_indexofc(&sb, '>');
+    if (openAnglePos >= 0 && commaPos > openAnglePos && closeAnglePos > commaPos) {
+        sb_remove(&sb, closeAnglePos, (size_t)(sb.length - closeAnglePos));
+        sb_remove(&sb, (size_t)openAnglePos, (size_t)(commaPos - openAnglePos + 1));
+    }
+
     char* result = sb_to_cstr(&sb);
     sb_free(&sb);
     return result;
