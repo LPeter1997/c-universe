@@ -518,9 +518,28 @@ static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_putc(cb, '\n');
 }
 
+static void generate_c_type(CodeBuilder* cb, Type* type) {
+    if (type->doc != NULL) {
+        code_builder_format(cb, ""
+            "/**\n"
+            " * %s.\n"
+            " */\n", type->doc);
+    }
+    if (type->kind == TYPE_STRONG_ID || type->kind == TYPE_NUMBER || type->kind == TYPE_STRING) {
+        code_builder_format(cb, "typedef %s Spv%s;\n\n", type->value.type_name, type->name);
+    }
+    else {
+        code_builder_format(cb, "// TODO: %s\n", type->name);
+    }
+}
+
 static char* generate_c_code(Model* model) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, model);
+    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
+        Type* type = &DynamicArray_at(model->types, i);
+        generate_c_type(&cb, type);
+    }
 
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
