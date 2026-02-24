@@ -31,7 +31,7 @@ typedef enum Quantifier {
 typedef struct Operand {
     char const* typeName;
     Quantifier quantifier;
-    char const* name;
+    char* name;
 } Operand;
 
 typedef struct Enumerant {
@@ -92,14 +92,26 @@ static void free_metadata(Metadata* metadata) {
     DynamicArray_free(metadata->extensions);
 }
 
+static void free_operand(Operand* operand) {
+    free(operand->name);
+}
+
+static void free_enumerant(Enumerant* enumerant) {
+    free_metadata(&enumerant->metadata);
+    for (size_t i = 0; i < DynamicArray_length(enumerant->parameters); ++i) {
+        Operand* operand = &DynamicArray_at(enumerant->parameters, i);
+        free_operand(operand);
+    }
+    DynamicArray_free(enumerant->parameters);
+}
+
 static void free_type(Type* type) {
     switch (type->kind) {
     case TYPE_ENUM: {
         Enum* enumeration = &type->value.enumeration;
         for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
-            free_metadata(&enumerant->metadata);
-            DynamicArray_free(enumerant->parameters);
+            free_enumerant(enumerant);
         }
         DynamicArray_free(enumeration->enumerants);
         break;
@@ -116,6 +128,10 @@ static void free_type(Type* type) {
 
 static void free_instruction(Instruction* instruction) {
     free_metadata(&instruction->metadata);
+    for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
+        Operand* operand = &DynamicArray_at(instruction->operands, i);
+        free_operand(operand);
+    }
     DynamicArray_free(instruction->operands);
 }
 
@@ -334,6 +350,14 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
     return metadata;
 }
 
+static char* operand_infer_name(Operand* operand, char const* hint) {
+    StringBuilder sb = {0};
+    // TODO
+    char* result = sb_to_cstr(&sb);
+    sb_free(&sb);
+    return result;
+}
+
 static Operand json_operand_to_domain(Json_Value* operand) {
     // NOTE: Name is optional
     Json_Value* name = json_object_get(operand, "name");
@@ -345,11 +369,13 @@ static Operand json_operand_to_domain(Json_Value* operand) {
         if (strcmp(quantifierStr, "?") == 0) quantifier = QUANTIFIER_OPTIONAL;
         else if (strcmp(quantifierStr, "*") == 0) quantifier = QUANTIFIER_ANY;
     }
-    return (Operand){
-        .name = name == NULL ? NULL : json_as_string(name),
+    Operand result = {
+        .name = NULL,
         .quantifier = quantifier,
         .typeName = kind,
     };
+    result.name = operand_infer_name(&result, name == NULL ? NULL : json_as_string(name));
+    return result;
 }
 
 static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
