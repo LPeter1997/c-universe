@@ -526,6 +526,8 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
     }
     else if (type->kind == TYPE_ENUM) {
         char const* enumSuffix = type->value.enumeration.flags ? "Flags" : "Tag";
+        char const* memberName = type->value.enumeration.flags ? "flags" : "tag";
+
         code_builder_format(cb, "typedef enum Spv_%s%s {\n", type->name, enumSuffix);
         code_builder_indent(cb);
         for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
@@ -543,6 +545,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
 
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
+        code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, memberName);
         code_builder_format(cb, "// TODO\n");
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
