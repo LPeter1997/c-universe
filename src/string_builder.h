@@ -13,6 +13,8 @@
  *  - Use sb_insert, sb_insertn and sb_insertc to insert content at a specific position
  *  - Use sb_remove to remove a portion of the string, and sb_replace to replace all occurrences of a target string
  *  - Use sb_length to get the current length, and sb_char_at to access a character at a specific position
+ *  - Use sb_contains and sb_containsc to check if the builder contains a string or character
+ *  - Use sb_index_of and sb_indexofc to find the position of a string or character (-1 if not found)
  *  - Use sb_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
  *  - Use sb_clear to clear the content of the builder without freeing the allocated buffer
  *  - Use sb_free to free the memory allocated for the builder when it is no longer needed
@@ -33,6 +35,7 @@
 #ifndef STRING_BUILDER_H
 #define STRING_BUILDER_H
 
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -186,6 +189,38 @@ STRING_BUILDER_DEF void sb_remove(StringBuilder* sb, size_t pos, size_t length);
  * @param replacement The string to replace the target with.
  */
 STRING_BUILDER_DEF void sb_replace(StringBuilder* sb, char const* target, char const* replacement);
+
+/**
+ * Checks if the builder contains a given string.
+ * @param sb The string builder to search in.
+ * @param str The null-terminated string to search for.
+ * @return true if the string is found, false otherwise.
+ */
+STRING_BUILDER_DEF bool sb_contains(StringBuilder* sb, char const* str);
+
+/**
+ * Checks if the builder contains a given character.
+ * @param sb The string builder to search in.
+ * @param c The character to search for.
+ * @return true if the character is found, false otherwise.
+ */
+STRING_BUILDER_DEF bool sb_containsc(StringBuilder* sb, char c);
+
+/**
+ * Finds the first occurrence of a string in the builder.
+ * @param sb The string builder to search in.
+ * @param str The null-terminated string to search for.
+ * @return The index of the first occurrence, or -1 if not found.
+ */
+STRING_BUILDER_DEF int sb_index_of(StringBuilder* sb, char const* str);
+
+/**
+ * Finds the first occurrence of a character in the builder.
+ * @param sb The string builder to search in.
+ * @param c The character to search for.
+ * @return The index of the first occurrence, or -1 if not found.
+ */
+STRING_BUILDER_DEF int sb_indexofc(StringBuilder* sb, char c);
 
 /**
  * Utility for building code with indentation, using an underlying string builder.
@@ -370,6 +405,35 @@ void sb_replace(StringBuilder* sb, char const* target, char const* replacement) 
         }
         pos += replacementLen;
     }
+}
+
+bool sb_contains(StringBuilder* sb, char const* str) {
+    return sb_index_of(sb, str) >= 0;
+}
+
+bool sb_containsc(StringBuilder* sb, char c) {
+    return sb_indexofc(sb, c) >= 0;
+}
+
+int sb_index_of(StringBuilder* sb, char const* str) {
+    size_t strLen = strlen(str);
+    if (strLen == 0) return 0; // Empty string is found at position 0
+    if (strLen > sb->length) return -1;
+    for (size_t pos = 0; pos + strLen <= sb->length; ++pos) {
+        if (memcmp(sb->buffer + pos, str, strLen) == 0) {
+            return (int)pos;
+        }
+    }
+    return -1;
+}
+
+int sb_indexofc(StringBuilder* sb, char c) {
+    for (size_t pos = 0; pos < sb->length; ++pos) {
+        if (sb->buffer[pos] == c) {
+            return (int)pos;
+        }
+    }
+    return -1;
 }
 
 // Code builder ////////////////////////////////////////////////////////////////
@@ -696,8 +760,8 @@ CTEST_CASE(string_builder_to_cstr_independent_copy) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "Hello");
     char* cstr = sb_to_cstr(&sb);
-    sb_puts(&sb, " World"); // Modify original
-    CTEST_ASSERT_TRUE(strcmp(cstr, "Hello") == 0); // Copy unchanged
+    sb_puts(&sb, " World");
+    CTEST_ASSERT_TRUE(strcmp(cstr, "Hello") == 0);
     free(cstr);
     sb_free(&sb);
 }
@@ -983,7 +1047,7 @@ CTEST_CASE(string_builder_replace_empty_target) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "test");
     sb_replace(&sb, "", "x");
-    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test")); // Empty target should be a no-op
+    CTEST_ASSERT_TRUE(test_sb_equals(&sb, "test"));
     sb_free(&sb);
 }
 
@@ -992,6 +1056,134 @@ CTEST_CASE(string_builder_replace_with_empty) {
     sb_puts(&sb, "Hello World");
     sb_replace(&sb, " World", "");
     CTEST_ASSERT_TRUE(test_sb_equals(&sb, "Hello"));
+    sb_free(&sb);
+}
+
+// Contains tests //////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_contains_finds_string) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(sb_contains(&sb, "World"));
+    CTEST_ASSERT_TRUE(sb_contains(&sb, "Hello"));
+    CTEST_ASSERT_TRUE(sb_contains(&sb, "o W"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_contains_not_found) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(!sb_contains(&sb, "xyz"));
+    CTEST_ASSERT_TRUE(!sb_contains(&sb, "HELLO"));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_contains_empty_string) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    CTEST_ASSERT_TRUE(sb_contains(&sb, ""));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_containsc_finds) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(sb_containsc(&sb, 'H'));
+    CTEST_ASSERT_TRUE(sb_containsc(&sb, 'e'));
+    CTEST_ASSERT_TRUE(sb_containsc(&sb, 'o'));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_containsc_not_found) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(!sb_containsc(&sb, 'x'));
+    CTEST_ASSERT_TRUE(!sb_containsc(&sb, 'h'));
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_contains_in_empty_builder) {
+    StringBuilder sb = test_sb_create();
+    CTEST_ASSERT_TRUE(!sb_contains(&sb, "test"));
+    CTEST_ASSERT_TRUE(!sb_containsc(&sb, 'a'));
+    CTEST_ASSERT_TRUE(sb_contains(&sb, ""));
+    sb_free(&sb);
+}
+
+// Index of tests //////////////////////////////////////////////////////////////
+
+CTEST_CASE(string_builder_index_of_finds_at_start) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "Hello") == 0);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_finds_in_middle) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "o W") == 4);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_finds_at_end) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "World") == 6);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_not_found) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello World");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "xyz") == -1);
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "Worlds") == -1);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_empty_string) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "test");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "") == 0);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_first_occurrence) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "abcabc");
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "bc") == 1);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_indexofc_finds) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'H') == 0);
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'e') == 1);
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'o') == 4);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_indexofc_not_found) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "Hello");
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'x') == -1);
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'h') == -1);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_indexofc_first_occurrence) {
+    StringBuilder sb = test_sb_create();
+    sb_puts(&sb, "abcabc");
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'b') == 1);
+    sb_free(&sb);
+}
+
+CTEST_CASE(string_builder_index_of_in_empty_builder) {
+    StringBuilder sb = test_sb_create();
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "test") == -1);
+    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'a') == -1);
+    CTEST_ASSERT_TRUE(sb_index_of(&sb, "") == 0);
     sb_free(&sb);
 }
 
