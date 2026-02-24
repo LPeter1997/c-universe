@@ -430,6 +430,8 @@ static char* operand_infer_name(Operand* operand, char const* hint) {
 
     sb_replace(&sb, " ", "");
     sb_replace(&sb, "-", "");
+    sb_replace(&sb, ".", "");
+    sb_replace(&sb, "~", "");
 
     // For some bizarre reason the grammar uses <<Invocation,invocations>> as a name, we get rid of the crud and just extract plural
     int openAnglePos = sb_indexofc(&sb, '<');
