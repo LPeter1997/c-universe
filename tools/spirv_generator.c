@@ -565,7 +565,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
     else if (type->kind == TYPE_ENUM) {
         Enum* enumeration = &type->value.enumeration;
         char const* enumSuffix = enumeration->flags ? "Flags" : "Tag";
-        char const* memberName = enumeration->flags ? "flags" : "tag";
+        char const* tagName = enumeration->flags ? "flags" : "tag";
 
         code_builder_format(cb, "typedef enum Spv_%s%s {\n", type->name, enumSuffix);
         code_builder_indent(cb);
@@ -590,7 +590,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         // Define the struct describing the operand
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
-        code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, memberName);
+        code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, tagName);
         if (hasParameters && !enumeration->flags) {
             code_builder_puts(cb, "union {\n");
             code_builder_indent(cb);
@@ -618,14 +618,42 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
 
-        // Define constants for parameterless enumerants and methods for parametric ones
         for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
-            if (enumerant->parameters.length == 0) {
-                // TODO
+            char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
+            if (!enumeration->flags && enumerant->parameters.length == 0) {
+                // Value-enum element without parameters, we generate a constant for it
+                code_builder_format(cb, "const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
+            }
+            else if (!enumeration->flags) {
+                // Value-enum element with parameters, we generate a function that can create the struct with the parameters
+                code_builder_format(cb, "static inline Spv_%s spv_%s_%s(", type->name, type->name, enumerant->name);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    code_builder_format(cb, "Spv_%s %s", param->typeName, param->name);
+                    if (j < DynamicArray_length(enumerant->parameters) - 1) {
+                        code_builder_puts(cb, ", ");
+                    }
+                }
+                code_builder_puts(cb, ") {\n");
+                code_builder_indent(cb);
+                code_builder_format(cb, "return (Spv_%s){\n", type->name);
+                code_builder_indent(cb);
+                code_builder_format(cb, ".%s = Spv_%s_%s,\n", tagName, type->name, originalMember);
+                for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
+                    Operand* param = &DynamicArray_at(enumerant->parameters, j);
+                    if (param->quantifier != QUANTIFIER_ONE) {
+                        code_builder_format(cb, "// TODO: handle quantifier %d\n", param->quantifier);
+                    }
+                    code_builder_format(cb, ".variants.%s.%s = %s;\n", originalMember, param->name, param->name);
+                }
+                code_builder_dedent(cb);
+                code_builder_format(cb, "};\n");
+                code_builder_dedent(cb);
+                code_builder_puts(cb, "}\n");
             }
             else {
-                // TODO
+                // If it's a flags enum, we generate a function that can set a flag with the parameters
             }
         }
     }
