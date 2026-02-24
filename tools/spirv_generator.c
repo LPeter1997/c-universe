@@ -268,7 +268,8 @@ static Metadata json_metadata_to_domain(Json_Value* value) {
 }
 
 static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
-    char const* name = json_as_string(json_object_get(operand, "name"));
+    // NOTE: Name is optional
+    Json_Value* name = json_object_get(operand, "name");
     Json_Value* quantifierValue = json_object_get(operand, "quantifier");
     Quantifier quantifier = QUANTIFIER_ONE;
     if (quantifierValue != NULL) {
@@ -280,26 +281,26 @@ static Operand json_operand_to_domain(Model* model, Json_Value* operand) {
     // TODO: Linear lookup, but the API of our HashTable is kinda bad, so we'll stick to array for now
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* candidate = &DynamicArray_at(model->types, i);
-        if (strcmp(candidate->value.strong_id, json_as_string(json_object_get(operand, "type"))) == 0) {
+        if (strcmp(candidate->value.strong_id, json_as_string(json_object_get(operand, "kind"))) == 0) {
             type = candidate;
             break;
         }
     }
     if (type == NULL) {
-        printf("Unknown type %s for operand %s\n", json_as_string(json_object_get(operand, "type")), name);
+        printf("Unknown type %s\n", json_as_string(json_object_get(operand, "kind")));
         // We return a dummy operand with NULL type, but we should probably report an error instead
         assert(false);
     }
     return (Operand){
-        .name = name,
+        .name = name == NULL ? NULL : json_as_string(name),
         .quantifier = quantifier,
         .type = type,
     };
 }
 
-static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
+static Enumerant json_enumerant_to_domain(Model* model, Json_Value* enumerant) {
     Json_Value* doc = json_object_get(enumerant, "doc");
-    char const* name = json_as_string(json_object_get(enumerant, "name"));
+    char const* name = json_as_string(json_object_get(enumerant, "enumerant"));
     long long value = json_as_int(json_object_get(enumerant, "value"));
     Enumerant result = {
         .name = name,
@@ -309,15 +310,15 @@ static Enumerant json_enumerant_to_domain(Json_Value* enumerant) {
         .parameters = {0},
     };
     Json_Value* parameters = json_object_get(enumerant, "parameters");
-    for (size_t i = 0; i < json_length(parameters); ++i) {
+    for (size_t i = 0; parameters != NULL && i < json_length(parameters); ++i) {
         Json_Value* parameter = json_array_at(parameters, i);
-        Operand operand = json_operand_to_domain(NULL, parameter);
+        Operand operand = json_operand_to_domain(model, parameter);
         DynamicArray_append(result.parameters, operand);
     }
     return result;
 }
 
-static Enum json_enum_to_domain(Json_Value* operandKind) {
+static Enum json_enum_to_domain(Model* model, Json_Value* operandKind) {
     Json_Value* doc = json_object_get(operandKind, "doc");
     char const* name = json_as_string(json_object_get(operandKind, "kind"));
     bool isFlags = strcmp(json_as_string(json_object_get(operandKind, "category")), "BitEnum") == 0;
@@ -330,16 +331,16 @@ static Enum json_enum_to_domain(Json_Value* operandKind) {
     Json_Value* enumerants = json_object_get(operandKind, "enumerants");
     for (size_t i = 0; i < json_length(enumerants); ++i) {
         Json_Value* enumerant = json_array_at(enumerants, i);
-        Enumerant enumerantStruct = json_enumerant_to_domain(enumerant);
+        Enumerant enumerantStruct = json_enumerant_to_domain(model, enumerant);
         DynamicArray_append(result.enumerants, enumerantStruct);
     }
     return result;
 }
 
-static Type json_operand_kind_to_domain(Json_Value* operandKind) {
+static Type json_operand_kind_to_domain(Model* model, Json_Value* operandKind) {
     char const* category = json_as_string(json_object_get(operandKind, "category"));
     if (strcmp(category, "BitEnum") == 0 || strcmp(category, "ValueEnum") == 0) {
-        Enum enumeration = json_enum_to_domain(operandKind);
+        Enum enumeration = json_enum_to_domain(model, operandKind);
         return (Type){
             .kind = TYPE_ENUM,
             .value.enumeration = enumeration,
@@ -378,7 +379,7 @@ static Model json_model_to_domain(Json_Document doc) {
     Json_Value* operandKinds = json_object_get(&doc.root, "operand_kinds");
     for (size_t i = 0; i < json_length(operandKinds); ++i) {
         Json_Value* operandKind = json_array_at(operandKinds, i);
-        Type type = json_operand_kind_to_domain(operandKind);
+        Type type = json_operand_kind_to_domain(&model, operandKind);
         DynamicArray_append(model.types, type);
     }
 
