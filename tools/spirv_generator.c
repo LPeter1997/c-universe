@@ -396,7 +396,6 @@ static Tuple json_tuple_to_domain(Model* model, Json_Value* operandKind) {
     Json_Value* members = json_object_get(operandKind, "bases");
     for (size_t i = 0; i < json_length(members); ++i) {
         char const* memberKind = json_as_string(json_array_at(members, i));
-        // TODO: Again, linear lookup...
         Type* memberType = find_type_by_name(model, memberKind);
         DynamicArray_append(result.members, memberType);
     }
