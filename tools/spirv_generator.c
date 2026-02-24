@@ -563,13 +563,14 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_format(cb, "typedef %s Spv_%s;\n\n", type->value.type_name, type->name);
     }
     else if (type->kind == TYPE_ENUM) {
-        char const* enumSuffix = type->value.enumeration.flags ? "Flags" : "Tag";
-        char const* memberName = type->value.enumeration.flags ? "flags" : "tag";
+        Enum* enumeration = &type->value.enumeration;
+        char const* enumSuffix = enumeration->flags ? "Flags" : "Tag";
+        char const* memberName = enumeration->flags ? "flags" : "tag";
 
         code_builder_format(cb, "typedef enum Spv_%s%s {\n", type->name, enumSuffix);
         code_builder_indent(cb);
-        for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
-            Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
             generate_c_doc(cb, enumerant->doc);
             code_builder_format(cb, "Spv_%s_%s = %lld,\n", type->name, enumerant->name, enumerant->value);
         }
@@ -578,23 +579,24 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
 
         // TODO: Would be nice to have a general search algo
         bool hasParameters = false;
-        for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
-            Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
             if (enumerant->parameters.length > 0) {
                 hasParameters = true;
                 break;
             }
         }
 
+        // Define the struct describing the operand
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
         code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, memberName);
-        if (hasParameters && !type->value.enumeration.flags) {
+        if (hasParameters && !enumeration->flags) {
             code_builder_puts(cb, "union {\n");
             code_builder_indent(cb);
         }
-        for (size_t i = 0; i < DynamicArray_length(type->value.enumeration.enumerants); ++i) {
-            Enumerant* enumerant = &DynamicArray_at(type->value.enumeration.enumerants, i);
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
             if (enumerant->alias_of != NULL) continue;
             if (enumerant->parameters.length == 0) continue;
             code_builder_format(cb, "struct {\n");
@@ -609,18 +611,30 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             code_builder_dedent(cb);
             code_builder_format(cb, "} %s;\n", enumerant->name);
         }
-        if (hasParameters && !type->value.enumeration.flags) {
+        if (hasParameters && !enumeration->flags) {
             code_builder_dedent(cb);
             code_builder_format(cb, "} variants;\n\n", type->name);
         }
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
+
+        // Define constants for parameterless enumerants and methods for parametric ones
+        for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+            if (enumerant->parameters.length == 0) {
+                // TODO
+            }
+            else {
+                // TODO
+            }
+        }
     }
     else if (type->kind == TYPE_TUPLE) {
+        Tuple* tuple = &type->value.tuple;
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
-        for (size_t i = 0; i < DynamicArray_length(type->value.tuple.memberTypeNames); ++i) {
-            char const* memberTypeName = DynamicArray_at(type->value.tuple.memberTypeNames, i);
+        for (size_t i = 0; i < DynamicArray_length(tuple->memberTypeNames); ++i) {
+            char const* memberTypeName = DynamicArray_at(tuple->memberTypeNames, i);
             code_builder_format(cb, "Spv_%s member%d;\n", memberTypeName, (int)i + 1);
         }
         code_builder_dedent(cb);
