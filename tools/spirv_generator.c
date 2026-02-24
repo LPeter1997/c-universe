@@ -39,6 +39,7 @@ typedef struct Operand {
 typedef struct Enumerant {
     Metadata metadata;
     char const* name;
+    char const* doc;
     long long value;
     DynamicArray(Operand) parameters;
 } Enumerant;
