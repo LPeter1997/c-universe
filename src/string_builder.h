@@ -274,6 +274,60 @@ void sb_vformat(StringBuilder* sb, char const* format, va_list args) {
     sb->length += (size_t)formattedLength;
 }
 
+void sb_insert(StringBuilder* sb, size_t pos, char const* str) {
+    size_t strLength = strlen(str);
+    sb_insertn(sb, pos, str, strLength);
+}
+
+void sb_insertn(StringBuilder* sb, size_t pos, char const* str, size_t n) {
+    if (n == 0) return;
+    STRING_BUILDER_ASSERT(pos <= sb->length, "insert position out of bounds");
+    sb_reserve(sb, sb->length + n);
+    memmove(sb->buffer + pos + n, sb->buffer + pos, sb->length - pos);
+    memcpy(sb->buffer + pos, str, n);
+    sb->length += n;
+}
+
+void sb_remove(StringBuilder* sb, size_t pos, size_t length) {
+    if (length == 0) return;
+    STRING_BUILDER_ASSERT(pos <= sb->length, "remove position out of bounds");
+    if (pos + length > sb->length) length = sb->length - pos;
+    memmove(sb->buffer + pos, sb->buffer + pos + length, sb->length - pos - length);
+    sb->length -= length;
+}
+
+void sb_replace(StringBuilder* sb, char const* target, char const* replacement) {
+    size_t targetLen = strlen(target);
+    // Avoid replacing empty strings, just makes no sense
+    if (targetLen == 0) return;
+    size_t replacementLen = strlen(replacement);
+    size_t pos = 0;
+    while (pos + targetLen <= sb->length) {
+        if (memcmp(sb->buffer + pos, target, targetLen) != 0) {
+            ++pos;
+            continue;
+        }
+        if (targetLen == replacementLen) {
+            // Same length, no shifting needed
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+        } else if (replacementLen < targetLen) {
+            // Replacement is shorter, copy replacement, then shift rest left
+            size_t diff = targetLen - replacementLen;
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
+            sb->length -= diff;
+        } else {
+            // Replacement is longer, reserve, shift rest right, then copy replacement
+            size_t diff = replacementLen - targetLen;
+            sb_reserve(sb, sb->length + diff);
+            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
+            memcpy(sb->buffer + pos, replacement, replacementLen);
+            sb->length += diff;
+        }
+        pos += replacementLen;
+    }
+}
+
 // Code builder ////////////////////////////////////////////////////////////////
 
 static void code_builder_indent_if_needed(CodeBuilder* cb) {
