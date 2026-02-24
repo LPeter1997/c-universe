@@ -804,7 +804,18 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, ".%s = Spv_%s_%s,\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
+                    // Unfortunately C99 doesn't have anonymous struct compatibility, so for ANY and OPTIONAL we need to special-case
+                    if (param->quantifier == QUANTIFIER_ONE) {
+                        code_builder_format(cb, ".variants.%s.%s = %s,\n", originalMember, param->name, param->name);
+                    }
+                    else if (param->quantifier == QUANTIFIER_ANY) {
+                        code_builder_format(cb, ".variants.%s.%s.values = %s.values,\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, ".variants.%s.%s.count = %s.count,\n", originalMember, param->name, param->name);
+                    }
+                    else if (param->quantifier == QUANTIFIER_OPTIONAL) {
+                        code_builder_format(cb, ".variants.%s.%s.present = %s.present,\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, ".variants.%s.%s.value = %s.value,\n", originalMember, param->name, param->name);
+                    }
                 }
                 code_builder_dedent(cb);
                 code_builder_format(cb, "};\n");
@@ -824,7 +835,17 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "operand->%s |= Spv_%s_%s;\n", tagName, type->name, originalMember);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
+                    if (param->quantifier == QUANTIFIER_ONE) {
+                        code_builder_format(cb, "operand->%s.%s = %s;\n", originalMember, param->name, param->name);
+                    }
+                    else if (param->quantifier == QUANTIFIER_ANY) {
+                        code_builder_format(cb, "operand->%s.%s.values = %s.values;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, "operand->%s.%s.count = %s.count;\n", originalMember, param->name, param->name);
+                    }
+                    else if (param->quantifier == QUANTIFIER_OPTIONAL) {
+                        code_builder_format(cb, "operand->%s.%s.present = %s.present;\n", originalMember, param->name, param->name);
+                        code_builder_format(cb, "operand->%s.%s.value = %s.value;\n", originalMember, param->name, param->name);
+                    }
                 }
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
