@@ -166,6 +166,7 @@ typedef struct Argparse_Command {
         size_t capacity;
     } subcommands;
 
+    // TODO: We might want to factor this out into a proper struct since this lib will pass it around
     // Optional customization for memory allocation.
     // This is only considered for the root command, other commands will inherit the set allocator.
     struct {
