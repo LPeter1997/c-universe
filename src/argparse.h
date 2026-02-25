@@ -172,6 +172,14 @@ typedef struct Argparse_Command {
         // The capacity of the subcommands array.
         size_t capacity;
     } subcommands;
+
+    // Optional customization for memory allocation.
+    // This is only considered for the root command, other commands will inherit the set allocator.
+    struct {
+        void* context;
+        void* (*realloc)(void* ctx, void* ptr, size_t new_size);
+        void (*free)(void* ctx, void* ptr);
+    } allocator;
 } Argparse_Command;
 
 /**
