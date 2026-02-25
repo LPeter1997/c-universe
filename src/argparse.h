@@ -48,13 +48,6 @@
     #define ARGPARSE_DEF extern
 #endif
 
-#ifndef ARGPARSE_REALLOC
-    #define ARGPARSE_REALLOC realloc
-#endif
-#ifndef ARGPARSE_FREE
-    #define ARGPARSE_FREE free
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -409,7 +402,6 @@ typedef struct Argparse_Response {
     char* text;
     size_t length;
     size_t index;
-    struct Argparse_Response* next;
 } Argparse_Response;
 
 typedef struct Argparse_Token {
@@ -422,24 +414,27 @@ typedef struct Argparse_Tokenizer {
     int argc;
     char** argv;
     size_t argvIndex;
-    Argparse_Response* currentResponse;
+    struct {
+        // NOTE: We use a limited array to avoid dynamic memory allocations for something that will likely be never exceeded
+        Argparse_Response responses[16];
+        size_t length;
+    } responseStack;
     Argparse_Token currentToken;
 } Argparse_Tokenizer;
 
 static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
-    response.next = tokenizer->currentResponse;
-    tokenizer->currentResponse = (Argparse_Response*)ARGPARSE_REALLOC(NULL, sizeof(Argparse_Response));
-    ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "failed to allocate memory for tokenizer response");
-    *tokenizer->currentResponse = response;
+    ARGPARSE_ASSERT(tokenizer->responseStack.length < 16, "response stack overflow");
+    tokenizer->responseStack.responses[tokenizer->responseStack.length++] = response;
 }
 
 static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
-    Argparse_Response* toPop = tokenizer->currentResponse;
-    ARGPARSE_ASSERT(toPop != NULL, "cannot pop response, response stack is empty");
-    tokenizer->currentResponse = toPop->next;
-    // Free the popped response's text and the response itself
+    ARGPARSE_ASSERT(tokenizer->responseStack.length > 0, "cannot pop response, response stack is empty");
+    --tokenizer->responseStack.length;
+    Argparse_Response* toPop = &tokenizer->responseStack.responses[tokenizer->responseStack.length];
     ARGPARSE_FREE(toPop->text);
-    ARGPARSE_FREE(toPop);
+    toPop->text = NULL;
+    toPop->length = 0;
+    toPop->index = 0;
 }
 
 static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* tokenizer) {
