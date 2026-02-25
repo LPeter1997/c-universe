@@ -57,9 +57,11 @@ static void declaration_section(CodeBuilder* cb, char const* libName) {
         "\n"
         "#ifndef %s_REALLOC\n"
         "    #define %s_REALLOC realloc\n"
-        "#endif\n"
-        "#ifndef %s_FREE\n"
         "    #define %s_FREE free\n"
+        "#endif\n"
+        "\n"
+        "#ifndef %s_ASSERT\n"
+        "    #define %s_ASSERT(condition, message) ((void)message, (condition))\n"
         "#endif\n"
         "\n"
         "#ifdef __cplusplus\n"
@@ -73,7 +75,7 @@ static void declaration_section(CodeBuilder* cb, char const* libName) {
         "#endif\n"
         "\n"
         "#endif /* %s_H */\n"
-        , upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName);
+        , upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName);
     free(upcasedName);
 }
 
@@ -87,8 +89,6 @@ static void implementation_section(CodeBuilder* cb, char const* libName) {
         "\n"
         "#include <assert.h>\n"
         "\n"
-        "#define %s_ASSERT(condition, message) assert(((void)message, condition))\n"
-        "\n"
         "#ifdef __cplusplus\n"
         "extern \"C\" {\n"
         "#endif\n"
@@ -99,10 +99,8 @@ static void implementation_section(CodeBuilder* cb, char const* libName) {
         "}\n"
         "#endif\n"
         "\n"
-        "#undef %s_ASSERT\n"
-        "\n"
         "#endif /* %s_IMPLEMENTATION */\n"
-        , upcasedName, upcasedName, upcasedName, upcasedName);
+        , upcasedName, upcasedName);
     free(upcasedName);
 }
 
