@@ -5,6 +5,7 @@
  *  - #define STRING_BUILDER_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define STRING_BUILDER_STATIC before including this header to make all functions have internal linkage
  *  - #define STRING_BUILDER_REALLOC and STRING_BUILDER_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define STRING_BUILDER_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define STRING_BUILDER_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
@@ -46,10 +47,12 @@
 #endif
 
 #ifndef STRING_BUILDER_REALLOC
-    #define STRING_BUILDER_REALLOC realloc
+    #define STRING_BUILDER_REALLOC(ctx, ...) realloc(__VA_ARGS__)
+    #define STRING_BUILDER_FREE(ctx, ...) free(__VA_ARGS__)
 #endif
-#ifndef STRING_BUILDER_FREE
-    #define STRING_BUILDER_FREE free
+
+#ifndef STRING_BUILDER_ASSERT
+    #define STRING_BUILDER_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
@@ -66,6 +69,9 @@ typedef struct StringBuilder {
     size_t length;
     // The total capacity of the buffer
     size_t capacity;
+    // Optional user data that can be used with custom allocators
+    // The defined allocation macros have this pointer passed as the first argument
+    void* user_data;
 } StringBuilder;
 
 /**
@@ -264,8 +270,6 @@ STRING_BUILDER_DEF void code_builder_dedent(CodeBuilder* cb);
 #include <stdlib.h>
 #include <string.h>
 
-#define STRING_BUILDER_ASSERT(condition, message) assert(((void)message, condition))
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -277,14 +281,14 @@ void sb_reserve(StringBuilder* sb, size_t capacity) {
 
     size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
     while (newCapacity < capacity) newCapacity *= 2;
-    char* newBuffer = (char*)STRING_BUILDER_REALLOC(sb->buffer, sizeof(char) * newCapacity);
+    char* newBuffer = (char*)STRING_BUILDER_REALLOC(sb->user_data, sb->buffer, sizeof(char) * newCapacity);
     STRING_BUILDER_ASSERT(newBuffer != NULL, "failed to allocate memory for string builder");
     sb->buffer = newBuffer;
     sb->capacity = newCapacity;
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
-    char* cstr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (sb->length + 1));
+    char* cstr = (char*)STRING_BUILDER_REALLOC(sb->user_data, NULL, sizeof(char) * (sb->length + 1));
     STRING_BUILDER_ASSERT(cstr != NULL, "failed to allocate memory for cstring from string builder");
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
@@ -292,7 +296,7 @@ char* sb_to_cstr(StringBuilder* sb) {
 }
 
 void sb_free(StringBuilder* sb) {
-    STRING_BUILDER_FREE(sb->buffer);
+    STRING_BUILDER_FREE(sb->user_data, sb->buffer);
     sb->buffer = NULL;
     sb->length = 0;
     sb->capacity = 0;
@@ -519,11 +523,11 @@ void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
-    char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * ((size_t)formattedLength + 1));
+    char* formattedStr = (char*)STRING_BUILDER_REALLOC(cb->builder.user_data, NULL, sizeof(char) * ((size_t)formattedLength + 1));
     STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
     code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
-    STRING_BUILDER_FREE(formattedStr);
+    STRING_BUILDER_FREE(cb->builder.user_data, formattedStr);
 }
 
 void code_builder_indent(CodeBuilder* cb) {
@@ -538,8 +542,6 @@ void code_builder_dedent(CodeBuilder* cb) {
 #ifdef __cplusplus
 }
 #endif
-
-#undef STRING_BUILDER_ASSERT
 
 #endif /* STRING_BUILDER_IMPLEMENTATION */
 
