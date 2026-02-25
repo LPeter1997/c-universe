@@ -40,10 +40,12 @@
 #endif
 
 #ifndef JSON_REALLOC
-    #define JSON_REALLOC realloc
+    #define JSON_REALLOC(ctx, ...) realloc(__VA_ARGS__)
+    #define JSON_FREE(ctx, ...) free(__VA_ARGS__)
 #endif
-#ifndef JSON_FREE
-    #define JSON_FREE free
+
+#ifndef JSON_ASSERT
+    #define JSON_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
@@ -417,7 +419,6 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 #include <stdlib.h>
 #include <string.h>
 
-#define JSON_ASSERT(condition, message) assert(((void)message, condition))
 #define JSON_ADD_TO_ARRAY(array, length, capacity, element) \
     do { \
         if ((length) + 1 > (capacity)) { \
@@ -1784,7 +1785,6 @@ void json_free_document(Json_Document* doc) {
 #endif
 
 #undef JSON_ADD_TO_ARRAY
-#undef JSON_ASSERT
 
 #endif /* JSON_IMPLEMENTATION */
 
