@@ -42,8 +42,6 @@
 
 #ifndef CTEST_REALLOC
     #define CTEST_REALLOC realloc
-#endif
-#ifndef CTEST_FREE
     #define CTEST_FREE free
 #endif
 
