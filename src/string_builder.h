@@ -542,7 +542,7 @@ void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
-    sb_allocator_init(&cb->builder);
+    sb_init_allocator(&cb->builder);
     char* formattedStr = (char*)cb->builder.allocator.realloc(cb->builder.allocator.context, NULL, sizeof(char) * ((size_t)formattedLength + 1));
     STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
