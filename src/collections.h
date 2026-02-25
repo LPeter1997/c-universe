@@ -29,16 +29,14 @@
 
 #ifndef COLLECTIONS_REALLOC
     #define COLLECTIONS_REALLOC realloc
-#endif
-#ifndef COLLECTIONS_FREE
     #define COLLECTIONS_FREE free
 #endif
-
-// Dynamic array ///////////////////////////////////////////////////////////////
 
 #ifndef COLLECTIONS_ASSERT
     #define COLLECTIONS_ASSERT(condition, message) assert(((void)message, condition))
 #endif
+
+// Dynamic array ///////////////////////////////////////////////////////////////
 
 // Suppress -Wtype-limits for index checks (e.g., 0 <= size_t is always true)
 #if defined(__GNUC__) && !defined(__clang__)
