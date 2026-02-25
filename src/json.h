@@ -41,8 +41,8 @@
 #endif
 
 #ifndef JSON_REALLOC
-    #define JSON_REALLOC(ctx, ...) realloc(__VA_ARGS__)
-    #define JSON_FREE(ctx, ...) free(__VA_ARGS__)
+    #define JSON_REALLOC realloc
+    #define JSON_FREE free
 #endif
 
 #ifndef JSON_ASSERT

@@ -3,6 +3,7 @@
  *
  * Configuration:
  *  - #define COLLECTIONS_REALLOC and COLLECTIONS_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define COLLECTIONS_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define COLLECTIONS_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define COLLECTIONS_EXAMPLE before including this header to compile a simple example that demonstrates the library's usage
  *
