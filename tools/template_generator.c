@@ -55,11 +55,6 @@ static void declaration_section(CodeBuilder* cb, char const* libName) {
         "    #define %s_DEF extern\n"
         "#endif\n"
         "\n"
-        "#ifndef %s_REALLOC\n"
-        "    #define %s_REALLOC realloc\n"
-        "    #define %s_FREE free\n"
-        "#endif\n"
-        "\n"
         "#ifndef %s_ASSERT\n"
         "    #define %s_ASSERT(condition, message) ((void)message, (condition))\n"
         "#endif\n"
@@ -75,7 +70,7 @@ static void declaration_section(CodeBuilder* cb, char const* libName) {
         "#endif\n"
         "\n"
         "#endif /* %s_H */\n"
-        , upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName);
+        , upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName, upcasedName);
     free(upcasedName);
 }
 
