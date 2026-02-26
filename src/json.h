@@ -94,7 +94,7 @@ typedef struct Json_Options {
  */
 typedef struct Json_Error {
     // A human-readable message describing the error.
-    // Owned by the document it's added to, the library will call JSON_FREE on it when the document is freed.
+    // Owned by the document it's added to, the library will call free on it when the document is freed.
     char* message;
     // The line number where the error occurred, starting from 0.
     size_t line;
@@ -223,7 +223,8 @@ JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
 JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
 
 /**
- * Writes the given JSON value into a newly allocated string, which must be freed by the caller using JSON_FREE.
+ * Writes the given JSON value into a newly allocated string, which must be freed by the caller
+ * with the appropriate allocator specified in the options.
  * @param value The JSON value to write.
  * @param options The options to customize the behavior of the writer.
  * @param out_length A pointer to a size_t variable that will receive the length of the written string, excluding the null terminator. Can be NULL if the length is not needed.
