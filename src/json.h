@@ -1895,7 +1895,7 @@ CTEST_CASE(parse_true) {
     Json_Document doc = json_parse("true", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.value.boolean == true);
+    CTEST_ASSERT_TRUE(json_as_bool(&doc.root) == true);
     json_free_document(&doc);
 }
 
@@ -1903,7 +1903,7 @@ CTEST_CASE(parse_false) {
     Json_Document doc = json_parse("false", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.value.boolean == false);
+    CTEST_ASSERT_TRUE(json_as_bool(&doc.root) == false);
     json_free_document(&doc);
 }
 
@@ -1911,7 +1911,7 @@ CTEST_CASE(parse_integer) {
     Json_Document doc = json_parse("42", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.value.integer == 42);
+    CTEST_ASSERT_TRUE(json_as_int(&doc.root) == 42);
     json_free_document(&doc);
 }
 
@@ -1919,7 +1919,7 @@ CTEST_CASE(parse_negative_integer) {
     Json_Document doc = json_parse("-123", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.value.integer == -123);
+    CTEST_ASSERT_TRUE(json_as_int(&doc.root) == -123);
     json_free_document(&doc);
 }
 
@@ -1927,7 +1927,7 @@ CTEST_CASE(parse_double) {
     Json_Document doc = json_parse("3.14", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating > 3.13 && doc.root.value.floating < 3.15);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) > 3.13 && json_as_double(&doc.root) < 3.15);
     json_free_document(&doc);
 }
 
@@ -1935,7 +1935,7 @@ CTEST_CASE(parse_negative_double) {
     Json_Document doc = json_parse("-0.5", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating < -0.49 && doc.root.value.floating > -0.51);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) < -0.49 && json_as_double(&doc.root) > -0.51);
     json_free_document(&doc);
 }
 
@@ -1943,7 +1943,7 @@ CTEST_CASE(parse_double_with_exponent) {
     Json_Document doc = json_parse("1.5e10", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating > 1.4e10 && doc.root.value.floating < 1.6e10);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) > 1.4e10 && json_as_double(&doc.root) < 1.6e10);
     json_free_document(&doc);
 }
 
@@ -2085,8 +2085,8 @@ CTEST_CASE(object_get_at_and_remove) {
     // Test remove
     Json_Value removed;
     CTEST_ASSERT_TRUE(json_object_remove(&obj, "a", &removed));
-    CTEST_ASSERT_TRUE(removed.value.integer == 1);
-    CTEST_ASSERT_TRUE(obj.value.object.entry_count == 1);
+    CTEST_ASSERT_TRUE(json_as_int(&removed) == 1);
+    CTEST_ASSERT_TRUE(json_length(&obj) == 1);
     CTEST_ASSERT_TRUE(json_object_get(&obj, "a") == NULL);
 
     json_free_value(&obj);
@@ -2100,13 +2100,13 @@ CTEST_CASE(array_at_and_remove) {
 
     // Test assignment via json_array_at
     *json_array_at(&arr, 1) = json_int(99);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 99);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 99);
 
     // Test remove
     json_array_remove(&arr, 0);
-    CTEST_ASSERT_TRUE(arr.value.array.length == 2);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 99);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 2);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 99);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 30);
 
     json_free_value(&arr);
 }
@@ -2118,20 +2118,20 @@ CTEST_CASE(array_insert) {
 
     // Insert in the middle
     json_array_insert(&arr, 1, json_int(20));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 3);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 10);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 20);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 2)) == 30);
 
     // Insert at the beginning
     json_array_insert(&arr, 0, json_int(5));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 4);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 5);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 4);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 5);
 
     // Insert at the end (equivalent to append)
     json_array_insert(&arr, 4, json_int(40));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 5);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 4)->value.integer == 40);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 5);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 4)) == 40);
 
     json_free_value(&arr);
 }
@@ -2144,11 +2144,11 @@ CTEST_CASE(json_move_from_array) {
     // Move the string out
     Json_Value moved = json_move(json_array_at(&arr, 0));
     CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&moved), "hello") == 0);
 
     // Original location should now be null
     CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->type == JSON_VALUE_NULL);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 42);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 42);
 
     json_free_value(&moved);
     json_free_value(&arr);
@@ -2162,11 +2162,11 @@ CTEST_CASE(json_move_from_object) {
     // Move the name value out
     Json_Value moved = json_move(json_object_get(&obj, "name"));
     CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "Alice") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&moved), "Alice") == 0);
 
     // Original location should now be null
     CTEST_ASSERT_TRUE(json_object_get(&obj, "name")->type == JSON_VALUE_NULL);
-    CTEST_ASSERT_TRUE(json_object_get(&obj, "age")->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_as_int(json_object_get(&obj, "age")) == 30);
 
     json_free_value(&moved);
     json_free_value(&obj);
@@ -2258,8 +2258,8 @@ CTEST_CASE(write_roundtrip) {
     // Verify the re-parsed values match
     Json_Value* name = json_object_get(&doc2.root, "name");
     Json_Value* active = json_object_get(&doc2.root, "active");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Bob") == 0);
-    CTEST_ASSERT_TRUE(active != NULL && active->value.boolean == true);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(name), "Bob") == 0);
+    CTEST_ASSERT_TRUE(active != NULL && json_as_bool(active) == true);
 
     free(reWritten);
     json_free_document(&doc);
