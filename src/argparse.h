@@ -411,20 +411,22 @@ typedef struct Argparse_Token {
     size_t length;
 } Argparse_Token;
 
+static const size_t Argparse_MaxResponseStackDepth = 16;
+
 typedef struct Argparse_Tokenizer {
     int argc;
     char** argv;
     size_t argvIndex;
     struct {
         // NOTE: We use a limited array to avoid dynamic memory allocations for something that will likely be never exceeded
-        Argparse_Response responses[16];
+        Argparse_Response responses[Argparse_MaxResponseStackDepth];
         size_t length;
     } responseStack;
     Argparse_Token currentToken;
 } Argparse_Tokenizer;
 
 static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
-    ARGPARSE_ASSERT(tokenizer->responseStack.length < 16, "response stack overflow");
+    ARGPARSE_ASSERT(tokenizer->responseStack.length < Argparse_MaxResponseStackDepth, "response stack overflow");
     tokenizer->responseStack.responses[tokenizer->responseStack.length++] = response;
 }
 
@@ -529,6 +531,12 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     // If we are at the start of the token and it's a response, we need to push it onto the stack
     // Not a response
     if (tokenizer->currentToken.index != 0 || tokenizer->currentToken.text[0] != '@') return false;
+
+    if (tokenizer->responseStack.length >= Argparse_MaxResponseStackDepth) {
+        error = argparse_format("response stack overflow, maximum depth of %zu exceeded", Argparse_MaxResponseStackDepth);
+        argparse_add_error(pack, error);
+        return false;
+    }
 
     Argparse_Token* token = &tokenizer->currentToken;
     // We interpret the token (minus the @) as a file path
