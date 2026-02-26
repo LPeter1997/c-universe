@@ -57,6 +57,18 @@ struct Argparse_Argument;
 struct Argparse_Option;
 
 /**
+ * An allocator struct that allows customizing memory allocation for the library.
+ */
+typedef struct Argparse_Allocator {
+    // A user-defined context pointer that will be passed to realloc and free
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Argparse_Allocator;
+
+/**
  * The result of parsing command-line arguments, containing the parsed values and any errors that were encountered during parsing.
  */
 typedef struct Argparse_Pack {
@@ -165,15 +177,6 @@ typedef struct Argparse_Command {
         // The capacity of the subcommands array.
         size_t capacity;
     } subcommands;
-
-    // TODO: We might want to factor this out into a proper struct since this lib will pass it around
-    // Optional customization for memory allocation.
-    // This is only considered for the root command, other commands will inherit the set allocator.
-    struct {
-        void* context;
-        void* (*realloc)(void* ctx, void* ptr, size_t new_size);
-        void (*free)(void* ctx, void* ptr);
-    } allocator;
 } Argparse_Command;
 
 /**
