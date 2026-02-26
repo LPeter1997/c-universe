@@ -4,7 +4,6 @@
  * Configuration:
  *  - #define JSON_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define JSON_STATIC before including this header to make all functions have internal linkage
- *  - #define JSON_REALLOC and JSON_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
  *  - #define JSON_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define JSON_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define JSON_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
@@ -52,6 +51,18 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * An allocator struct that allows customizing memory allocation for the JSON library.
+ */
+typedef struct Json_Allocator {
+    // Context pointer that will be passed to the realloc and free functions
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Json_Allocator;
 
 /**
  * Extension flags for the JSON parser, allowing it to support common, non-standard JSON features.
