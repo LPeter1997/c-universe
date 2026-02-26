@@ -14,9 +14,11 @@
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
 #ifndef SPV_H
-#define SPV_H
+// IMPORTANT: We do NOT define SPV_H here, as the generated sections will be dumped at the end of this file, which will define it
+//#define SPV_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef SPV_STATIC
     #define SPV_DEF static
@@ -32,7 +34,9 @@
 extern "C" {
 #endif
 
-// TODO: Public API declarations
+typedef struct Spv_ChunkEncoder {
+
+} Spv_ChunkEncoder;
 
 #ifdef __cplusplus
 }
@@ -94,3 +98,8 @@ int main(void) {
 }
 
 #endif /* SPV_EXAMPLE */
+
+////////////////////////////////////////////////////////////////////////////////
+// Generated section                                                          //
+////////////////////////////////////////////////////////////////////////////////
+// TODO
