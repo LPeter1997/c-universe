@@ -2051,8 +2051,8 @@ CTEST_CASE(build_object_manually) {
 
     Json_Value* name = json_object_get(&obj, "name");
     Json_Value* score = json_object_get(&obj, "score");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(*name), "Alice") == 0);
-    CTEST_ASSERT_TRUE(score != NULL && json_as_int(*score) == 100);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(name), "Alice") == 0);
+    CTEST_ASSERT_TRUE(score != NULL && json_as_int(score) == 100);
 
     json_free_value(&obj);
 }
@@ -2064,9 +2064,9 @@ CTEST_CASE(build_array_manually) {
     json_array_append(&arr, json_int(30));
 
     CTEST_ASSERT_TRUE(json_length(&arr) == 3);
-    CTEST_ASSERT_TRUE(json_as_int(*json_array_at(&arr, 0)) == 10);
-    CTEST_ASSERT_TRUE(json_as_int(*json_array_at(&arr, 1)) == 20);
-    CTEST_ASSERT_TRUE(json_as_int(*json_array_at(&arr, 2)) == 30);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 10);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 20);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 2)) == 30);
 
     json_free_value(&arr);
 }
