@@ -403,7 +403,7 @@ static void operand_unhinged_naming_handler(StringBuilder* sb) {
     // We'll need to turn this into a somewhat human-friendly name
     //  - for case 1 we can use 'Foos'
     //  - for case 2 we can use 'FooAndBars'
-    // Sewriously, who the hell thought putting crap like this into a machine-readable grammar was a good idea?
+    // Seriously, who the hell thought putting crap like this into a machine-readable grammar was a good idea?
 
     if (!sb_contains(sb, "...")) return;
 
