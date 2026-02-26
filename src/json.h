@@ -1882,6 +1882,9 @@ void json_free_document(Json_Document* doc) {
 #define ASSERT_NO_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length == 0)
 #define ASSERT_HAS_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length > 0)
 
+// Since we use default allocator for tests
+Json_Allocator no_allocator = {0};
+
 // Parsing primitives //////////////////////////////////////////////////////////
 
 CTEST_CASE(parse_null) {
@@ -2045,8 +2048,8 @@ CTEST_CASE(parse_trailing_comma_allowed_with_extension) {
 // Builder API /////////////////////////////////////////////////////////////////
 
 CTEST_CASE(build_object_manually) {
-    Json_Value obj = json_object();
-    json_object_set(&obj, "name", json_string("Alice"));
+    Json_Value obj = json_object(no_allocator);
+    json_object_set(&obj, "name", json_string("Alice", no_allocator));
     json_object_set(&obj, "score", json_int(100));
 
     Json_Value* name = json_object_get(&obj, "name");
@@ -2058,7 +2061,7 @@ CTEST_CASE(build_object_manually) {
 }
 
 CTEST_CASE(build_array_manually) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
@@ -2072,7 +2075,7 @@ CTEST_CASE(build_array_manually) {
 }
 
 CTEST_CASE(object_get_at_and_remove) {
-    Json_Value obj = json_object();
+    Json_Value obj = json_object(no_allocator);
     json_object_set(&obj, "a", json_int(1));
     json_object_set(&obj, "b", json_int(2));
 
@@ -2093,7 +2096,7 @@ CTEST_CASE(object_get_at_and_remove) {
 }
 
 CTEST_CASE(array_at_and_remove) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
@@ -2112,7 +2115,7 @@ CTEST_CASE(array_at_and_remove) {
 }
 
 CTEST_CASE(array_insert) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(30));
 
@@ -2137,8 +2140,8 @@ CTEST_CASE(array_insert) {
 }
 
 CTEST_CASE(json_move_from_array) {
-    Json_Value arr = json_array();
-    json_array_append(&arr, json_string("hello"));
+    Json_Value arr = json_array(no_allocator);
+    json_array_append(&arr, json_string("hello", no_allocator));
     json_array_append(&arr, json_int(42));
 
     // Move the string out
@@ -2155,8 +2158,8 @@ CTEST_CASE(json_move_from_array) {
 }
 
 CTEST_CASE(json_move_from_object) {
-    Json_Value obj = json_object();
-    json_object_set(&obj, "name", json_string("Alice"));
+    Json_Value obj = json_object(no_allocator);
+    json_object_set(&obj, "name", json_string("Alice", no_allocator));
     json_object_set(&obj, "age", json_int(30));
 
     // Move the name value out
@@ -2174,12 +2177,12 @@ CTEST_CASE(json_move_from_object) {
 
 CTEST_CASE(json_length_accessor) {
     // Test string length
-    Json_Value str = json_string("hello");
+    Json_Value str = json_string("hello", no_allocator);
     CTEST_ASSERT_TRUE(json_length(&str) == 5);
     json_free_value(&str);
 
     // Test array length
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(1));
     json_array_append(&arr, json_int(2));
     json_array_append(&arr, json_int(3));
@@ -2187,7 +2190,7 @@ CTEST_CASE(json_length_accessor) {
     json_free_value(&arr);
 
     // Test object length
-    Json_Value obj = json_object();
+    Json_Value obj = json_object(no_allocator);
     json_object_set(&obj, "a", json_int(1));
     json_object_set(&obj, "b", json_int(2));
     CTEST_ASSERT_TRUE(json_length(&obj) == 2);
@@ -2211,7 +2214,7 @@ CTEST_CASE(safe_accessors) {
     CTEST_ASSERT_TRUE(json_as_bool(&bool_val) == true);
 
     // Test json_as_string
-    Json_Value str_val = json_string("test");
+    Json_Value str_val = json_string("test", no_allocator);
     CTEST_ASSERT_TRUE(strcmp(json_as_string(&str_val), "test") == 0);
 
     json_free_value(&str_val);
@@ -2225,7 +2228,7 @@ CTEST_CASE(write_primitives) {
     char* null_str = json_write(json_null(), opts, NULL);
     char* true_str = json_write(json_bool(true), opts, NULL);
     char* int_str = json_write(json_int(42), opts, NULL);
-    char* str_str = json_write(json_string("hello"), opts, NULL);
+    char* str_str = json_write(json_string("hello", no_allocator), opts, NULL);
 
     CTEST_ASSERT_TRUE(strcmp(null_str, "null") == 0);
     CTEST_ASSERT_TRUE(strcmp(true_str, "true") == 0);
@@ -2239,7 +2242,7 @@ CTEST_CASE(write_primitives) {
 }
 
 CTEST_CASE(write_string_escapes) {
-    Json_Value val = json_string("line1\nline2\ttab");
+    Json_Value val = json_string("line1\nline2\ttab", no_allocator);
     char* str = json_write(val, (Json_Options){0}, NULL);
     CTEST_ASSERT_TRUE(strcmp(str, "\"line1\\nline2\\ttab\"") == 0);
     free(str);
