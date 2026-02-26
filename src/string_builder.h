@@ -4,7 +4,7 @@
  * Configuration:
  *  - #define STRING_BUILDER_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define STRING_BUILDER_STATIC before including this header to make all functions have internal linkage
- *  - #define STRING_BUILDER_REALLOC and STRING_BUILDER_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define STRING_BUILDER_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define STRING_BUILDER_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define STRING_BUILDER_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
@@ -14,10 +14,11 @@
  *  - Use sb_remove to remove a portion of the string, and sb_replace to replace all occurrences of a target string
  *  - Use sb_length to get the current length, and sb_char_at to access a character at a specific position
  *  - Use sb_contains and sb_containsc to check if the builder contains a string or character
- *  - Use sb_index_of and sb_indexofc to find the position of a string or character (-1 if not found)
+ *  - Use sb_index_of and sb_index_ofc to find the position of a string or character (-1 if not found)
  *  - Use sb_to_cstr to get a heap-allocated C string with the current content of the builder, which must be freed by the caller
  *  - Use sb_clear to clear the content of the builder without freeing the allocated buffer
  *  - Use sb_free to free the memory allocated for the builder when it is no longer needed
+ *  - Use the allocator field and SB_Allocator to customize memory allocation if needed
  *
  * CodeBuilder API:
  *  - Similar to StringBuilder but with automatic indentation at the start of lines, useful for code generation
@@ -45,16 +46,25 @@
     #define STRING_BUILDER_DEF extern
 #endif
 
-#ifndef STRING_BUILDER_REALLOC
-    #define STRING_BUILDER_REALLOC realloc
-#endif
-#ifndef STRING_BUILDER_FREE
-    #define STRING_BUILDER_FREE free
+#ifndef STRING_BUILDER_ASSERT
+    #define STRING_BUILDER_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * An allocator struct that allows customizing memory allocation for the string builder.
+ */
+typedef struct SB_Allocator {
+    // A user-defined context pointer that will be passed to realloc and free
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} SB_Allocator;
 
 /**
  * A simple dynamic string builder.
@@ -66,6 +76,8 @@ typedef struct StringBuilder {
     size_t length;
     // The total capacity of the buffer
     size_t capacity;
+    // Optional custom memory allocator
+    SB_Allocator allocator;
 } StringBuilder;
 
 /**
@@ -220,7 +232,7 @@ STRING_BUILDER_DEF int sb_index_of(StringBuilder* sb, char const* str);
  * @param c The character to search for.
  * @return The index of the first occurrence, or -1 if not found.
  */
-STRING_BUILDER_DEF int sb_indexofc(StringBuilder* sb, char c);
+STRING_BUILDER_DEF int sb_index_ofc(StringBuilder* sb, char c);
 
 /**
  * Utility for building code with indentation, using an underlying string builder.
@@ -264,11 +276,42 @@ STRING_BUILDER_DEF void code_builder_dedent(CodeBuilder* cb);
 #include <stdlib.h>
 #include <string.h>
 
-#define STRING_BUILDER_ASSERT(condition, message) assert(((void)message, condition))
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Allocation //////////////////////////////////////////////////////////////////
+
+static void* sb_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+
+static void sb_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+static void sb_init_allocator(SB_Allocator* allocator) {
+    if (allocator->realloc != NULL || allocator->free != NULL) {
+        STRING_BUILDER_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
+        return;
+    }
+    allocator->realloc = sb_default_realloc;
+    allocator->free = sb_default_free;
+}
+
+static void* sb_alloc_realloc(SB_Allocator* allocator, void* ptr, size_t size) {
+    sb_init_allocator(allocator);
+    void* result = allocator->realloc(allocator->context, ptr, size);
+    STRING_BUILDER_ASSERT(result != NULL, "failed to allocate memory");
+    return result;
+}
+
+static void sb_alloc_free(SB_Allocator* allocator, void* ptr) {
+    sb_init_allocator(allocator);
+    allocator->free(allocator->context, ptr);
+}
 
 // String builder //////////////////////////////////////////////////////////////
 
@@ -277,22 +320,21 @@ void sb_reserve(StringBuilder* sb, size_t capacity) {
 
     size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
     while (newCapacity < capacity) newCapacity *= 2;
-    char* newBuffer = (char*)STRING_BUILDER_REALLOC(sb->buffer, sizeof(char) * newCapacity);
-    STRING_BUILDER_ASSERT(newBuffer != NULL, "failed to allocate memory for string builder");
+
+    char* newBuffer = (char*)sb_alloc_realloc(&sb->allocator, sb->buffer, sizeof(char) * newCapacity);
     sb->buffer = newBuffer;
     sb->capacity = newCapacity;
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
-    char* cstr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * (sb->length + 1));
-    STRING_BUILDER_ASSERT(cstr != NULL, "failed to allocate memory for cstring from string builder");
+    char* cstr = (char*)sb_alloc_realloc(&sb->allocator, NULL, sizeof(char) * (sb->length + 1));
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
     return cstr;
 }
 
 void sb_free(StringBuilder* sb) {
-    STRING_BUILDER_FREE(sb->buffer);
+    sb_alloc_free(&sb->allocator, sb->buffer);
     sb->buffer = NULL;
     sb->length = 0;
     sb->capacity = 0;
@@ -412,7 +454,7 @@ bool sb_contains(StringBuilder* sb, char const* str) {
 }
 
 bool sb_containsc(StringBuilder* sb, char c) {
-    return sb_indexofc(sb, c) >= 0;
+    return sb_index_ofc(sb, c) >= 0;
 }
 
 int sb_index_of(StringBuilder* sb, char const* str) {
@@ -427,7 +469,7 @@ int sb_index_of(StringBuilder* sb, char const* str) {
     return -1;
 }
 
-int sb_indexofc(StringBuilder* sb, char c) {
+int sb_index_ofc(StringBuilder* sb, char c) {
     for (size_t pos = 0; pos < sb->length; ++pos) {
         if (sb->buffer[pos] == c) {
             return (int)pos;
@@ -519,11 +561,10 @@ void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
-    char* formattedStr = (char*)STRING_BUILDER_REALLOC(NULL, sizeof(char) * ((size_t)formattedLength + 1));
-    STRING_BUILDER_ASSERT(formattedStr != NULL, "failed to allocate memory for formatted string in code builder");
+    char* formattedStr = (char*)sb_alloc_realloc(&cb->builder.allocator, NULL, sizeof(char) * ((size_t)formattedLength + 1));
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
     code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
-    STRING_BUILDER_FREE(formattedStr);
+    sb_alloc_free(&cb->builder.allocator, formattedStr);
 }
 
 void code_builder_indent(CodeBuilder* cb) {
@@ -538,8 +579,6 @@ void code_builder_dedent(CodeBuilder* cb) {
 #ifdef __cplusplus
 }
 #endif
-
-#undef STRING_BUILDER_ASSERT
 
 #endif /* STRING_BUILDER_IMPLEMENTATION */
 
@@ -1155,34 +1194,34 @@ CTEST_CASE(string_builder_index_of_first_occurrence) {
     sb_free(&sb);
 }
 
-CTEST_CASE(string_builder_indexofc_finds) {
+CTEST_CASE(string_builder_index_ofc_finds) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "Hello");
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'H') == 0);
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'e') == 1);
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'o') == 4);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'H') == 0);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'e') == 1);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'o') == 4);
     sb_free(&sb);
 }
 
-CTEST_CASE(string_builder_indexofc_not_found) {
+CTEST_CASE(string_builder_index_ofc_not_found) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "Hello");
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'x') == -1);
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'h') == -1);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'x') == -1);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'h') == -1);
     sb_free(&sb);
 }
 
-CTEST_CASE(string_builder_indexofc_first_occurrence) {
+CTEST_CASE(string_builder_index_ofc_first_occurrence) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "abcabc");
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'b') == 1);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'b') == 1);
     sb_free(&sb);
 }
 
 CTEST_CASE(string_builder_index_of_in_empty_builder) {
     StringBuilder sb = test_sb_create();
     CTEST_ASSERT_TRUE(sb_index_of(&sb, "test") == -1);
-    CTEST_ASSERT_TRUE(sb_indexofc(&sb, 'a') == -1);
+    CTEST_ASSERT_TRUE(sb_index_ofc(&sb, 'a') == -1);
     CTEST_ASSERT_TRUE(sb_index_of(&sb, "") == 0);
     sb_free(&sb);
 }
