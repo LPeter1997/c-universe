@@ -864,6 +864,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
                 code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
             }
         }
+        code_builder_putc(cb, '\n');
     }
     else if (type->kind == TYPE_TUPLE) {
         Tuple* tuple = &type->value.tuple;
