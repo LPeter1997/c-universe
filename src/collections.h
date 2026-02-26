@@ -68,10 +68,20 @@ do { \
         if ((allocator).realloc != NULL || (allocator).free != NULL) { \
             COLLECTIONS_ASSERT((allocator).realloc != NULL && (allocator).free != NULL, "both realloc and free function pointers must be set in allocator"); \
         } else { \
-            (allocator).realloc = realloc; \
-            (allocator).free = free; \
+            (allocator).realloc = collections_default_realloc; \
+            (allocator).free = collections_default_free; \
         } \
     } while (false)
+
+// NOTE: Ugly, maybe one day this lib will have an implementation section, for now we put the default allocation functions here
+static inline void* collections_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+static inline void collections_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
 
 // Dynamic array ///////////////////////////////////////////////////////////////
 
