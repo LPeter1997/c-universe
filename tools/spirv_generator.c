@@ -823,7 +823,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
             char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
             if (!enumeration->flags && enumerant->parameters.length == 0) {
                 // Value-enum element without parameters, we generate a constant for it
-                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                if (declare) code_builder_puts(cb, "extern ");
                 code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
                 if (!declare) code_builder_format(cb, " = { .%s = Spv_%s_%s }", tagName, type->name, originalMember);
                 code_builder_puts(cb, ";\n");
@@ -881,7 +881,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
             else {
                 // We expect 0 to be a special case, define a constant for it
                 assert(DynamicArray_length(enumerant->parameters) == 0);
-                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                if (declare) code_builder_puts(cb, "extern ");
                 code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
                 if (!declare) code_builder_format(cb, " = { .%s = 0 }", tagName);
                 code_builder_puts(cb, ";\n");
