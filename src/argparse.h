@@ -17,7 +17,7 @@
  * Configuration:
  *  - #define ARGPARSE_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define ARGPARSE_STATIC before including this header to make all functions have internal linkage
- *  - #define ARGPARSE_REALLOC and ARGPARSE_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define ARGPARSE_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define ARGPARSE_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define ARGPARSE_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
@@ -30,6 +30,7 @@
  *  - Use argparse_print_usage to print usage information for a command
  *  - Use argparse_free_pack and argparse_free_command to free the memory associated with packs and commands when they are no longer needed
  *  - Use argparse_format to create formatted strings for error messages
+ *  - Customize memory allocation by providing a custom Argparse_Allocator to the root command and use argparse_realloc and argparse_free for memory management
  */
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,11 +49,8 @@
     #define ARGPARSE_DEF extern
 #endif
 
-#ifndef ARGPARSE_REALLOC
-    #define ARGPARSE_REALLOC realloc
-#endif
-#ifndef ARGPARSE_FREE
-    #define ARGPARSE_FREE free
+#ifndef ARGPARSE_ASSERT
+    #define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
@@ -62,6 +60,18 @@ extern "C" {
 struct Argparse_Command;
 struct Argparse_Argument;
 struct Argparse_Option;
+
+/**
+ * An allocator struct that allows customizing memory allocation for the library.
+ */
+typedef struct Argparse_Allocator {
+    // A user-defined context pointer that will be passed to realloc and free
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Argparse_Allocator;
 
 /**
  * The result of parsing command-line arguments, containing the parsed values and any errors that were encountered during parsing.
@@ -86,7 +96,7 @@ typedef struct Argparse_Pack {
     // Owned list of errors
     struct {
         // The error messages that were produced.
-        char const** elements;
+        char** elements;
         // The number of error messages.
         size_t length;
         // The capacity of the errors array.
@@ -99,12 +109,12 @@ typedef struct Argparse_Pack {
  */
 typedef struct Argparse_ParseResult {
     // The value that was parsed, if parsing succeeded.
-    // The library will call ARGPARSE_FREE on this value when the pack is freed, so it must be heap-allocated if parsing succeeded.
+    // The library will attempt to free this value, so it must be heap-allocated if parsing succeeded.
     void* value;
     // An error message if parsing failed, or NULL if parsing succeeded.
-    // The library will call ARGPARSE_FREE on this error message when the pack is freed, so it must be heap-allocated if parsing failed.
+    // The library will attempt to free this error message when the pack is freed, so it must be heap-allocated if parsing failed.
     // Consider using @see argparse_format to create error messages for this.
-    char const* error;
+    char* error;
 } Argparse_ParseResult;
 
 /**
@@ -118,8 +128,8 @@ typedef enum Argparse_Arity {
     ARGPARSE_ARITY_ONE_OR_MORE,
 } Argparse_Arity;
 
-typedef Argparse_ParseResult Argparse_ParseFn(char const* text, size_t length);
-typedef void* Argparse_ValueFn(struct Argparse_Option* option);
+typedef Argparse_ParseResult Argparse_ParseFn(Argparse_Allocator* allocator, char const* text, size_t length);
+typedef void* Argparse_ValueFn(Argparse_Allocator* allocator, struct Argparse_Option* option);
 
 /**
  * Describes an option that a command accepts, including its name(s), description, arity, default value and custom parsing function.
@@ -172,6 +182,10 @@ typedef struct Argparse_Command {
         // The capacity of the subcommands array.
         size_t capacity;
     } subcommands;
+
+    // Optional custom allocator. Only specify for the root command before adding subcommands, it will be inherited by all subcommands
+    // when they are registered. Mixing the command tree with different allocators is UB by the library.
+    Argparse_Allocator allocator;
 } Argparse_Command;
 
 /**
@@ -264,19 +278,37 @@ ARGPARSE_DEF void argparse_free_command(Argparse_Command* command);
 /**
  * Formats a string using printf-style formatting, returning a heap-allocated string that must be freed by the caller.
  * This is a convenience function with the primary purpose of creating error messages for parser functions.
+ * @param allocator The allocator to use for memory management.
  * @param format The format string, followed by any additional arguments needed for formatting.
  * @param ... The additional arguments needed for formatting, as specified by the format string.
- * @returns A heap-allocated string containing the formatted result, will be freed by the library using ARGPARSE_FREE.
+ * @returns A heap-allocated string containing the formatted result.
  */
-ARGPARSE_DEF char* argparse_format(char const* format, ...);
+ARGPARSE_DEF char* argparse_format(Argparse_Allocator* allocator, char const* format, ...);
 
 /**
  * Same as @see argparse_format but takes a va_list instead of variadic arguments.
+ * @param allocator The allocator to use for memory management.
  * @param format The format string, followed by any additional arguments needed for formatting.
  * @param args The va_list of arguments needed for formatting.
- * @returns A heap-allocated string containing the formatted result, will be freed by the library using ARGPARSE_FREE.
+ * @returns A heap-allocated string containing the formatted result.
  */
-ARGPARSE_DEF char* argparse_vformat(char const* format, va_list args);
+ARGPARSE_DEF char* argparse_vformat(Argparse_Allocator* allocator, char const* format, va_list args);
+
+/**
+ * Reallocates memory using the specified allocator. If the allocator is zero-initialized, realloc will be called.
+ * @param allocator The allocator to use.
+ * @param ptr A pointer to the memory block to reallocate, or NULL to allocate a new block.
+ * @param size The new size of the memory block, in bytes.
+ * @returns A pointer to the reallocated memory block.
+ */
+ARGPARSE_DEF void* argparse_realloc(Argparse_Allocator* allocator, void* ptr, size_t size);
+
+/**
+ * Frees memory using the specified allocator. If the allocator is zero-initialized, free will be called.
+ * @param allocator The allocator to use.
+ * @param ptr A pointer to the memory block to free.
+ */
+ARGPARSE_DEF void argparse_free(Argparse_Allocator* allocator, void* ptr);
 
 #ifdef __cplusplus
 }
@@ -297,22 +329,55 @@ ARGPARSE_DEF char* argparse_vformat(char const* format, va_list args);
 #include <string.h>
 #include <stdlib.h>
 
-#define ARGPARSE_ASSERT(condition, message) assert(((void)message, condition))
-#define ARGPARSE_ADD_TO_ARRAY(array, length, capacity, element) \
+#define ARGPARSE_ADD_TO_ARRAY(allocator, array, element) \
     do { \
-        if ((length) + 1 > (capacity)) { \
-            size_t newCapacity = ((capacity) == 0) ? 8 : ((capacity) * 2); \
-            void* newElements = ARGPARSE_REALLOC((array), newCapacity * sizeof(*(array))); \
-            ARGPARSE_ASSERT(newElements != NULL, "failed to allocate memory for array"); \
-            (array) = newElements; \
-            (capacity) = newCapacity; \
+        if ((array).length + 1 > (array).capacity) { \
+            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
+            void* newElements = argparse_realloc((allocator), (array).elements, newCapacity * sizeof(*((array).elements))); \
+            (array).elements = newElements; \
+            (array).capacity = newCapacity; \
         } \
-        (array)[(length)++] = element; \
+        (array).elements[(array).length++] = element; \
     } while (false)
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Allocation //////////////////////////////////////////////////////////////////
+
+static void* argparse_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+
+static void argparse_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+static void argparse_init_allocator(Argparse_Allocator* allocator) {
+    if (allocator->realloc != NULL || allocator->free != NULL) {
+        ARGPARSE_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
+        return;
+    }
+    allocator->realloc = argparse_default_realloc;
+    allocator->free = argparse_default_free;
+}
+
+void* argparse_realloc(Argparse_Allocator* allocator, void* ptr, size_t size) {
+    argparse_init_allocator(allocator);
+    void* result = allocator->realloc(allocator->context, ptr, size);
+    ARGPARSE_ASSERT(result != NULL, "failed to allocate memory");
+    return result;
+}
+
+void argparse_free(Argparse_Allocator* allocator, void* ptr) {
+    argparse_init_allocator(allocator);
+    allocator->free(allocator->context, ptr);
+}
+
+// Misc ////////////////////////////////////////////////////////////////////////
 
 static bool argparse_option_has_name(Argparse_Option* option, char const* name) {
     return (option->long_name != NULL && strcmp(option->long_name, name) == 0)
@@ -344,16 +409,16 @@ static Argparse_Option* argparse_find_option_with_name_n(Argparse_Command* comma
     return NULL;
 }
 
-static void argparse_add_error(Argparse_Pack* pack, char const* error) {
-    ARGPARSE_ADD_TO_ARRAY(pack->errors.elements, pack->errors.length, pack->errors.capacity, error);
+static void argparse_add_error(Argparse_Pack* pack, char* error) {
+    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, pack->errors, error);
 }
 
 static void argparse_add_argument(Argparse_Pack* pack, Argparse_Argument arg) {
-    ARGPARSE_ADD_TO_ARRAY(pack->arguments.elements, pack->arguments.length, pack->arguments.capacity, arg);
+    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, pack->arguments, arg);
 }
 
-static void argparse_add_value_to_argument(Argparse_Argument* argument, void* value) {
-    ARGPARSE_ADD_TO_ARRAY(argument->values.elements, argument->values.length, argument->values.capacity, value);
+static void argparse_add_value_to_argument(Argparse_Pack* pack, Argparse_Argument* argument, void* value) {
+    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, argument->values, value);
 }
 
 // Tokenization logic //////////////////////////////////////////////////////////
@@ -401,7 +466,6 @@ typedef struct Argparse_Response {
     char* text;
     size_t length;
     size_t index;
-    struct Argparse_Response* next;
 } Argparse_Response;
 
 typedef struct Argparse_Token {
@@ -411,32 +475,54 @@ typedef struct Argparse_Token {
 } Argparse_Token;
 
 typedef struct Argparse_Tokenizer {
+    Argparse_Pack* pack;
     int argc;
     char** argv;
     size_t argvIndex;
-    Argparse_Response* currentResponse;
+    struct {
+        Argparse_Response* elements;
+        size_t capacity;
+        size_t length;
+    } responseStack;
     Argparse_Token currentToken;
 } Argparse_Tokenizer;
 
+static void argparse_tokenizer_free(Argparse_Tokenizer* tokenizer) {
+    Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
+    for (size_t i = 0; i < tokenizer->responseStack.length; ++i) {
+        Argparse_Response* response = &tokenizer->responseStack.elements[i];
+        argparse_free(allocator, response->text);
+    }
+    argparse_free(allocator, tokenizer->responseStack.elements);
+    tokenizer->responseStack.elements = NULL;
+    tokenizer->responseStack.length = 0;
+    tokenizer->responseStack.capacity = 0;
+}
+
+static Argparse_Response* argparse_tokenizer_current_response(Argparse_Tokenizer* tokenizer) {
+    if (tokenizer->responseStack.length == 0) return NULL;
+    return &tokenizer->responseStack.elements[tokenizer->responseStack.length - 1];
+}
+
 static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
-    response.next = tokenizer->currentResponse;
-    tokenizer->currentResponse = (Argparse_Response*)ARGPARSE_REALLOC(NULL, sizeof(Argparse_Response));
-    ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "failed to allocate memory for tokenizer response");
-    *tokenizer->currentResponse = response;
+    Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
+    ARGPARSE_ADD_TO_ARRAY(allocator, tokenizer->responseStack, response);
 }
 
 static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
-    Argparse_Response* toPop = tokenizer->currentResponse;
+    Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
+    Argparse_Response* toPop = argparse_tokenizer_current_response(tokenizer);
     ARGPARSE_ASSERT(toPop != NULL, "cannot pop response, response stack is empty");
-    tokenizer->currentResponse = toPop->next;
-    // Free the popped response's text and the response itself
-    ARGPARSE_FREE(toPop->text);
-    ARGPARSE_FREE(toPop);
+    --tokenizer->responseStack.length;
+    argparse_free(allocator, toPop->text);
+    toPop->text = NULL;
+    toPop->length = 0;
+    toPop->index = 0;
 }
 
 static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* tokenizer) {
-    ARGPARSE_ASSERT(tokenizer->currentResponse != NULL, "cannot read from response, no current response present");
-    Argparse_Response* response = tokenizer->currentResponse;
+    Argparse_Response* response = argparse_tokenizer_current_response(tokenizer);
+    ARGPARSE_ASSERT(response != NULL, "cannot read from response, no current response present");
     Argparse_Token* token = &tokenizer->currentToken;
 
 start:
@@ -476,7 +562,7 @@ start:
 // Does not do any extra handling
 // If the source is exhausted, sets currentToken.text to NULL
 static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
-    if (tokenizer->currentResponse == NULL) {
+    if (tokenizer->responseStack.length == 0) {
         Argparse_Token* token = &tokenizer->currentToken;
         // Easy, read from argv
         if (tokenizer->argvIndex >= (size_t)tokenizer->argc) {
@@ -501,13 +587,14 @@ static void argparse_tokenizer_skip_current(Argparse_Tokenizer* tokenizer) {
     Argparse_Token* token = &tokenizer->currentToken;
     ARGPARSE_ASSERT(token->text != NULL, "cannot skip current token, no current token present");
 
-    if (tokenizer->currentResponse == NULL) {
+    Argparse_Response* currentResponse = argparse_tokenizer_current_response(tokenizer);
+    if (currentResponse == NULL) {
         // Easy, just move to the next argv
         ++tokenizer->argvIndex;
     }
     else {
         // We just move the index forward by the length of the current token
-        tokenizer->currentResponse->index += token->length;
+        currentResponse->index += token->length;
     }
 
     // Either way, we clear the currnet token's state, so that we read a new token on the next read
@@ -518,7 +605,9 @@ static void argparse_tokenizer_skip_current(Argparse_Tokenizer* tokenizer) {
 
 // Handles the current token, unwrapping it if it's a response file token and pushing it on the stack if so
 // Returns true if the token was handled as a response file token, false otherwise
-static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+static bool argparse_tokenizer_handle_current_as_response(Argparse_Tokenizer* tokenizer) {
+    Argparse_Pack* pack = tokenizer->pack;
+    Argparse_Allocator* allocator = &pack->command->allocator;
     char* error = NULL;
     ARGPARSE_ASSERT(tokenizer->currentToken.text != NULL, "cannot process current token, no current token present");
 
@@ -528,7 +617,7 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
 
     Argparse_Token* token = &tokenizer->currentToken;
     // We interpret the token (minus the @) as a file path
-    char* filePath = argparse_format("%.*s", (int)(token->length - 1), token->text + 1);
+    char* filePath = argparse_format(allocator, "%.*s", (int)(token->length - 1), token->text + 1);
     // Skip this token to not re-read it when the response is processed
     argparse_tokenizer_skip_current(tokenizer);
     // Open file for reading in binary mode to avoid CRLF translation issues
@@ -540,11 +629,10 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
     if (fileSize < 0) goto io_fail;
     fseek(file, 0, SEEK_SET);
     // Read file content
-    char* fileContent = (char*)ARGPARSE_REALLOC(NULL, (size_t)fileSize * sizeof(char));
-    ARGPARSE_ASSERT(fileContent != NULL, "failed to allocate memory for response file content");
+    char* fileContent = (char*)argparse_realloc(allocator, NULL, (size_t)fileSize);
     size_t bytesRead = fread(fileContent, 1, (size_t)fileSize, file);
     fclose(file);
-    ARGPARSE_FREE(filePath);
+    argparse_free(allocator, filePath);
     // Push content as new response
     argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
         .text = fileContent,
@@ -555,8 +643,8 @@ static bool argparse_tokenizer_handle_current_as_response(Argparse_Pack* pack, A
 
 io_fail:
     // Report error, we add a dummy response to the stack to allow processing to continue
-    error = argparse_format("failed to read response file '%s'", filePath);
-    ARGPARSE_FREE(filePath);
+    error = argparse_format(allocator, "failed to read response file '%s'", filePath);
+    argparse_free(allocator, filePath);
     argparse_add_error(pack, error);
     argparse_tokenizer_push_response(tokenizer, (Argparse_Response){
         .text = NULL,
@@ -567,16 +655,16 @@ io_fail:
 }
 
 // Reads in the next full token, handling it as a response file if needed
-static bool argparse_tokenizer_next_internal(Argparse_Pack* pack, Argparse_Tokenizer* tokenizer) {
+static bool argparse_tokenizer_next_internal(Argparse_Tokenizer* tokenizer) {
 start:
     if (tokenizer->currentToken.text == NULL) {
         // Try to read the current token
         argparse_tokenizer_read_current(tokenizer);
         // If we still don't have a token and the response stack is empty, we are done
-        if (tokenizer->currentToken.text == NULL && tokenizer->currentResponse == NULL) return false;
+        if (tokenizer->currentToken.text == NULL && tokenizer->responseStack.length == 0) return false;
         // If we got a token, check if it's a response file token and handle it if so
         if (tokenizer->currentToken.text != NULL) {
-            if (argparse_tokenizer_handle_current_as_response(pack, tokenizer)) {
+            if (argparse_tokenizer_handle_current_as_response(tokenizer)) {
                 // We handled it as a response file token, so we need to read the next token from the new response
                 goto start;
             }
@@ -596,13 +684,12 @@ start:
     goto start;
 }
 
-static bool argparse_tokenizer_next(
-    Argparse_Pack* pack, Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength, bool* outEndsInValueDelimiter) {
+static bool argparse_tokenizer_next(Argparse_Tokenizer* tokenizer, char** outToken, size_t* outLength, bool* outEndsInValueDelimiter) {
     Argparse_Token* token = &tokenizer->currentToken;
 
     if (token->index >= token->length) {
         // End of previous token, try to read the next one
-        if (!argparse_tokenizer_next_internal(pack, tokenizer)) {
+        if (!argparse_tokenizer_next_internal(tokenizer)) {
             // No more tokens to read
             *outToken = NULL;
             *outLength = 0;
@@ -705,19 +792,19 @@ static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, 
 }
 
 static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argument* argument, char const* value, size_t valueLength) {
+    Argparse_Allocator* allocator = &pack->command->allocator;
     // If there is a parser function, invoke it
     void* resultValue = NULL;
     if (argument->option->parse_fn == NULL) {
         // Paste the raw text as the value
-        char* valueCopy = (char*)ARGPARSE_REALLOC(NULL, (size_t)(valueLength + 1) * sizeof(char));
-        ARGPARSE_ASSERT(valueCopy != NULL, "failed to allocate memory for option value");
+        char* valueCopy = (char*)argparse_realloc(allocator, NULL, (size_t)(valueLength + 1) * sizeof(char));
         memcpy(valueCopy, value, valueLength);
         valueCopy[valueLength] = '\0';
         resultValue = valueCopy;
     }
     else {
         // Use the specified parser function
-        Argparse_ParseResult parseResult = argument->option->parse_fn(value, valueLength);
+        Argparse_ParseResult parseResult = argument->option->parse_fn(allocator, value, valueLength);
         if (parseResult.error != NULL) {
             // Parsing failed, report error
             // This error is already expected to be heap-allocated, so we can just add it directly
@@ -727,7 +814,7 @@ static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argum
         resultValue = parseResult.value;
     }
     // Add the value to the argument
-    argparse_add_value_to_argument(argument, resultValue);
+    argparse_add_value_to_argument(pack, argument, resultValue);
 }
 
 static Argparse_Argument* argparse_get_current_positional_argument_for_value(Argparse_Pack* pack) {
@@ -764,6 +851,7 @@ static Argparse_Argument* argparse_get_current_positional_argument_for_value(Arg
 }
 
 static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option* option, Argparse_Argument* argument) {
+    Argparse_Allocator* allocator = &pack->command->allocator;
     size_t valueCount = (argument != NULL) ? argument->values.length : 0;
     Argparse_Arity arity = option->arity;
     bool valid = false;
@@ -802,10 +890,10 @@ static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option*
                     break;
                 }
             }
-            error = argparse_format("positional argument %zu expects %s value(s), but got %zu", positionalIndex, expectedAmountDesc, valueCount);
+            error = argparse_format(allocator, "positional argument %zu expects %s value(s), but got %zu", positionalIndex, expectedAmountDesc, valueCount);
         }
         else {
-            error = argparse_format("option '%s' expects %s value(s), but got %zu", optionName, expectedAmountDesc, valueCount);
+            error = argparse_format(allocator, "option '%s' expects %s value(s), but got %zu", optionName, expectedAmountDesc, valueCount);
         }
         argparse_add_error(pack, error);
     }
@@ -875,22 +963,24 @@ void argparse_print_usage(Argparse_Command* command) {
 }
 
 Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
+    Argparse_Allocator* allocator = &root->allocator;
     Argparse_Pack pack = { 0 };
     pack.command = root;
 
     if (argc == 0) {
         // NOTE: We call argparse_format to move the error to the heap, we expect errors to be freeable
-        char* error = argparse_format("no arguments provided");
+        char* error = argparse_format(allocator, "no arguments provided");
         argparse_add_error(&pack, error);
         return pack;
     }
 
     pack.program_name = argv[0];
     Argparse_Tokenizer tokenizer = {
+        .pack = &pack,
         .argc = argc,
         .argv = argv,
         .argvIndex = 1,
-        .currentResponse = NULL,
+        .responseStack = { 0 },
         .currentToken = { 0 },
     };
 
@@ -901,20 +991,20 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     size_t tokenLength;
     bool endsInValueDelimiter = false;
     bool prevExpectsValue = false;
-    while (argparse_tokenizer_next(&pack, &tokenizer, &tokenText, &tokenLength, &endsInValueDelimiter)) {
+    while (argparse_tokenizer_next(&tokenizer, &tokenText, &tokenLength, &endsInValueDelimiter)) {
         if (endsInValueDelimiter) {
             ARGPARSE_ASSERT(!prevExpectsValue, "cannot have two consecutive tokens that end with value delimiters");
             // A value specification bans subcommands
             allowSubcommands = false;
             // If we have already banned options, this is illegal
             if (!allowOptions) {
-                char* error = argparse_format("unexpected option value '%.*s' after option escape", (int)tokenLength, tokenText);
+                char* error = argparse_format(allocator, "unexpected option value '%.*s' after option escape", (int)tokenLength, tokenText);
                 argparse_add_error(&pack, error);
                 continue;
             }
             currentArgument = argparse_try_add_option_argument(&pack, tokenText, tokenLength);
             if (currentArgument == NULL) {
-                char* error = argparse_format("unknown option '%.*s'", (int)tokenLength, tokenText);
+                char* error = argparse_format(allocator, "unknown option '%.*s'", (int)tokenLength, tokenText);
                 argparse_add_error(&pack, error);
                 // NOTE: We allow fallthrough here, we still parse a value to match intent closer
             }
@@ -977,9 +1067,11 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             continue;
         }
         // No argument could take this value, report error
-        char* error = argparse_format("unexpected argument '%.*s'", (int)tokenLength, tokenText);
+        char* error = argparse_format(allocator, "unexpected argument '%.*s'", (int)tokenLength, tokenText);
         argparse_add_error(&pack, error);
     }
+
+    argparse_tokenizer_free(&tokenizer);
 
     // Now we need to validate the arity of each option
     for (size_t i = 0; i < pack.command->options.length; ++i) {
@@ -1028,28 +1120,31 @@ Argparse_Argument* argparse_get_positional(Argparse_Pack* pack, size_t position)
 }
 
 void argparse_free_pack(Argparse_Pack* pack) {
+    Argparse_Allocator* allocator = &pack->command->allocator;
     // Free all allocated memory for the parsed arguments
     // Do not deallocate the command or options, as they are owned by the command hierarchy
     for (size_t i = 0; i < pack->arguments.length; ++i) {
         Argparse_Argument* argument = &pack->arguments.elements[i];
         for (size_t j = 0; j < argument->values.length; ++j) {
-            ARGPARSE_FREE(argument->values.elements[j]);
+            argparse_free(allocator, argument->values.elements[j]);
         }
-        ARGPARSE_FREE(argument->values.elements);
+        argparse_free(allocator, argument->values.elements);
     }
-    ARGPARSE_FREE(pack->arguments.elements);
+    argparse_free(allocator, pack->arguments.elements);
     for (size_t i = 0; i < pack->errors.length; ++i) {
-        ARGPARSE_FREE((void*)pack->errors.elements[i]);
+        argparse_free(allocator, pack->errors.elements[i]);
     }
-    ARGPARSE_FREE(pack->errors.elements);
+    argparse_free(allocator, pack->errors.elements);
 }
 
 void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
-    ARGPARSE_ADD_TO_ARRAY(command->options.elements, command->options.length, command->options.capacity, option);
+    ARGPARSE_ADD_TO_ARRAY(&command->allocator, command->options, option);
 }
 
 void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand) {
-    ARGPARSE_ADD_TO_ARRAY(command->subcommands.elements, command->subcommands.length, command->subcommands.capacity, subcommand);
+    // Inherit allocator
+    subcommand.allocator = command->allocator;
+    ARGPARSE_ADD_TO_ARRAY(&subcommand.allocator, command->subcommands, subcommand);
 }
 
 void argparse_free_command(Argparse_Command* command) {
@@ -1058,29 +1153,28 @@ void argparse_free_command(Argparse_Command* command) {
     for (size_t i = 0; i < command->subcommands.length; ++i) {
         argparse_free_command(&command->subcommands.elements[i]);
     }
-    ARGPARSE_FREE(command->subcommands.elements);
-    ARGPARSE_FREE(command->options.elements);
+    argparse_free(&command->allocator, command->subcommands.elements);
+    argparse_free(&command->allocator, command->options.elements);
     // We null out the pointers to avoid double-free, in case this command is shared in the hierarchy
     command->subcommands.elements = NULL;
     command->options.elements = NULL;
 }
 
-char* argparse_format(char const* format, ...) {
+char* argparse_format(Argparse_Allocator* allocator, char const* format, ...) {
     va_list args;
     va_start(args, format);
-    char* result = argparse_vformat(format, args);
+    char* result = argparse_vformat(allocator, format, args);
     va_end(args);
     return result;
 }
 
-char* argparse_vformat(char const* format, va_list args) {
+char* argparse_vformat(Argparse_Allocator* allocator, char const* format, va_list args) {
     va_list args_copy;
     va_copy(args_copy, args);
     int length = vsnprintf(NULL, 0, format, args_copy);
     ARGPARSE_ASSERT(length >= 0, "failed to compute length of formatted string");
     va_end(args_copy);
-    char* buffer = (char*)ARGPARSE_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
-    ARGPARSE_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
+    char* buffer = (char*)argparse_realloc(allocator, NULL, (size_t)length + 1);
     vsnprintf(buffer, (size_t)length + 1, format, args);
     return buffer;
 }
@@ -1090,7 +1184,6 @@ char* argparse_vformat(char const* format, va_list args) {
 #endif
 
 #undef ARGPARSE_ADD_TO_ARRAY
-#undef ARGPARSE_ASSERT
 
 #endif /* ARGPARSE_IMPLEMENTATION */
 
@@ -1115,7 +1208,7 @@ char* argparse_vformat(char const* format, va_list args) {
 #define ASSERT_ERROR_COUNT(pack, n) CTEST_ASSERT_TRUE((pack).errors.length == (n))
 
 // Custom parse function for integers
-static Argparse_ParseResult parse_int(char const* text, size_t length) {
+static Argparse_ParseResult parse_int(Argparse_Allocator* allocator, char const* text, size_t length) {
     // Check for optional leading minus sign
     size_t start = 0;
     bool negate = false;
@@ -1128,12 +1221,12 @@ static Argparse_ParseResult parse_int(char const* text, size_t length) {
         if (!isdigit((unsigned char)text[i])) {
             return (Argparse_ParseResult){
                 .value = NULL,
-                .error = argparse_format("expected integer, got '%.*s'", (int)length, text),
+                .error = argparse_format(allocator, "expected integer, got '%.*s'", (int)length, text),
             };
         }
     }
     // Parse and return
-    int* value = (int*)malloc(sizeof(int));
+    int* value = (int*)argparse_realloc(allocator, NULL, sizeof(int));
     // Simple string to int conversion
     *value = 0;
     for (size_t i = start; i < length; ++i) {
@@ -2204,13 +2297,13 @@ CTEST_CASE(run_handler_return_value_propagates) {
 //   project clean [--all]
 
 // Custom parser for integers
-static Argparse_ParseResult parse_int(char const* text, size_t length) {
-    char* temp = (char*)malloc(length + 1);
+static Argparse_ParseResult parse_int(Argparse_Allocator* allocator, char const* text, size_t length) {
+    char* temp = (char*)argparse_realloc(allocator, NULL, length + 1);
     memcpy(temp, text, length);
     temp[length] = '\0';
-    int* value = (int*)malloc(sizeof(int));
+    int* value = (int*)argparse_realloc(allocator, NULL, sizeof(int));
     *value = atoi(temp);
-    free(temp);
+    argparse_free(allocator, temp);
     return (Argparse_ParseResult){ .value = value, .error = NULL };
 }
 

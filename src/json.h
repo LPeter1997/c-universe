@@ -4,7 +4,7 @@
  * Configuration:
  *  - #define JSON_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define JSON_STATIC before including this header to make all functions have internal linkage
- *  - #define JSON_REALLOC and JSON_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
+ *  - #define JSON_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define JSON_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define JSON_EXAMPLE before including this header to compile a simple example that demonstrates how to use the library
  *
@@ -19,6 +19,7 @@
  *  - Use json_move to move a value out of a container while leaving a null in place
  *  - Use json_length, json_as_int, json_as_double, json_as_bool and json_as_string for safe value access
  *  - Use json_free_value and json_free_document to free the memory associated with JSON values and documents when they are no longer needed
+ *  - Use Json_Allocator to customize memory allocation if needed
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -39,16 +40,25 @@
     #define JSON_DEF extern
 #endif
 
-#ifndef JSON_REALLOC
-    #define JSON_REALLOC realloc
-#endif
-#ifndef JSON_FREE
-    #define JSON_FREE free
+#ifndef JSON_ASSERT
+    #define JSON_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * An allocator struct that allows customizing memory allocation for the JSON library.
+ */
+typedef struct Json_Allocator {
+    // Context pointer that will be passed to the realloc and free functions
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Json_Allocator;
 
 /**
  * Extension flags for the JSON parser, allowing it to support common, non-standard JSON features.
@@ -75,6 +85,8 @@ typedef struct Json_Options {
     char const* newline_str;
     // The string to use for indentation when writing. NULL means no indentation.
     char const* indent_str;
+    // Optional custom memory allocator
+    Json_Allocator allocator;
 } Json_Options;
 
 /**
@@ -82,7 +94,7 @@ typedef struct Json_Options {
  */
 typedef struct Json_Error {
     // A human-readable message describing the error.
-    // Owned by the document it's added to, the library will call JSON_FREE on it when the document is freed.
+    // Owned by the document it's added to, the library will call free on it when the document is freed.
     char* message;
     // The line number where the error occurred, starting from 0.
     size_t line;
@@ -147,17 +159,22 @@ typedef struct Json_Value {
         bool boolean;
         long long integer;
         double floating;
-        // Owned string
-        char* string;
+        struct {
+            char* data;
+            size_t length;
+            Json_Allocator allocator;
+        } string;
         struct {
             struct Json_Value* elements;
             size_t length;
             size_t capacity;
+            Json_Allocator allocator;
         } array;
         struct {
             struct Json_HashBucket* buckets;
             size_t buckets_length;
             size_t entry_count;
+            Json_Allocator allocator;
         } object;
     } value;
 } Json_Value;
@@ -172,6 +189,7 @@ typedef struct Json_Document {
         size_t length;
         size_t capacity;
     } errors;
+    Json_Allocator allocator;
 } Json_Document;
 
 // Parsing and writing API /////////////////////////////////////////////////////
@@ -205,7 +223,8 @@ JSON_DEF Json_Document json_parse(char const* json, Json_Options options);
 JSON_DEF size_t json_swrite(Json_Value value, Json_Options options, char* buffer, size_t buffer_size);
 
 /**
- * Writes the given JSON value into a newly allocated string, which must be freed by the caller using JSON_FREE.
+ * Writes the given JSON value into a newly allocated string, which must be freed by the caller
+ * with the appropriate allocator specified in the options.
  * @param value The JSON value to write.
  * @param options The options to customize the behavior of the writer.
  * @param out_length A pointer to a size_t variable that will receive the length of the written string, excluding the null terminator. Can be NULL if the length is not needed.
@@ -217,22 +236,25 @@ JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_le
 
 /**
  * Creates a new JSON object value.
+ * @param allocator The allocator to use for the object's allocations.
  * @returns A new, empty JSON object.
  */
-JSON_DEF Json_Value json_object(void);
+JSON_DEF Json_Value json_object(Json_Allocator allocator);
 
 /**
  * Creates a new JSON array value.
+ * @param allocator The allocator to use for the array's allocations.
  * @returns A new, empty JSON array.
  */
-JSON_DEF Json_Value json_array(void);
+JSON_DEF Json_Value json_array(Json_Allocator allocator);
 
 /**
  * Creates a new JSON string value by copying the given string.
  * @param str The string to copy into the JSON value.
+ * @param allocator The allocator to use for the string's allocations.
  * @returns A new JSON string value containing a copy of the given string.
  */
-JSON_DEF Json_Value json_string(char const* str);
+JSON_DEF Json_Value json_string(char const* str, Json_Allocator allocator);
 
 /**
  * Creates a new JSON integer number value.
@@ -417,22 +439,55 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 #include <stdlib.h>
 #include <string.h>
 
-#define JSON_ASSERT(condition, message) assert(((void)message, condition))
-#define JSON_ADD_TO_ARRAY(array, length, capacity, element) \
+#define JSON_ADD_TO_ARRAY(allocator, array, element) \
     do { \
-        if ((length) + 1 > (capacity)) { \
-            size_t newCapacity = ((capacity) == 0) ? 8 : ((capacity) * 2); \
-            void* newElements = JSON_REALLOC((array), newCapacity * sizeof(*(array))); \
-            JSON_ASSERT(newElements != NULL, "failed to allocate memory for array"); \
-            (array) = newElements; \
-            (capacity) = newCapacity; \
+        if ((array).length + 1 > (array).capacity) { \
+            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
+            void* newElements = json_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
+            (array).elements = newElements; \
+            (array).capacity = newCapacity; \
         } \
-        (array)[(length)++] = element; \
+        (array).elements[(array).length++] = element; \
     } while (false)
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Allocation //////////////////////////////////////////////////////////////////
+
+static void* json_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+
+static void json_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+static void json_init_allocator(Json_Allocator* allocator) {
+    if (allocator->realloc != NULL || allocator->free != NULL) {
+        JSON_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
+        return;
+    }
+    allocator->realloc = json_default_realloc;
+    allocator->free = json_default_free;
+}
+
+static void* json_realloc(Json_Allocator* allocator, void* ptr, size_t size) {
+    json_init_allocator(allocator);
+    void* result = allocator->realloc(allocator->context, ptr, size);
+    JSON_ASSERT(result != NULL, "failed to allocate memory");
+    return result;
+}
+
+static void json_free(Json_Allocator* allocator, void* ptr) {
+    json_init_allocator(allocator);
+    allocator->free(allocator->context, ptr);
+}
+
+// General /////////////////////////////////////////////////////////////////////
 
 typedef struct Json_HashEntry {
     char* key;
@@ -441,7 +496,7 @@ typedef struct Json_HashEntry {
 } Json_HashEntry;
 
 typedef struct Json_HashBucket {
-    Json_HashEntry* entries;
+    Json_HashEntry* elements;
     size_t length;
     size_t capacity;
 } Json_HashBucket;
@@ -480,16 +535,15 @@ static bool json_isxdigit(char ch, int* out_value) {
     return false;
 }
 
-static char* json_strdup(char const* str) {
+static char* json_strdup(Json_Allocator* allocator, char const* str) {
     size_t length = strlen(str);
-    char* copy = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
-    JSON_ASSERT(copy != NULL, "failed to allocate memory for string duplication");
+    char* copy = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
     memcpy(copy, str, length * sizeof(char));
     copy[length] = '\0';
     return copy;
 }
 
-static char* json_format(const char* format, ...) {
+static char* json_format(Json_Allocator* allocator, const char* format, ...) {
     va_list args;
     va_start(args, format);
     va_list args_copy;
@@ -497,8 +551,7 @@ static char* json_format(const char* format, ...) {
     int length = vsnprintf(NULL, 0, format, args_copy);
     JSON_ASSERT(length >= 0, "failed to compute length of formatted string");
     va_end(args_copy);
-    char* buffer = (char*)JSON_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
-    JSON_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
+    char* buffer = (char*)json_realloc(allocator, NULL, ((size_t)length + 1) * sizeof(char));
     vsnprintf(buffer, (size_t)length + 1, format, args);
     va_end(args);
     return buffer;
@@ -553,8 +606,9 @@ typedef struct Json_Parser {
 } Json_Parser;
 
 static void json_parser_report_error(Json_Parser* parser, Json_Position position, char* message) {
+    Json_Allocator* allocator = &parser->options.allocator;
     if (parser->sax.on_error == NULL) {
-        JSON_FREE(message);
+        json_free(allocator, message);
         return;
     }
     Json_Error error = {
@@ -600,6 +654,7 @@ static void json_parser_advance(Json_Parser* parser, size_t count) {
 }
 
 static void json_parser_skip_whitespace(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
 start:
     while (isspace((unsigned char)json_parser_peek(parser, 0, '\0'))) json_parser_advance(parser, 1);
 
@@ -607,7 +662,7 @@ start:
     if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '/') {
         // If extension is not enabled, report an error
         if ((parser->options.extensions & JSON_EXTENSION_LINE_COMMENTS) == 0) {
-            char* message = json_format("line comments are not allowed");
+            char* message = json_format(allocator, "line comments are not allowed");
             json_parser_report_error(parser, parser->position, message);
             // We still continue the parser, treating the comment as whitespace
         }
@@ -626,7 +681,7 @@ start:
     if (json_parser_peek(parser, 0, '\0') == '/' && json_parser_peek(parser, 1, '\0') == '*') {
         // If extension is not enabled, report an error
         if ((parser->options.extensions & JSON_EXTENSION_BLOCK_COMMENTS) == 0) {
-            char* message = json_format("block comments are not allowed");
+            char* message = json_format(allocator, "block comments are not allowed");
             json_parser_report_error(parser, parser->position, message);
             // We still continue the parser, treating the comment as whitespace
         }
@@ -635,7 +690,7 @@ start:
         while (true) {
             char c = json_parser_peek(parser, 0, '\0');
             if (c == '\0') {
-                char* message = json_format("unexpected end of input in block comment");
+                char* message = json_format(allocator, "unexpected end of input in block comment");
                 json_parser_report_error(parser, parser->position, message);
                 return;
             }
@@ -657,7 +712,8 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
         return true;
     }
     else {
-        char* message = json_format("expected character '%c', but got '%c'", expected, c);
+        Json_Allocator* allocator = &parser->options.allocator;
+        char* message = json_format(allocator, "expected character '%c', but got '%c'", expected, c);
         json_parser_report_error(parser, parser->position, message);
         return false;
     }
@@ -667,10 +723,11 @@ static bool json_parser_expect_char(Json_Parser* parser, char expected) {
 //  - first with buffer = NULL to compute the required buffer size
 //  - then with an allocated buffer to fill it
 static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, size_t bufferSize, size_t* outParserAdvance) {
+    Json_Allocator* allocator = &parser->options.allocator;
     size_t parserOffset = 0;
     size_t bufferIndex = 0;
     if (json_parser_peek(parser, parserOffset, '\0') != '"') {
-        char* message = json_format("expected '\"' at start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+        char* message = json_format(allocator, "expected '\"' at start of string value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
         json_parser_report_error(parser, parser->position, message);
         goto done;
     }
@@ -679,7 +736,7 @@ static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, si
     while (true) {
         char c = json_parser_peek(parser, parserOffset, '\0');
         if (c == '\0') {
-            char* message = json_format("unexpected end of input while parsing string value");
+            char* message = json_format(allocator, "unexpected end of input while parsing string value");
             json_parser_report_error(parser, parser->position, message);
             goto done;
         }
@@ -702,7 +759,7 @@ static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, si
         ++parserOffset;
         char escape = json_parser_peek(parser, parserOffset, '\0');
         if (escape == '\0') {
-            char* message = json_format("unexpected end of input in escape sequence of string value");
+            char* message = json_format(allocator, "unexpected end of input in escape sequence of string value");
             json_parser_report_error(parser, parser->position, message);
             goto done;
         }
@@ -719,7 +776,7 @@ static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, si
                 case 'r': escapedChar = '\r'; break;
                 case 't': escapedChar = '\t'; break;
                 default: {
-                    char* message = json_format("invalid escape sequence '\\%c' in string value", escape);
+                    char* message = json_format(allocator, "invalid escape sequence '\\%c' in string value", escape);
                     json_parser_report_error(parser, parser->position, message);
                     // We don't actually return here, for best-effort we just treat it as a literal
                     escapedChar = escape;
@@ -741,13 +798,13 @@ static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, si
         for (size_t i = 0; i < 4; ++i) {
             char hex = json_parser_peek(parser, parserOffset, '\0');
             if (hex == '\0') {
-                char* message = json_format("unexpected end of input in unicode escape sequence of string value");
+                char* message = json_format(allocator, "unexpected end of input in unicode escape sequence of string value");
                 json_parser_report_error(parser, parser->position, message);
                 goto done;
             }
             int hexValue;
             if (!json_isxdigit(hex, &hexValue)) {
-                char* message = json_format("invalid hex digit '%c' in unicode escape sequence of string value", hex);
+                char* message = json_format(allocator, "invalid hex digit '%c' in unicode escape sequence of string value", hex);
                 json_parser_report_error(parser, parser->position, message);
                 // We don't actually return here, for best-effort we just treat it as a literal
                 hexValue = 0;
@@ -759,7 +816,7 @@ static size_t json_parse_string_value_impl(Json_Parser* parser, char* buffer, si
         char utf8[4];
         size_t utf8Length = json_utf8_encode(codepoint, utf8);
         if (utf8Length == 0) {
-            char* message = json_format("invalid Unicode code point U+%04X in string value", codepoint);
+            char* message = json_format(allocator, "invalid Unicode code point U+%04X in string value", codepoint);
             json_parser_report_error(parser, parser->position, message);
             // We don't actually return here, for best-effort we just skip it
             continue;
@@ -781,12 +838,12 @@ done:
 // On a null SAX callback, the parser will free the value, if it allocated any
 
 static void json_parse_string_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     Json_Sax* sax = &parser->sax;
     size_t parserToAdvance;
     size_t length = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
     if (sax->on_string != NULL) {
-        char* buffer = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
-        JSON_ASSERT(buffer != NULL, "failed to allocate buffer for string value");
+        char* buffer = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
         json_parse_string_value_impl(parser, buffer, length, &parserToAdvance);
         buffer[length] = '\0';
         sax->on_string(parser->user_data, buffer, length);
@@ -795,6 +852,7 @@ static void json_parse_string_value(Json_Parser* parser) {
 }
 
 static void json_parse_identifier_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     Json_Sax* sax = &parser->sax;
     size_t parserOffset = 0;
     while (json_isident(json_parser_peek(parser, parserOffset, '\0'))) ++parserOffset;
@@ -814,7 +872,7 @@ static void json_parse_identifier_value(Json_Parser* parser) {
         if (sax->on_null != NULL) sax->on_null(parser->user_data);
     }
     else {
-        char* message = json_format("unexpected identifier '%.*s'", (int)parserOffset, ident);
+        char* message = json_format(allocator, "unexpected identifier '%.*s'", (int)parserOffset, ident);
         json_parser_report_error(parser, parser->position, message);
         // We don't actually return here, for best-effort we just skip it and return null
         json_parser_advance(parser, parserOffset);
@@ -824,6 +882,7 @@ static void json_parse_identifier_value(Json_Parser* parser) {
 }
 
 static void json_parse_number_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     Json_Sax* sax = &parser->sax;
     unsigned long long intValue = 0;
     bool negate = false;
@@ -841,7 +900,7 @@ static void json_parse_number_value(Json_Parser* parser) {
         if (c == '0' && parserOffset == digitStart) leadingZero = true;
         // NOTE: Check below is written in a way that it only gets triggered ONCE
         if (leadingZero && parserOffset == digitStart + 1 && (parser->options.extensions & JSON_EXTENSION_LEADING_ZEROS) == 0) {
-            char* message = json_format("leading zeros are not allowed in number values");
+            char* message = json_format(allocator, "leading zeros are not allowed in number values");
             json_parser_report_error(parser, parser->position, message);
             // We don't actually return here, for best-effort we just skip the leading zeros
         }
@@ -850,7 +909,7 @@ static void json_parse_number_value(Json_Parser* parser) {
     }
     // Check that we have at least one digit
     if (parserOffset == digitStart) {
-        char* message = json_format("expected digit in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+        char* message = json_format(allocator, "expected digit in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
         json_parser_report_error(parser, parser->position, message);
         json_parser_advance(parser, parserOffset);
         if (sax->on_null != NULL) sax->on_null(parser->user_data);
@@ -881,7 +940,7 @@ static void json_parse_number_value(Json_Parser* parser) {
         }
         // Check that we have at least one digit in the fractional part
         if (parserOffset == fractionDigitStart) {
-            char* message = json_format("expected digit after '.' in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+            char* message = json_format(allocator, "expected digit after '.' in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
             json_parser_report_error(parser, parser->position, message);
         }
     }
@@ -907,7 +966,7 @@ static void json_parse_number_value(Json_Parser* parser) {
         }
         // Check that we have at least one digit in the exponent
         if (parserOffset == exponentDigitStart) {
-            char* message = json_format("expected digit after exponent in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
+            char* message = json_format(allocator, "expected digit after exponent in number value, but got '%c'", json_parser_peek(parser, parserOffset, '\0'));
             json_parser_report_error(parser, parser->position, message);
         }
         if (expNegate) exponent = -exponent;
@@ -922,6 +981,7 @@ static void json_parse_number_value(Json_Parser* parser) {
 static void json_parse_value(Json_Parser* parser);
 
 static void json_parse_array_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     Json_Sax* sax = &parser->sax;
     if (!json_parser_expect_char(parser, '[')) return;
 
@@ -936,7 +996,7 @@ static void json_parse_array_value(Json_Parser* parser) {
         char c = json_parser_peek(parser, 0, '\0');
         // End of file
         if (c == '\0') {
-            char* message = json_format("unexpected end of input while parsing array");
+            char* message = json_format(allocator, "unexpected end of input while parsing array");
             json_parser_report_error(parser, parser->position, message);
             // Break out of the loop to report the array end regardless
             break;
@@ -961,7 +1021,7 @@ static void json_parse_array_value(Json_Parser* parser) {
 
     // If trailing comma extension is not enabled, report an error
     if (lastIsComma && (parser->options.extensions & JSON_EXTENSION_TRAILING_COMMAS) == 0) {
-        char* message = json_format("trailing comma in array is not allowed");
+        char* message = json_format(allocator, "trailing comma in array is not allowed");
         json_parser_report_error(parser, lastCommaPosition, message);
     }
 
@@ -971,6 +1031,7 @@ static void json_parse_array_value(Json_Parser* parser) {
 }
 
 static void json_parse_object_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     Json_Sax* sax = &parser->sax;
     if (!json_parser_expect_char(parser, '{')) return;
 
@@ -985,7 +1046,7 @@ static void json_parse_object_value(Json_Parser* parser) {
         char c = json_parser_peek(parser, 0, '\0');
         // End of file
         if (c == '\0') {
-            char* message = json_format("unexpected end of input while parsing object");
+            char* message = json_format(allocator, "unexpected end of input while parsing object");
             json_parser_report_error(parser, parser->position, message);
             // Break out of the loop to report the object end regardless
             break;
@@ -994,7 +1055,7 @@ static void json_parse_object_value(Json_Parser* parser) {
         if (c == '}') break;
         // Must be a string key
         if (c != '"') {
-            char* message = json_format("expected '\"' at start of object key, but got '%c'", c);
+            char* message = json_format(allocator, "expected '\"' at start of object key, but got '%c'", c);
             json_parser_report_error(parser, parser->position, message);
             // We don't actually return here, for best-effort we just skip it and continue parsing
             json_parser_advance(parser, 1);
@@ -1006,8 +1067,7 @@ static void json_parse_object_value(Json_Parser* parser) {
         size_t keyLength = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
         if (sax->on_object_key != NULL) {
             // We only actually allocate, if the consumer has a callback for the key, otherwise we can just skip it
-            char* keyBuffer = (char*)JSON_REALLOC(NULL, (keyLength + 1) * sizeof(char));
-            JSON_ASSERT(keyBuffer != NULL, "failed to allocate buffer for object key");
+            char* keyBuffer = (char*)json_realloc(allocator, NULL, (keyLength + 1) * sizeof(char));
             json_parse_string_value_impl(parser, keyBuffer, keyLength, &parserToAdvance);
             keyBuffer[keyLength] = '\0';
             sax->on_object_key(parser->user_data, keyBuffer, keyLength);
@@ -1040,7 +1100,7 @@ static void json_parse_object_value(Json_Parser* parser) {
 
     // If trailing comma extension is not enabled, report an error
     if (lastIsComma && (parser->options.extensions & JSON_EXTENSION_TRAILING_COMMAS) == 0) {
-        char* message = json_format("trailing comma in object is not allowed");
+        char* message = json_format(allocator, "trailing comma in object is not allowed");
         json_parser_report_error(parser, lastCommaPosition, message);
     }
 
@@ -1050,6 +1110,7 @@ static void json_parse_object_value(Json_Parser* parser) {
 }
 
 static void json_parse_value(Json_Parser* parser) {
+    Json_Allocator* allocator = &parser->options.allocator;
     json_parser_skip_whitespace(parser);
     char c = json_parser_peek(parser, 0, '\0');
     if (c == '{') {
@@ -1068,7 +1129,7 @@ static void json_parse_value(Json_Parser* parser) {
         json_parse_identifier_value(parser);
     }
     else {
-        char* message = json_format("unexpected character '%c' while parsing value", c);
+        char* message = json_format(allocator, "unexpected character '%c' while parsing value", c);
         json_parser_report_error(parser, parser->position, message);
         // Report null value to still give them a value
         if (parser->sax.on_null != NULL) parser->sax.on_null(parser->user_data);
@@ -1076,6 +1137,7 @@ static void json_parse_value(Json_Parser* parser) {
 }
 
 void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* user_data) {
+    Json_Allocator* allocator = &options.allocator;
     Json_Parser parser = {
         .text = json,
         .length = strlen(json),
@@ -1088,7 +1150,7 @@ void json_parse_sax(char const* json, Json_Sax sax, Json_Options options, void* 
     // If we have remaining non-whitespace characters after parsing the value, that's an error
     json_parser_skip_whitespace(&parser);
     if (parser.position.index < parser.length) {
-        char* message = json_format("unexpected character '%c' after parsing complete value", json_parser_peek(&parser, 0, '\0'));
+        char* message = json_format(allocator, "unexpected character '%c' after parsing complete value", json_parser_peek(&parser, 0, '\0'));
         json_parser_report_error(&parser, parser.position, message);
     }
 }
@@ -1113,7 +1175,7 @@ typedef struct Json_DomBuilder {
 
 static void json_dom_builder_push(Json_DomBuilder* builder, Json_Value value) {
     Json_DomFrame frame = { .value = value, .last_key = NULL };
-    JSON_ADD_TO_ARRAY(builder->stack.elements, builder->stack.length, builder->stack.capacity, frame);
+    JSON_ADD_TO_ARRAY(&builder->document.allocator, builder->stack, frame);
 }
 
 static Json_Value json_dom_builder_pop(Json_DomBuilder* builder) {
@@ -1140,7 +1202,7 @@ static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value v
         JSON_ASSERT(current->last_key != NULL, "attempted to append value to object without a key in DOM builder");
         json_object_set(&current->value, current->last_key, value);
         // We assume that json_object_set copies, we need to free the key
-        JSON_FREE(current->last_key);
+        json_free(&builder->document.allocator, current->last_key);
         current->last_key = NULL;
     }
     else {
@@ -1173,13 +1235,17 @@ static void json_dom_builder_on_string(void* user_data, char* value, size_t leng
     // The string is owned already, don't use json_string here
     json_dom_builder_append_value(builder, (Json_Value){
         .type = JSON_VALUE_STRING,
-        .value = { .string = value },
+        .value.string = {
+            .data = value,
+            .length = length,
+            .allocator = builder->document.allocator,
+        },
     });
 }
 
 static void json_dom_builder_on_array_start(void* user_data) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
-    json_dom_builder_push(builder, json_array());
+    json_dom_builder_push(builder, json_array(builder->document.allocator));
 }
 
 static void json_dom_builder_on_array_end(void* user_data) {
@@ -1190,10 +1256,11 @@ static void json_dom_builder_on_array_end(void* user_data) {
 
 static void json_dom_builder_on_object_start(void* user_data) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
-    json_dom_builder_push(builder, json_object());
+    json_dom_builder_push(builder, json_object(builder->document.allocator));
 }
 
 static void json_dom_builder_on_object_key(void* user_data, char* key, size_t length) {
+    (void)length;
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     // The key is owned already, we just need to keep track of it until we get the value
     Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
@@ -1209,12 +1276,14 @@ static void json_dom_builder_on_object_end(void* user_data) {
 static void json_dom_builder_on_error(void* user_data, Json_Error error) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     Json_Document* doc = &builder->document;
-    JSON_ADD_TO_ARRAY(doc->errors.elements, doc->errors.length, doc->errors.capacity, error);
+    JSON_ADD_TO_ARRAY(&builder->document.allocator, doc->errors, error);
 }
 
 Json_Document json_parse(char const* json, Json_Options options) {
     // Configure our DOM builder as a SAX consumer
-    Json_DomBuilder builder = { 0 };
+    Json_DomBuilder builder = {
+        .document.allocator = options.allocator,
+    };
     Json_Sax sax = {
         .on_null = json_dom_builder_on_null,
         .on_bool = json_dom_builder_on_bool,
@@ -1232,7 +1301,7 @@ Json_Document json_parse(char const* json, Json_Options options) {
     // We must have cleaned up everything properly
     JSON_ASSERT(builder.stack.length == 0, "DOM builder stack is not empty after parsing complete document");
     // Deallocate the stack memory, we don't need it anymore
-    JSON_FREE(builder.stack.elements);
+    json_free(&builder.document.allocator, builder.stack.elements);
     return builder.document;
 }
 
@@ -1247,20 +1316,20 @@ Json_Value json_copy(Json_Value* value) {
         // Don't need any deep-copy
         return *value;
     case JSON_VALUE_STRING:
-        return json_string(value->value.string);
+        return json_string(value->value.string.data, value->value.string.allocator);
     case JSON_VALUE_ARRAY: {
-        Json_Value array = json_array();
+        Json_Value array = json_array(value->value.array.allocator);
         for (size_t i = 0; i < value->value.array.length; ++i) {
             json_array_append(&array, json_copy(&value->value.array.elements[i]));
         }
         return array;
     }
     case JSON_VALUE_OBJECT: {
-        Json_Value object = json_object();
+        Json_Value object = json_object(value->value.object.allocator);
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 json_object_set(&object, entry->key, json_copy(&entry->value));
             }
         }
@@ -1272,24 +1341,28 @@ Json_Value json_copy(Json_Value* value) {
     }
 }
 
-Json_Value json_object(void) {
+Json_Value json_object(Json_Allocator allocator) {
     return (Json_Value){
         .type = JSON_VALUE_OBJECT,
-        .value = { .object = { 0 } },
+        .value = { .object = { .allocator = allocator } },
     };
 }
 
-Json_Value json_array(void) {
+Json_Value json_array(Json_Allocator allocator) {
     return (Json_Value){
         .type = JSON_VALUE_ARRAY,
-        .value = { .array = { 0 } },
+        .value = { .array = { .allocator = allocator } },
     };
 }
 
-Json_Value json_string(char const* str) {
+Json_Value json_string(char const* str, Json_Allocator allocator) {
     return (Json_Value){
         .type = JSON_VALUE_STRING,
-        .value = { .string = json_strdup(str) },
+        .value.string = {
+            .data = json_strdup(&allocator, str),
+            .length = strlen(str),
+            .allocator = allocator,
+        },
     };
 }
 
@@ -1323,7 +1396,7 @@ Json_Value json_null(void) {
 
 void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to append to non-array value");
-    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
 }
 
 void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
@@ -1335,7 +1408,7 @@ void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
         return;
     }
     // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
-    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
     memmove(&array->value.array.elements[index + 1], &array->value.array.elements[index], (array->value.array.length - index - 1) * sizeof(Json_Value));
     array->value.array.elements[index] = value;
 }
@@ -1374,24 +1447,24 @@ static double json_hash_table_load_factor(Json_Value* value) {
 }
 
 static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
+    Json_Allocator* allocator = &value->value.object.allocator;
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to resize hash table on non-object value");
-    Json_HashBucket* newBuckets = (Json_HashBucket*)JSON_REALLOC(NULL, newBucketCount * sizeof(Json_HashBucket));
-    JSON_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets");
+    Json_HashBucket* newBuckets = (Json_HashBucket*)json_realloc(allocator, NULL, newBucketCount * sizeof(Json_HashBucket));
     memset(newBuckets, 0, newBucketCount * sizeof(Json_HashBucket));
     // Add each item from each bucket to the new bucket array, essentially redistributing
     for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
         Json_HashBucket* oldBucket = &value->value.object.buckets[i];
         for (size_t j = 0; j < oldBucket->length; ++j) {
-            Json_HashEntry entry = oldBucket->entries[j];
+            Json_HashEntry entry = oldBucket->elements[j];
             size_t newBucketIndex = entry.hash % newBucketCount;
             Json_HashBucket* newBucket = &newBuckets[newBucketIndex];
-            JSON_ADD_TO_ARRAY(newBucket->entries, newBucket->length, newBucket->capacity, entry);
+            JSON_ADD_TO_ARRAY(allocator, *newBucket, entry);
         }
         // Old bucket entries have been moved to the new buckets, we can free the old bucket entries array
-        JSON_FREE(oldBucket->entries);
+        json_free(allocator, oldBucket->elements);
     }
     // Free the old buckets and replace with the new ones
-    JSON_FREE(value->value.object.buckets);
+    json_free(allocator, value->value.object.buckets);
     value->value.object.buckets = newBuckets;
     value->value.object.buckets_length = newBucketCount;
 }
@@ -1406,6 +1479,7 @@ static void json_hash_table_grow(Json_Value* value) {
 
 void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     JSON_ASSERT(object->type == JSON_VALUE_OBJECT, "attempted to set key-value pair on non-object value");
+    Json_Allocator* allocator = &object->value.object.allocator;
     // Grow if needed
     double loadFactor = json_hash_table_load_factor(object);
     if (loadFactor > Json_HashTable_UpsizeLoadFactor || object->value.object.buckets_length == 0) json_hash_table_grow(object);
@@ -1415,7 +1489,7 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Check if the key already exists in the bucket, if so, replace the value
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // Free the old value if needed
             json_free_value(&entry->value);
@@ -1426,11 +1500,11 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     // Key does not exist, add a new entry to the bucket
     Json_HashEntry newEntry = {
         // NOTE: We copy the key
-        .key = json_strdup(key),
+        .key = json_strdup(allocator, key),
         .value = value,
         .hash = hash,
     };
-    JSON_ADD_TO_ARRAY(bucket->entries, bucket->length, bucket->capacity, newEntry);
+    JSON_ADD_TO_ARRAY(allocator, *bucket, newEntry);
     // New element was added
     ++object->value.object.entry_count;
 }
@@ -1444,7 +1518,7 @@ Json_Value* json_object_get(Json_Value* object, char const* key) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             return &entry->value;
         }
@@ -1460,7 +1534,7 @@ bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, 
         Json_HashBucket* bucket = &object->value.object.buckets[i];
         for (size_t j = 0; j < bucket->length; ++j) {
             if (currentIndex == index) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 if (out_key != NULL) *out_key = entry->key;
                 if (out_value != NULL) *out_value = entry->value;
                 return true;
@@ -1480,15 +1554,15 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // If old value is wanted, copy it out, otherwise free it
             if (out_value != NULL) *out_value = entry->value;
             else json_free_value(&entry->value);
             // Free the key
-            JSON_FREE(entry->key);
+            json_free(&object->value.object.allocator, entry->key);
             // Remove the entry by shifting the remaining entries
-            memmove(&bucket->entries[i], &bucket->entries[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
+            memmove(&bucket->elements[i], &bucket->elements[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
             --bucket->length;
             --object->value.object.entry_count;
             return true;
@@ -1512,7 +1586,7 @@ size_t json_length(Json_Value* value) {
     case JSON_VALUE_OBJECT:
         return value->value.object.entry_count;
     case JSON_VALUE_STRING:
-        return strlen(value->value.string);
+        return value->value.string.length;
     default:
         JSON_ASSERT(false, "attempted to get length of non-array, non-object, non-string value");
         return 0;
@@ -1540,7 +1614,7 @@ bool json_as_bool(Json_Value* value) {
 }
 
 char const* json_as_string(Json_Value* value) {
-    if (value->type == JSON_VALUE_STRING) return value->value.string;
+    if (value->type == JSON_VALUE_STRING) return value->value.string.data;
     JSON_ASSERT(false, "attempted to get string value of non-string value");
     return NULL;
 }
@@ -1648,7 +1722,7 @@ static void json_write_value(Json_Writer* writer, Json_Value value) {
         json_writer_appendn(writer, buffer, (size_t)length);
     } break;
     case JSON_VALUE_STRING:
-        json_write_string_value(writer, value.value.string);
+        json_write_string_value(writer, value.value.string.data);
         break;
     case JSON_VALUE_ARRAY: {
         // For empty we can just append []
@@ -1684,7 +1758,7 @@ static void json_write_value(Json_Writer* writer, Json_Value value) {
         for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value.value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j, ++entryIndex) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 json_writer_append_indent(writer);
                 json_write_string_value(writer, entry->key);
                 json_writer_append(writer, ": ");
@@ -1716,10 +1790,10 @@ size_t json_swrite(Json_Value value, Json_Options options, char* buffer, size_t 
 }
 
 char* json_write(Json_Value value, Json_Options options, size_t* out_length) {
+    Json_Allocator* allocator = &options.allocator;
     // Simply compute the length, then allocate a buffer of the needed size and write into it
     size_t length = json_swrite(value, options, NULL, 0);
-    char* buffer = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
-    JSON_ASSERT(buffer != NULL, "failed to allocate buffer for JSON writing");
+    char* buffer = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
     json_swrite(value, options, buffer, length);
     buffer[length] = '\0';
     if (out_length != NULL) *out_length = length;
@@ -1730,33 +1804,37 @@ char* json_write(Json_Value value, Json_Options options, size_t* out_length) {
 
 void json_free_value(Json_Value* value) {
     switch (value->type) {
-    case JSON_VALUE_STRING:
-        JSON_FREE(value->value.string);
+    case JSON_VALUE_STRING: {
+        Json_Allocator* allocator = &value->value.string.allocator;
+        json_free(allocator, value->value.string.data);
         // NULL out in case it's shared somewhere
-        value->value.string = NULL;
+        value->value.string.data = NULL;
         break;
+    }
     case JSON_VALUE_ARRAY: {
         for (size_t i = 0; i < value->value.array.length; ++i) {
             json_free_value(&value->value.array.elements[i]);
         }
-        JSON_FREE(value->value.array.elements);
+        Json_Allocator* allocator = &value->value.array.allocator;
+        json_free(allocator, value->value.array.elements);
         // NULL out in case it's shared somewhere
         value->value.array.elements = NULL;
         value->value.array.length = 0;
         value->value.array.capacity = 0;
     } break;
     case JSON_VALUE_OBJECT: {
+        Json_Allocator* allocator = &value->value.object.allocator;
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 // Free the value and the key
                 json_free_value(&entry->value);
-                JSON_FREE(entry->key);
+                json_free(allocator, entry->key);
             }
-            JSON_FREE(bucket->entries);
+            json_free(allocator, bucket->elements);
         }
-        JSON_FREE(value->value.object.buckets);
+        json_free(allocator, value->value.object.buckets);
         // NULL out in case it's shared somewhere
         value->value.object.buckets = NULL;
         value->value.object.buckets_length = 0;
@@ -1771,9 +1849,9 @@ void json_free_document(Json_Document* doc) {
     json_free_value(&doc->root);
     // Free each error message
     for (size_t i = 0; i < doc->errors.length; ++i) {
-        JSON_FREE(doc->errors.elements[i].message);
+        json_free(&doc->allocator, doc->errors.elements[i].message);
     }
-    JSON_FREE(doc->errors.elements);
+    json_free(&doc->allocator, doc->errors.elements);
     doc->errors.elements = NULL;
     doc->errors.length = 0;
     doc->errors.capacity = 0;
@@ -1784,7 +1862,6 @@ void json_free_document(Json_Document* doc) {
 #endif
 
 #undef JSON_ADD_TO_ARRAY
-#undef JSON_ASSERT
 
 #endif /* JSON_IMPLEMENTATION */
 
@@ -1806,6 +1883,9 @@ void json_free_document(Json_Document* doc) {
 #define ASSERT_NO_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length == 0)
 #define ASSERT_HAS_ERRORS(doc) CTEST_ASSERT_TRUE((doc).errors.length > 0)
 
+// Since we use default allocator for tests
+Json_Allocator no_allocator = {0};
+
 // Parsing primitives //////////////////////////////////////////////////////////
 
 CTEST_CASE(parse_null) {
@@ -1819,7 +1899,7 @@ CTEST_CASE(parse_true) {
     Json_Document doc = json_parse("true", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.value.boolean == true);
+    CTEST_ASSERT_TRUE(json_as_bool(&doc.root) == true);
     json_free_document(&doc);
 }
 
@@ -1827,7 +1907,7 @@ CTEST_CASE(parse_false) {
     Json_Document doc = json_parse("false", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_BOOL);
-    CTEST_ASSERT_TRUE(doc.root.value.boolean == false);
+    CTEST_ASSERT_TRUE(json_as_bool(&doc.root) == false);
     json_free_document(&doc);
 }
 
@@ -1835,7 +1915,7 @@ CTEST_CASE(parse_integer) {
     Json_Document doc = json_parse("42", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.value.integer == 42);
+    CTEST_ASSERT_TRUE(json_as_int(&doc.root) == 42);
     json_free_document(&doc);
 }
 
@@ -1843,7 +1923,7 @@ CTEST_CASE(parse_negative_integer) {
     Json_Document doc = json_parse("-123", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_INT);
-    CTEST_ASSERT_TRUE(doc.root.value.integer == -123);
+    CTEST_ASSERT_TRUE(json_as_int(&doc.root) == -123);
     json_free_document(&doc);
 }
 
@@ -1851,7 +1931,7 @@ CTEST_CASE(parse_double) {
     Json_Document doc = json_parse("3.14", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating > 3.13 && doc.root.value.floating < 3.15);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) > 3.13 && json_as_double(&doc.root) < 3.15);
     json_free_document(&doc);
 }
 
@@ -1859,7 +1939,7 @@ CTEST_CASE(parse_negative_double) {
     Json_Document doc = json_parse("-0.5", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating < -0.49 && doc.root.value.floating > -0.51);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) < -0.49 && json_as_double(&doc.root) > -0.51);
     json_free_document(&doc);
 }
 
@@ -1867,7 +1947,7 @@ CTEST_CASE(parse_double_with_exponent) {
     Json_Document doc = json_parse("1.5e10", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_DOUBLE);
-    CTEST_ASSERT_TRUE(doc.root.value.floating > 1.4e10 && doc.root.value.floating < 1.6e10);
+    CTEST_ASSERT_TRUE(json_as_double(&doc.root) > 1.4e10 && json_as_double(&doc.root) < 1.6e10);
     json_free_document(&doc);
 }
 
@@ -1875,7 +1955,7 @@ CTEST_CASE(parse_string) {
     Json_Document doc = json_parse("\"hello\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&doc.root), "hello") == 0);
     json_free_document(&doc);
 }
 
@@ -1883,7 +1963,7 @@ CTEST_CASE(parse_string_with_escapes) {
     Json_Document doc = json_parse("\"line1\\nline2\\ttab\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "line1\nline2\ttab") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&doc.root), "line1\nline2\ttab") == 0);
     json_free_document(&doc);
 }
 
@@ -1891,7 +1971,7 @@ CTEST_CASE(parse_string_with_unicode) {
     Json_Document doc = json_parse("\"\\u0048\\u0065\\u006c\\u006c\\u006f\"", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(doc.root.value.string, "Hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&doc.root), "Hello") == 0);
     json_free_document(&doc);
 }
 
@@ -1901,7 +1981,7 @@ CTEST_CASE(parse_empty_array) {
     Json_Document doc = json_parse("[]", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
-    CTEST_ASSERT_TRUE(doc.root.value.array.length == 0);
+    CTEST_ASSERT_TRUE(json_length(&doc.root) == 0);
     json_free_document(&doc);
 }
 
@@ -1909,10 +1989,10 @@ CTEST_CASE(parse_array_with_values) {
     Json_Document doc = json_parse("[1, 2, 3]", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_ARRAY);
-    CTEST_ASSERT_TRUE(doc.root.value.array.length == 3);
-    CTEST_ASSERT_TRUE(doc.root.value.array.elements[0].value.integer == 1);
-    CTEST_ASSERT_TRUE(doc.root.value.array.elements[1].value.integer == 2);
-    CTEST_ASSERT_TRUE(doc.root.value.array.elements[2].value.integer == 3);
+    CTEST_ASSERT_TRUE(json_length(&doc.root) == 3);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&doc.root, 0)) == 1);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&doc.root, 1)) == 2);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&doc.root, 2)) == 3);
     json_free_document(&doc);
 }
 
@@ -1922,7 +2002,7 @@ CTEST_CASE(parse_empty_object) {
     Json_Document doc = json_parse("{}", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
-    CTEST_ASSERT_TRUE(doc.root.value.object.entry_count == 0);
+    CTEST_ASSERT_TRUE(json_length(&doc.root) == 0);
     json_free_document(&doc);
 }
 
@@ -1930,11 +2010,11 @@ CTEST_CASE(parse_object_with_properties) {
     Json_Document doc = json_parse("{\"name\": \"John\", \"age\": 30}", (Json_Options){0});
     ASSERT_NO_ERRORS(doc);
     CTEST_ASSERT_TRUE(doc.root.type == JSON_VALUE_OBJECT);
-    CTEST_ASSERT_TRUE(doc.root.value.object.entry_count == 2);
+    CTEST_ASSERT_TRUE(json_length(&doc.root) == 2);
     Json_Value* name = json_object_get(&doc.root, "name");
     Json_Value* age = json_object_get(&doc.root, "age");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "John") == 0);
-    CTEST_ASSERT_TRUE(age != NULL && age->value.integer == 30);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(name), "John") == 0);
+    CTEST_ASSERT_TRUE(age != NULL && json_as_int(age) == 30);
     json_free_document(&doc);
 }
 
@@ -1949,7 +2029,7 @@ CTEST_CASE(parse_leading_zeros_error) {
 CTEST_CASE(parse_leading_zeros_allowed_with_extension) {
     Json_Document doc = json_parse("007", (Json_Options){ .extensions = JSON_EXTENSION_LEADING_ZEROS });
     ASSERT_NO_ERRORS(doc);
-    CTEST_ASSERT_TRUE(doc.root.value.integer == 7);
+    CTEST_ASSERT_TRUE(json_as_int(&doc.root) == 7);
     json_free_document(&doc);
 }
 
@@ -1962,41 +2042,41 @@ CTEST_CASE(parse_trailing_comma_error) {
 CTEST_CASE(parse_trailing_comma_allowed_with_extension) {
     Json_Document doc = json_parse("[1, 2, 3,]", (Json_Options){ .extensions = JSON_EXTENSION_TRAILING_COMMAS });
     ASSERT_NO_ERRORS(doc);
-    CTEST_ASSERT_TRUE(doc.root.value.array.length == 3);
+    CTEST_ASSERT_TRUE(json_length(&doc.root) == 3);
     json_free_document(&doc);
 }
 
 // Builder API /////////////////////////////////////////////////////////////////
 
 CTEST_CASE(build_object_manually) {
-    Json_Value obj = json_object();
-    json_object_set(&obj, "name", json_string("Alice"));
+    Json_Value obj = json_object(no_allocator);
+    json_object_set(&obj, "name", json_string("Alice", no_allocator));
     json_object_set(&obj, "score", json_int(100));
 
     Json_Value* name = json_object_get(&obj, "name");
     Json_Value* score = json_object_get(&obj, "score");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Alice") == 0);
-    CTEST_ASSERT_TRUE(score != NULL && score->value.integer == 100);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(name), "Alice") == 0);
+    CTEST_ASSERT_TRUE(score != NULL && json_as_int(score) == 100);
 
     json_free_value(&obj);
 }
 
 CTEST_CASE(build_array_manually) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
 
-    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 3);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 10);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 20);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 2)) == 30);
 
     json_free_value(&arr);
 }
 
 CTEST_CASE(object_get_at_and_remove) {
-    Json_Value obj = json_object();
+    Json_Value obj = json_object(no_allocator);
     json_object_set(&obj, "a", json_int(1));
     json_object_set(&obj, "b", json_int(2));
 
@@ -2009,88 +2089,88 @@ CTEST_CASE(object_get_at_and_remove) {
     // Test remove
     Json_Value removed;
     CTEST_ASSERT_TRUE(json_object_remove(&obj, "a", &removed));
-    CTEST_ASSERT_TRUE(removed.value.integer == 1);
-    CTEST_ASSERT_TRUE(obj.value.object.entry_count == 1);
+    CTEST_ASSERT_TRUE(json_as_int(&removed) == 1);
+    CTEST_ASSERT_TRUE(json_length(&obj) == 1);
     CTEST_ASSERT_TRUE(json_object_get(&obj, "a") == NULL);
 
     json_free_value(&obj);
 }
 
 CTEST_CASE(array_at_and_remove) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(20));
     json_array_append(&arr, json_int(30));
 
     // Test assignment via json_array_at
     *json_array_at(&arr, 1) = json_int(99);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 99);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 99);
 
     // Test remove
     json_array_remove(&arr, 0);
-    CTEST_ASSERT_TRUE(arr.value.array.length == 2);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 99);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 2);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 99);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 30);
 
     json_free_value(&arr);
 }
 
 CTEST_CASE(array_insert) {
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(10));
     json_array_append(&arr, json_int(30));
 
     // Insert in the middle
     json_array_insert(&arr, 1, json_int(20));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 3);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 10);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 20);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 2)->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 3);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 10);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 20);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 2)) == 30);
 
     // Insert at the beginning
     json_array_insert(&arr, 0, json_int(5));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 4);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->value.integer == 5);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 4);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 0)) == 5);
 
     // Insert at the end (equivalent to append)
     json_array_insert(&arr, 4, json_int(40));
-    CTEST_ASSERT_TRUE(arr.value.array.length == 5);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 4)->value.integer == 40);
+    CTEST_ASSERT_TRUE(json_length(&arr) == 5);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 4)) == 40);
 
     json_free_value(&arr);
 }
 
 CTEST_CASE(json_move_from_array) {
-    Json_Value arr = json_array();
-    json_array_append(&arr, json_string("hello"));
+    Json_Value arr = json_array(no_allocator);
+    json_array_append(&arr, json_string("hello", no_allocator));
     json_array_append(&arr, json_int(42));
 
     // Move the string out
     Json_Value moved = json_move(json_array_at(&arr, 0));
     CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "hello") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&moved), "hello") == 0);
 
     // Original location should now be null
     CTEST_ASSERT_TRUE(json_array_at(&arr, 0)->type == JSON_VALUE_NULL);
-    CTEST_ASSERT_TRUE(json_array_at(&arr, 1)->value.integer == 42);
+    CTEST_ASSERT_TRUE(json_as_int(json_array_at(&arr, 1)) == 42);
 
     json_free_value(&moved);
     json_free_value(&arr);
 }
 
 CTEST_CASE(json_move_from_object) {
-    Json_Value obj = json_object();
-    json_object_set(&obj, "name", json_string("Alice"));
+    Json_Value obj = json_object(no_allocator);
+    json_object_set(&obj, "name", json_string("Alice", no_allocator));
     json_object_set(&obj, "age", json_int(30));
 
     // Move the name value out
     Json_Value moved = json_move(json_object_get(&obj, "name"));
     CTEST_ASSERT_TRUE(moved.type == JSON_VALUE_STRING);
-    CTEST_ASSERT_TRUE(strcmp(moved.value.string, "Alice") == 0);
+    CTEST_ASSERT_TRUE(strcmp(json_as_string(&moved), "Alice") == 0);
 
     // Original location should now be null
     CTEST_ASSERT_TRUE(json_object_get(&obj, "name")->type == JSON_VALUE_NULL);
-    CTEST_ASSERT_TRUE(json_object_get(&obj, "age")->value.integer == 30);
+    CTEST_ASSERT_TRUE(json_as_int(json_object_get(&obj, "age")) == 30);
 
     json_free_value(&moved);
     json_free_value(&obj);
@@ -2098,12 +2178,12 @@ CTEST_CASE(json_move_from_object) {
 
 CTEST_CASE(json_length_accessor) {
     // Test string length
-    Json_Value str = json_string("hello");
+    Json_Value str = json_string("hello", no_allocator);
     CTEST_ASSERT_TRUE(json_length(&str) == 5);
     json_free_value(&str);
 
     // Test array length
-    Json_Value arr = json_array();
+    Json_Value arr = json_array(no_allocator);
     json_array_append(&arr, json_int(1));
     json_array_append(&arr, json_int(2));
     json_array_append(&arr, json_int(3));
@@ -2111,7 +2191,7 @@ CTEST_CASE(json_length_accessor) {
     json_free_value(&arr);
 
     // Test object length
-    Json_Value obj = json_object();
+    Json_Value obj = json_object(no_allocator);
     json_object_set(&obj, "a", json_int(1));
     json_object_set(&obj, "b", json_int(2));
     CTEST_ASSERT_TRUE(json_length(&obj) == 2);
@@ -2135,7 +2215,7 @@ CTEST_CASE(safe_accessors) {
     CTEST_ASSERT_TRUE(json_as_bool(&bool_val) == true);
 
     // Test json_as_string
-    Json_Value str_val = json_string("test");
+    Json_Value str_val = json_string("test", no_allocator);
     CTEST_ASSERT_TRUE(strcmp(json_as_string(&str_val), "test") == 0);
 
     json_free_value(&str_val);
@@ -2149,7 +2229,7 @@ CTEST_CASE(write_primitives) {
     char* null_str = json_write(json_null(), opts, NULL);
     char* true_str = json_write(json_bool(true), opts, NULL);
     char* int_str = json_write(json_int(42), opts, NULL);
-    char* str_str = json_write(json_string("hello"), opts, NULL);
+    char* str_str = json_write(json_string("hello", no_allocator), opts, NULL);
 
     CTEST_ASSERT_TRUE(strcmp(null_str, "null") == 0);
     CTEST_ASSERT_TRUE(strcmp(true_str, "true") == 0);
@@ -2163,7 +2243,7 @@ CTEST_CASE(write_primitives) {
 }
 
 CTEST_CASE(write_string_escapes) {
-    Json_Value val = json_string("line1\nline2\ttab");
+    Json_Value val = json_string("line1\nline2\ttab", no_allocator);
     char* str = json_write(val, (Json_Options){0}, NULL);
     CTEST_ASSERT_TRUE(strcmp(str, "\"line1\\nline2\\ttab\"") == 0);
     free(str);
@@ -2182,8 +2262,8 @@ CTEST_CASE(write_roundtrip) {
     // Verify the re-parsed values match
     Json_Value* name = json_object_get(&doc2.root, "name");
     Json_Value* active = json_object_get(&doc2.root, "active");
-    CTEST_ASSERT_TRUE(name != NULL && strcmp(name->value.string, "Bob") == 0);
-    CTEST_ASSERT_TRUE(active != NULL && active->value.boolean == true);
+    CTEST_ASSERT_TRUE(name != NULL && strcmp(json_as_string(name), "Bob") == 0);
+    CTEST_ASSERT_TRUE(active != NULL && json_as_bool(active) == true);
 
     free(reWritten);
     json_free_document(&doc);
