@@ -17,6 +17,7 @@
 // IMPORTANT: We do NOT define SPV_H here, as the generated sections will be dumped at the end of this file, which will define it
 //#define SPV_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,7 +36,8 @@ extern "C" {
 #endif
 
 typedef struct Spv_ChunkEncoder {
-
+    size_t offset;
+    uint32_t* words;
 } Spv_ChunkEncoder;
 
 #ifdef __cplusplus
@@ -55,7 +57,29 @@ typedef struct Spv_ChunkEncoder {
 extern "C" {
 #endif
 
-// TODO: Implementation goes here
+static void spv_encode_u32(Spv_ChunkEncoder* encoder, uint32_t value) {
+    // TODO
+    (void)encoder;
+    (void)value;
+}
+
+static void spv_encode_i32(Spv_ChunkEncoder* encoder, int32_t value) {
+    // TODO
+    (void)encoder;
+    (void)value;
+}
+
+static void spv_encode_f32(Spv_ChunkEncoder* encoder, float value) {
+    // TODO
+    (void)encoder;
+    (void)value;
+}
+
+static void spv_encode_string(Spv_ChunkEncoder* encoder, char const* str) {
+    // TODO
+    (void)encoder;
+    (void)str;
+}
 
 #ifdef __cplusplus
 }
