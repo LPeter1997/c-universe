@@ -36,9 +36,18 @@ extern "C" {
 #endif
 
 typedef struct Spv_ChunkEncoder {
-    size_t offset;
     uint32_t* words;
+    size_t offset;
+    size_t capacity;
 } Spv_ChunkEncoder;
+
+typedef struct Spv_ModuleEncoder {
+    struct {
+        Spv_ChunkEncoder* elements;
+        size_t length;
+        size_t capacity;
+    } chunks;
+} Spv_ModuleEncoder;
 
 #ifdef __cplusplus
 }
