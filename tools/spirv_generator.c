@@ -703,16 +703,26 @@ static Model json_model_to_domain(Json_Document doc) {
 
 // C code generation ///////////////////////////////////////////////////////////
 
-static void generate_c_operand_declaration(CodeBuilder* cb, Operand* operand) {
+static void generate_c_operand_declaration(CodeBuilder* cb, Operand* operand, bool inStruct) {
     switch (operand->quantifier) {
     case QUANTIFIER_ONE:
         code_builder_format(cb, "Spv_%s %s", operand->typeName, operand->name);
         break;
     case QUANTIFIER_ANY:
-        code_builder_format(cb, "struct { Spv_%s* values; size_t count; } %s", operand->typeName, operand->name);
+        if (inStruct) {
+            code_builder_format(cb, "struct { Spv_%s values[]; size_t count; } %s", operand->typeName, operand->name);
+        }
+        else {
+            code_builder_format(cb, "Spv_%s* %sValues, size_t %sCount", operand->typeName, operand->name, operand->name);
+        }
         break;
     case QUANTIFIER_OPTIONAL:
-        code_builder_format(cb, "struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
+        if (inStruct) {
+            code_builder_format(cb, "struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
+        }
+        else {
+            code_builder_format(cb, "bool %sPresent, Spv_%s %sValue", operand->name, operand->typeName, operand->name);
+        }
         break;
     }
 }
@@ -804,7 +814,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
             code_builder_indent(cb);
             for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                 Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                generate_c_operand_declaration(cb, param);
+                generate_c_operand_declaration(cb, param, true);
                 code_builder_puts(cb, ";\n");
             }
             code_builder_dedent(cb);
@@ -834,7 +844,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
                 code_builder_format(cb, "Spv_%s spv_%s_%s(", type->name, type->name, enumerant->name);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
-                    generate_c_operand_declaration(cb, param);
+                    generate_c_operand_declaration(cb, param, false);
                     if (j < DynamicArray_length(enumerant->parameters) - 1) {
                         code_builder_puts(cb, ", ");
                     }
@@ -862,7 +872,7 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
                     code_builder_puts(cb, ", ");
-                    generate_c_operand_declaration(cb, param);
+                    generate_c_operand_declaration(cb, param, false);
                 }
                 if (declare) {
                     code_builder_puts(cb, ");\n");
@@ -1015,7 +1025,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
         Operand* operand = &DynamicArray_at(instruction->operands, i);
         code_builder_puts(cb, ", ");
-        generate_c_operand_declaration(cb, operand);
+        generate_c_operand_declaration(cb, operand, false);
     }
     if (declare) {
         code_builder_puts(cb, ");\n");
