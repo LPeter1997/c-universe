@@ -987,7 +987,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
 }
 
 static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instruction* instruction) {
-    code_builder_format(cb, "static inline void spv_%s(Spv_InstructionEncoder* encoder", instruction->name);
+    code_builder_format(cb, "static inline void spv_%s(Spv_Encoder* encoder", instruction->name);
     for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
         Operand* operand = &DynamicArray_at(instruction->operands, i);
         code_builder_puts(cb, ", ");
