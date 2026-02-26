@@ -719,7 +719,7 @@ static void generate_c_operand_declaration(CodeBuilder* cb, Operand* operand) {
 
 static void generate_c_header_comment(CodeBuilder* cb, Model* model) {
     code_builder_format(cb, ""
-        "// This portion is auto-generated from the official SPIR-V grammar JSON.\n"
+        "// This portion is auto-generated from the official SPIR-V grammar JSON ////////\n"
         "//\n"
         "// SPIR-V Version: %lld.%lld (revision %lld)\n"
         "//\n"
@@ -1044,6 +1044,14 @@ static char* generate_c_code(Model* model, bool declare) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, model);
 
+    if (declare) {
+        code_builder_puts(&cb, "#ifndef SPV_H\n");
+        code_builder_puts(&cb, "#define SPV_H\n\n");
+    }
+    else {
+        code_builder_puts(&cb, "#ifdef SPV_IMPLEMENTATION\n\n");
+    }
+
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
         generate_c_type(&cb, type, declare);
@@ -1054,7 +1062,10 @@ static char* generate_c_code(Model* model, bool declare) {
         generate_c_instruction_encoder(&cb, model, instruction, declare);
     }
 
-    code_builder_puts(&cb, "// End of auto-generated section ///////////////////////////////////////////////\n");
+    code_builder_puts(&cb, "// End of auto-generated section ///////////////////////////////////////////////\n\n");
+
+    if (declare) code_builder_puts(&cb, "#endif /* SPV_H */\n");
+    else code_builder_puts(&cb, "#endif /* SPV_IMPLEMENTATION */\n");
 
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
