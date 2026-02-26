@@ -2,7 +2,6 @@
  * collections.h is a single-header TODO.
  *
  * Configuration:
- *  - #define COLLECTIONS_REALLOC and COLLECTIONS_FREE to use custom memory allocation functions (by default they use realloc and free from the C standard library)
  *  - #define COLLECTIONS_ASSERT to use a custom assertion mechanism (by default it uses assert from the C standard library)
  *  - #define COLLECTIONS_SELF_TEST before including this header to compile a self-test that verifies the library's functionality
  *  - #define COLLECTIONS_EXAMPLE before including this header to compile a simple example that demonstrates the library's usage
@@ -12,6 +11,7 @@
  *  - Use DynamicArray_free, DynamicArray_length, DynamicArray_at, DynamicArray_clear, ... macros to manipulate the dynamic array
  *  - Use HashTable(K, V) to define a hash table with key type K and value type V, either inline or as a typedef
  *  - Use HashTable_set, HashTable_get, HashTable_remove, ... macros to manipulate the hash table
+ *  - Use the allocator field of collections to customize memory allocation if needed
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -23,36 +23,57 @@
 #define COLLECTIONS_H
 
 #include <assert.h>
-#include <stddef.h>
 #include <stdbool.h>
-#include <string.h>
+#include <stddef.h>
 #include <stdlib.h>
-
-#ifndef COLLECTIONS_REALLOC
-    #define COLLECTIONS_REALLOC realloc
-    #define COLLECTIONS_FREE free
-#endif
+#include <string.h>
 
 #ifndef COLLECTIONS_ASSERT
     #define COLLECTIONS_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
-// Dynamic array ///////////////////////////////////////////////////////////////
+/**
+ * An allocator struct that allows customizing memory allocation for the collections.
+ */
+typedef struct Collection_Allocator {
+    // Context pointer that will be passed to the realloc and free functions
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Collection_Allocator;
+
+// Internal macros /////////////////////////////////////////////////////////////
 
 // Suppress -Wtype-limits for index checks (e.g., 0 <= size_t is always true)
 #if defined(__GNUC__) && !defined(__clang__)
-    #define COLLECTIONS_ASSERT_INDEX(condition, message) \
-        do { \
-            _Pragma("GCC diagnostic push") \
-            _Pragma("GCC diagnostic ignored \"-Wtype-limits\"") \
-            COLLECTIONS_ASSERT(condition, message); \
-            _Pragma("GCC diagnostic pop") \
-        } while (false)
+#define __COLLECTIONS_ASSERT_NOWARN(condition, message) \
+do { \
+    _Pragma("GCC diagnostic push") \
+    _Pragma("GCC diagnostic ignored \"-Wtype-limits\"") \
+    COLLECTIONS_ASSERT(condition, message); \
+    _Pragma("GCC diagnostic pop") \
+} while (false)
 #else
-    #define COLLECTIONS_ASSERT_INDEX(condition, message) COLLECTIONS_ASSERT(condition, message)
+#define __COLLECTIONS_ASSERT_NOWARN(condition, message) COLLECTIONS_ASSERT(condition, message)
 #endif
 
+// A semi-reliable way to get a unique name to avoid shadowing
 #define __COLLECTIONS_ID(name) __collections_ ## name ## _ ## __LINE__
+
+// Initialization for allocator
+#define __COLLECTIONS_ALLOC_INIT(allocator) \
+    do { \
+        if ((allocator).realloc != NULL || (allocator).free != NULL) { \
+            COLLECTIONS_ASSERT((allocator).realloc != NULL && (allocator).free != NULL, "both realloc and free function pointers must be set in allocator"); \
+        } else { \
+            (allocator).realloc = realloc; \
+            (allocator).free = free; \
+        } \
+    } while (false)
+
+// Dynamic array ///////////////////////////////////////////////////////////////
 
 /**
  * Defines a dynamic array of the given type.
@@ -63,6 +84,7 @@
         T* elements; \
         size_t length; \
         size_t capacity; \
+        Collection_Allocator allocator; \
     }
 
 /**
@@ -71,7 +93,8 @@
  */
 #define DynamicArray_free(array) \
     do { \
-        COLLECTIONS_FREE((array).elements); \
+        __COLLECTIONS_ALLOC_INIT((array).allocator); \
+        (array).allocator.free((array).allocator.context, (array).elements); \
         (array).elements = NULL; \
         (array).length = 0; \
         (array).capacity = 0; \
@@ -109,7 +132,8 @@
         if ((new_capacity) > (array).capacity) { \
             size_t __COLLECTIONS_ID(new_cap) = (array).capacity == 0 ? 8 : (array).capacity * 2; \
             while (__COLLECTIONS_ID(new_cap) < (new_capacity)) __COLLECTIONS_ID(new_cap) *= 2; \
-            void* __COLLECTIONS_ID(new_elements) = COLLECTIONS_REALLOC((array).elements, __COLLECTIONS_ID(new_cap) * sizeof(*(array).elements)); \
+            __COLLECTIONS_ALLOC_INIT((array).allocator); \
+            void* __COLLECTIONS_ID(new_elements) = (array).allocator.realloc((array).allocator.context, (array).elements, __COLLECTIONS_ID(new_cap) * sizeof(*(array).elements)); \
             COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_elements) != NULL, "failed to allocate memory for dynamic array"); \
             (array).elements = __COLLECTIONS_ID(new_elements); \
             (array).capacity = __COLLECTIONS_ID(new_cap); \
@@ -135,7 +159,7 @@
  */
 #define DynamicArray_insert(array, index, element) \
     do { \
-        COLLECTIONS_ASSERT_INDEX((index) <= (array).length, "index out of bounds for dynamic array insertion"); \
+        __COLLECTIONS_ASSERT_NOWARN((index) <= (array).length, "index out of bounds for dynamic array insertion"); \
         DynamicArray_reserve((array), (array).length + 1); \
         memmove(&(array).elements[(index) + 1], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         (array).elements[index] = (element); \
@@ -158,7 +182,7 @@
  */
 #define DynamicArray_insert_range(array, index, ins_elements, count) \
     do { \
-        COLLECTIONS_ASSERT_INDEX((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
+        __COLLECTIONS_ASSERT_NOWARN((index) <= (array).length, "index out of bounds for dynamic array range insertion"); \
         DynamicArray_reserve((array), (array).length + (count)); \
         memmove(&(array).elements[(index) + (count)], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
         memcpy(&(array).elements[index], (ins_elements), (count) * sizeof(*(array).elements)); \
@@ -173,8 +197,8 @@
  */
 #define DynamicArray_remove_range(array, index, count) \
     do { \
-        COLLECTIONS_ASSERT_INDEX((index) < (array).length, "index out of bounds for dynamic array range removal"); \
-        COLLECTIONS_ASSERT_INDEX((index) + (count) <= (array).length, "range out of bounds for dynamic array range removal"); \
+        __COLLECTIONS_ASSERT_NOWARN((index) < (array).length, "index out of bounds for dynamic array range removal"); \
+        __COLLECTIONS_ASSERT_NOWARN((index) + (count) <= (array).length, "range out of bounds for dynamic array range removal"); \
         memmove(&(array).elements[index], &(array).elements[(index) + (count)], ((array).length - (index) - (count)) * sizeof(*(array).elements)); \
         (array).length -= (count); \
     } while (false)
@@ -201,6 +225,7 @@
         size_t entry_count; \
         size_t (*hash_fn)(K); \
         bool (*eq_fn)(K, K); \
+        Collection_Allocator allocator; \
     }
 
 /**
@@ -209,10 +234,11 @@
  */
 #define HashTable_free(table) \
     do { \
+        __COLLECTIONS_ALLOC_INIT((table).allocator); \
         for (size_t __COLLECTIONS_ID(i) = 0; __COLLECTIONS_ID(i) < (table).buckets_length; ++__COLLECTIONS_ID(i)) { \
-            COLLECTIONS_FREE((table).buckets[__COLLECTIONS_ID(i)].entries); \
+            (table).allocator.free((table).allocator.context, (table).buckets[__COLLECTIONS_ID(i)].entries); \
         } \
-        COLLECTIONS_FREE((table).buckets); \
+        (table).allocator.free((table).allocator.context, (table).buckets); \
         (table).buckets = NULL; \
         (table).buckets_length = 0; \
         (table).entry_count = 0; \
@@ -225,10 +251,11 @@
  */
 #define HashTable_resize(table, new_buckets_length) \
     do { \
+        __COLLECTIONS_ALLOC_INIT((table).allocator); \
         size_t __COLLECTIONS_ID(new_len) = (new_buckets_length); \
         if (__COLLECTIONS_ID(new_len) != (table).buckets_length && __COLLECTIONS_ID(new_len) > 0) { \
             /* Allocate new buckets memory */ \
-            void* __COLLECTIONS_ID(new_ptr) = COLLECTIONS_REALLOC(NULL, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
+            void* __COLLECTIONS_ID(new_ptr) = (table).allocator.realloc((table).allocator.context, NULL, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
             COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_ptr) != NULL, "failed to allocate memory for resized hash table buckets"); \
             memset(__COLLECTIONS_ID(new_ptr), 0, __COLLECTIONS_ID(new_len) * sizeof(*(table).buckets)); \
             /* Save old state */ \
@@ -249,7 +276,7 @@
                     /* Ensure new bucket has capacity */ \
                     if ((table).buckets[__COLLECTIONS_ID(new_idx)].length == (table).buckets[__COLLECTIONS_ID(new_idx)].capacity) { \
                         size_t __COLLECTIONS_ID(new_cap) = (table).buckets[__COLLECTIONS_ID(new_idx)].capacity == 0 ? 8 : (table).buckets[__COLLECTIONS_ID(new_idx)].capacity * 2; \
-                        void* __COLLECTIONS_ID(new_entries) = COLLECTIONS_REALLOC((table).buckets[__COLLECTIONS_ID(new_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[0].entries)); \
+                        void* __COLLECTIONS_ID(new_entries) = (table).allocator.realloc((table).allocator.context, (table).buckets[__COLLECTIONS_ID(new_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[0].entries)); \
                         COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_entries) != NULL, "failed to allocate memory for resized hash table bucket entries"); \
                         (table).buckets[__COLLECTIONS_ID(new_idx)].entries = __COLLECTIONS_ID(new_entries); \
                         (table).buckets[__COLLECTIONS_ID(new_idx)].capacity = __COLLECTIONS_ID(new_cap); \
@@ -262,10 +289,10 @@
                     (table).buckets_length = __COLLECTIONS_ID(old_len); \
                 } \
                 /* Free old bucket entries */ \
-                COLLECTIONS_FREE((table).buckets[__COLLECTIONS_ID(i)].entries); \
+                (table).allocator.free((table).allocator.context, (table).buckets[__COLLECTIONS_ID(i)].entries); \
             } \
             /* Final switch to new buckets */ \
-            COLLECTIONS_FREE(__COLLECTIONS_ID(old_ptr)); \
+            (table).allocator.free((table).allocator.context, __COLLECTIONS_ID(old_ptr)); \
             (table).buckets = __COLLECTIONS_ID(new_ptr); \
             (table).buckets_length = __COLLECTIONS_ID(new_len); \
         } \
@@ -337,7 +364,8 @@
         if (!__COLLECTIONS_ID(found)) { \
             if ((table).buckets[__COLLECTIONS_ID(bucket_idx)].length == (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity) { \
                 size_t __COLLECTIONS_ID(new_cap) = (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity == 0 ? 8 : (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity * 2; \
-                void* __COLLECTIONS_ID(new_entries) = COLLECTIONS_REALLOC((table).buckets[__COLLECTIONS_ID(bucket_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[__COLLECTIONS_ID(bucket_idx)].entries)); \
+                __COLLECTIONS_ALLOC_INIT((table).allocator); \
+                void* __COLLECTIONS_ID(new_entries) = (table).allocator.realloc((table).allocator.context, (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries, __COLLECTIONS_ID(new_cap) * sizeof(*(table).buckets[__COLLECTIONS_ID(bucket_idx)].entries)); \
                 COLLECTIONS_ASSERT(__COLLECTIONS_ID(new_entries) != NULL, "failed to allocate memory for hash table bucket entries during set"); \
                 (table).buckets[__COLLECTIONS_ID(bucket_idx)].entries = __COLLECTIONS_ID(new_entries); \
                 (table).buckets[__COLLECTIONS_ID(bucket_idx)].capacity = __COLLECTIONS_ID(new_cap); \
