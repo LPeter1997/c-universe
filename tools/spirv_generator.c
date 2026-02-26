@@ -282,7 +282,7 @@ static bool dependencies_satisfied(Json_Value* operandKind, Json_Value* sortedAr
 
 // Topological sort of operand_kinds (simple O(n^2) approach)
 static void json_topological_sort_operand_kinds(Json_Value* operandKinds) {
-    Json_Value sorted = json_array();
+    Json_Value sorted = json_array((Json_Allocator){0});
     size_t remaining = json_length(operandKinds);
 
     while (remaining > 0) {
@@ -463,9 +463,9 @@ static char* operand_infer_name(Operand* operand, char const* hint) {
     sb_replace(&sb, "~", "");
 
     // For some bizarre reason the grammar uses <<Invocation,invocations>> as a name, we get rid of the crud and just extract plural
-    int openAnglePos = sb_indexofc(&sb, '<');
-    int commaPos = sb_indexofc(&sb, ',');
-    int closeAnglePos = sb_indexofc(&sb, '>');
+    int openAnglePos = sb_index_ofc(&sb, '<');
+    int commaPos = sb_index_ofc(&sb, ',');
+    int closeAnglePos = sb_index_ofc(&sb, '>');
     if (openAnglePos >= 0 && commaPos > openAnglePos && closeAnglePos > commaPos) {
         sb_remove(&sb, closeAnglePos, (size_t)(sb.length - closeAnglePos));
         sb_remove(&sb, (size_t)openAnglePos, (size_t)(commaPos - openAnglePos + 1));
