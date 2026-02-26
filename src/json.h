@@ -85,6 +85,8 @@ typedef struct Json_Options {
     char const* newline_str;
     // The string to use for indentation when writing. NULL means no indentation.
     char const* indent_str;
+    // Optional custom memory allocator
+    Json_Allocator allocator;
 } Json_Options;
 
 /**
@@ -435,16 +437,15 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 #include <stdlib.h>
 #include <string.h>
 
-#define JSON_ADD_TO_ARRAY(array, length, capacity, element) \
+#define JSON_ADD_TO_ARRAY(allocator, array, element) \
     do { \
-        if ((length) + 1 > (capacity)) { \
-            size_t newCapacity = ((capacity) == 0) ? 8 : ((capacity) * 2); \
-            void* newElements = JSON_REALLOC((array), newCapacity * sizeof(*(array))); \
-            JSON_ASSERT(newElements != NULL, "failed to allocate memory for array"); \
-            (array) = newElements; \
-            (capacity) = newCapacity; \
+        if ((array).length + 1 > (array).capacity) { \
+            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
+            void* newElements = json_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
+            (array).elements = newElements; \
+            (array).capacity = newCapacity; \
         } \
-        (array)[(length)++] = element; \
+        (array).elements[(array).length++] = element; \
     } while (false)
 
 #ifdef __cplusplus
@@ -493,7 +494,7 @@ typedef struct Json_HashEntry {
 } Json_HashEntry;
 
 typedef struct Json_HashBucket {
-    Json_HashEntry* entries;
+    Json_HashEntry* elements;
     size_t length;
     size_t capacity;
 } Json_HashBucket;
@@ -532,16 +533,16 @@ static bool json_isxdigit(char ch, int* out_value) {
     return false;
 }
 
-static char* json_strdup(char const* str) {
+static char* json_strdup(Json_Allocator* allocator, char const* str) {
     size_t length = strlen(str);
-    char* copy = (char*)JSON_REALLOC(NULL, (length + 1) * sizeof(char));
+    char* copy = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
     JSON_ASSERT(copy != NULL, "failed to allocate memory for string duplication");
     memcpy(copy, str, length * sizeof(char));
     copy[length] = '\0';
     return copy;
 }
 
-static char* json_format(const char* format, ...) {
+static char* json_format(Json_Allocator* allocator, const char* format, ...) {
     va_list args;
     va_start(args, format);
     va_list args_copy;
@@ -549,7 +550,7 @@ static char* json_format(const char* format, ...) {
     int length = vsnprintf(NULL, 0, format, args_copy);
     JSON_ASSERT(length >= 0, "failed to compute length of formatted string");
     va_end(args_copy);
-    char* buffer = (char*)JSON_REALLOC(NULL, ((size_t)length + 1) * sizeof(char));
+    char* buffer = (char*)json_realloc(allocator, NULL, ((size_t)length + 1) * sizeof(char));
     JSON_ASSERT(buffer != NULL, "failed to allocate memory for formatted string");
     vsnprintf(buffer, (size_t)length + 1, format, args);
     va_end(args);
@@ -1314,7 +1315,7 @@ Json_Value json_copy(Json_Value* value) {
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 json_object_set(&object, entry->key, json_copy(&entry->value));
             }
         }
@@ -1377,7 +1378,7 @@ Json_Value json_null(void) {
 
 void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to append to non-array value");
-    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
 }
 
 void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
@@ -1389,7 +1390,7 @@ void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
         return;
     }
     // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
-    JSON_ADD_TO_ARRAY(array->value.array.elements, array->value.array.length, array->value.array.capacity, value);
+    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
     memmove(&array->value.array.elements[index + 1], &array->value.array.elements[index], (array->value.array.length - index - 1) * sizeof(Json_Value));
     array->value.array.elements[index] = value;
 }
@@ -1428,24 +1429,25 @@ static double json_hash_table_load_factor(Json_Value* value) {
 }
 
 static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
+    Json_Allocator* allocator = &value->value.object.allocator;
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to resize hash table on non-object value");
-    Json_HashBucket* newBuckets = (Json_HashBucket*)JSON_REALLOC(NULL, newBucketCount * sizeof(Json_HashBucket));
+    Json_HashBucket* newBuckets = (Json_HashBucket*)json_realloc(allocator, NULL, newBucketCount * sizeof(Json_HashBucket));
     JSON_ASSERT(newBuckets != NULL, "failed to allocate memory for resized hash table buckets");
     memset(newBuckets, 0, newBucketCount * sizeof(Json_HashBucket));
     // Add each item from each bucket to the new bucket array, essentially redistributing
     for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
         Json_HashBucket* oldBucket = &value->value.object.buckets[i];
         for (size_t j = 0; j < oldBucket->length; ++j) {
-            Json_HashEntry entry = oldBucket->entries[j];
+            Json_HashEntry entry = oldBucket->elements[j];
             size_t newBucketIndex = entry.hash % newBucketCount;
             Json_HashBucket* newBucket = &newBuckets[newBucketIndex];
-            JSON_ADD_TO_ARRAY(newBucket->entries, newBucket->length, newBucket->capacity, entry);
+            JSON_ADD_TO_ARRAY(allocator, newBucket, entry);
         }
         // Old bucket entries have been moved to the new buckets, we can free the old bucket entries array
-        JSON_FREE(oldBucket->entries);
+        json_free(allocator, oldBucket->elements);
     }
     // Free the old buckets and replace with the new ones
-    JSON_FREE(value->value.object.buckets);
+    json_free(allocator, value->value.object.buckets);
     value->value.object.buckets = newBuckets;
     value->value.object.buckets_length = newBucketCount;
 }
@@ -1469,7 +1471,7 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Check if the key already exists in the bucket, if so, replace the value
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // Free the old value if needed
             json_free_value(&entry->value);
@@ -1484,7 +1486,7 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
         .value = value,
         .hash = hash,
     };
-    JSON_ADD_TO_ARRAY(bucket->entries, bucket->length, bucket->capacity, newEntry);
+    JSON_ADD_TO_ARRAY(&object->value.object.allocator, bucket, newEntry);
     // New element was added
     ++object->value.object.entry_count;
 }
@@ -1498,7 +1500,7 @@ Json_Value* json_object_get(Json_Value* object, char const* key) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             return &entry->value;
         }
@@ -1514,7 +1516,7 @@ bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, 
         Json_HashBucket* bucket = &object->value.object.buckets[i];
         for (size_t j = 0; j < bucket->length; ++j) {
             if (currentIndex == index) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 if (out_key != NULL) *out_key = entry->key;
                 if (out_value != NULL) *out_value = entry->value;
                 return true;
@@ -1534,15 +1536,15 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->entries[i];
+        Json_HashEntry* entry = &bucket->elements[i];
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // If old value is wanted, copy it out, otherwise free it
             if (out_value != NULL) *out_value = entry->value;
             else json_free_value(&entry->value);
             // Free the key
-            JSON_FREE(entry->key);
+            json_free(&object->value.object.allocator, entry->key);
             // Remove the entry by shifting the remaining entries
-            memmove(&bucket->entries[i], &bucket->entries[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
+            memmove(&bucket->elements[i], &bucket->elements[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
             --bucket->length;
             --object->value.object.entry_count;
             return true;
@@ -1738,7 +1740,7 @@ static void json_write_value(Json_Writer* writer, Json_Value value) {
         for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value.value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j, ++entryIndex) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 json_writer_append_indent(writer);
                 json_write_string_value(writer, entry->key);
                 json_writer_append(writer, ": ");
@@ -1784,11 +1786,13 @@ char* json_write(Json_Value value, Json_Options options, size_t* out_length) {
 
 void json_free_value(Json_Value* value) {
     switch (value->type) {
-    case JSON_VALUE_STRING:
-        JSON_FREE(value->value.string);
+    case JSON_VALUE_STRING: {
+        Json_Allocator* allocator = &value->value.string_allocator;
+        json_free(allocator, value->value.string);
         // NULL out in case it's shared somewhere
         value->value.string = NULL;
         break;
+    }
     case JSON_VALUE_ARRAY: {
         for (size_t i = 0; i < value->value.array.length; ++i) {
             json_free_value(&value->value.array.elements[i]);
@@ -1805,12 +1809,12 @@ void json_free_value(Json_Value* value) {
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->entries[j];
+                Json_HashEntry* entry = &bucket->elements[j];
                 // Free the value and the key
                 json_free_value(&entry->value);
                 json_free(allocator, entry->key);
             }
-            json_free(allocator, bucket->entries);
+            json_free(allocator, bucket->elements);
         }
         json_free(allocator, value->value.object.buckets);
         // NULL out in case it's shared somewhere
