@@ -35,14 +35,14 @@
 /**
  * An allocator struct that allows customizing memory allocation for the collections.
  */
-typedef struct Collection_Allocator {
+typedef struct Collections_Allocator {
     // Context pointer that will be passed to the realloc and free functions
     void* context;
     // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
     void*(*realloc)(void* ctx, void* ptr, size_t new_size);
     // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
     void(*free)(void* ctx, void* ptr);
-} Collection_Allocator;
+} Collections_Allocator;
 
 // Internal macros /////////////////////////////////////////////////////////////
 
@@ -94,7 +94,7 @@ static inline void collections_default_free(void* ctx, void* ptr) {
         T* elements; \
         size_t length; \
         size_t capacity; \
-        Collection_Allocator allocator; \
+        Collections_Allocator allocator; \
     }
 
 /**
@@ -235,7 +235,7 @@ static inline void collections_default_free(void* ctx, void* ptr) {
         size_t entry_count; \
         size_t (*hash_fn)(K); \
         bool (*eq_fn)(K, K); \
-        Collection_Allocator allocator; \
+        Collections_Allocator allocator; \
     }
 
 /**
