@@ -751,6 +751,12 @@ static void generate_c_param_assignment(CodeBuilder* cb, char const* prefix, cha
 }
 
 static void generate_c_type(CodeBuilder* cb, Type* type) {
+    size_t headerLengthBefore = cb->builder.length;
+    code_builder_format(cb, "// %s ", type->name);
+    size_t headerLengthAfter = cb->builder.length;
+    // Pad up to 80 chars
+    for (size_t i = headerLengthAfter; i < headerLengthBefore + 80; ++i) code_builder_putc(cb, '/');
+    code_builder_putc(cb, '\n');
     generate_c_doc(cb, type->doc);
     if (type->kind == TYPE_STRONG_ID
      || type->kind == TYPE_UINT32
