@@ -19,6 +19,7 @@
  *  - Use json_move to move a value out of a container while leaving a null in place
  *  - Use json_length, json_as_int, json_as_double, json_as_bool and json_as_string for safe value access
  *  - Use json_free_value and json_free_document to free the memory associated with JSON values and documents when they are no longer needed
+ *  - Use Json_Allocator to customize memory allocation if needed
  *
  * Check the example section at the end of this file for a full example.
  */
@@ -37,11 +38,6 @@
     #define JSON_DEF static
 #else
     #define JSON_DEF extern
-#endif
-
-#ifndef JSON_REALLOC
-    #define JSON_REALLOC realloc
-    #define JSON_FREE free
 #endif
 
 #ifndef JSON_ASSERT
@@ -161,17 +157,22 @@ typedef struct Json_Value {
         bool boolean;
         long long integer;
         double floating;
-        // Owned string
-        char* string;
+        struct {
+            char* data;
+            size_t length;
+            Json_Allocator allocator;
+        } string;
         struct {
             struct Json_Value* elements;
             size_t length;
             size_t capacity;
+            Json_Allocator allocator;
         } array;
         struct {
             struct Json_HashBucket* buckets;
             size_t buckets_length;
             size_t entry_count;
+            Json_Allocator allocator;
         } object;
     } value;
 } Json_Value;
@@ -231,22 +232,25 @@ JSON_DEF char* json_write(Json_Value value, Json_Options options, size_t* out_le
 
 /**
  * Creates a new JSON object value.
+ * @param allocator The allocator to use for the object's allocations.
  * @returns A new, empty JSON object.
  */
-JSON_DEF Json_Value json_object(void);
+JSON_DEF Json_Value json_object(Json_Allocator allocator);
 
 /**
  * Creates a new JSON array value.
+ * @param allocator The allocator to use for the array's allocations.
  * @returns A new, empty JSON array.
  */
-JSON_DEF Json_Value json_array(void);
+JSON_DEF Json_Value json_array(Json_Allocator allocator);
 
 /**
  * Creates a new JSON string value by copying the given string.
  * @param str The string to copy into the JSON value.
+ * @param allocator The allocator to use for the string's allocations.
  * @returns A new JSON string value containing a copy of the given string.
  */
-JSON_DEF Json_Value json_string(char const* str);
+JSON_DEF Json_Value json_string(char const* str, Json_Allocator allocator);
 
 /**
  * Creates a new JSON integer number value.
@@ -446,6 +450,41 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Allocation //////////////////////////////////////////////////////////////////
+
+static void* json_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+
+static void json_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+static void json_init_allocator(Json_Allocator* allocator) {
+    if (allocator->realloc != NULL || allocator->free != NULL) {
+        JSON_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
+        return;
+    }
+    allocator->realloc = json_default_realloc;
+    allocator->free = json_default_free;
+}
+
+static void* json_realloc(Json_Allocator* allocator, void* ptr, size_t size) {
+    json_init_allocator(allocator);
+    void* result = allocator->realloc(allocator->context, ptr, size);
+    JSON_ASSERT(result != NULL, "failed to allocate memory");
+    return result;
+}
+
+static void json_free(Json_Allocator* allocator, void* ptr) {
+    json_init_allocator(allocator);
+    allocator->free(allocator->context, ptr);
+}
+
+// General /////////////////////////////////////////////////////////////////////
 
 typedef struct Json_HashEntry {
     char* key;
@@ -1186,7 +1225,9 @@ static void json_dom_builder_on_string(void* user_data, char* value, size_t leng
     // The string is owned already, don't use json_string here
     json_dom_builder_append_value(builder, (Json_Value){
         .type = JSON_VALUE_STRING,
-        .value = { .string = value },
+        .value.string.data = value,
+        .value.string.length = length,
+        // TODO: Inherit allocator
     });
 }
 
@@ -1752,24 +1793,26 @@ void json_free_value(Json_Value* value) {
         for (size_t i = 0; i < value->value.array.length; ++i) {
             json_free_value(&value->value.array.elements[i]);
         }
-        JSON_FREE(value->value.array.elements);
+        Json_Allocator* allocator = &value->value.array.allocator;
+        json_free(allocator, value->value.array.elements);
         // NULL out in case it's shared somewhere
         value->value.array.elements = NULL;
         value->value.array.length = 0;
         value->value.array.capacity = 0;
     } break;
     case JSON_VALUE_OBJECT: {
+        Json_Allocator* allocator = &value->value.object.allocator;
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
                 Json_HashEntry* entry = &bucket->entries[j];
                 // Free the value and the key
                 json_free_value(&entry->value);
-                JSON_FREE(entry->key);
+                json_free(allocator, entry->key);
             }
-            JSON_FREE(bucket->entries);
+            json_free(allocator, bucket->entries);
         }
-        JSON_FREE(value->value.object.buckets);
+        json_free(allocator, value->value.object.buckets);
         // NULL out in case it's shared somewhere
         value->value.object.buckets = NULL;
         value->value.object.buckets_length = 0;
