@@ -301,9 +301,9 @@ static void sb_init_allocator(SB_Allocator* allocator) {
     allocator->free = sb_default_free;
 }
 
-static void* sb_realloc(SB_Allocator* allocator, size_t size) {
+static void* sb_realloc(SB_Allocator* allocator, void* ptr, size_t size) {
     sb_init_allocator(allocator);
-    void* result = allocator->realloc(allocator->context, NULL, size);
+    void* result = allocator->realloc(allocator->context, ptr, size);
     STRING_BUILDER_ASSERT(result != NULL, "failed to allocate memory");
     return result;
 }
@@ -321,13 +321,13 @@ void sb_reserve(StringBuilder* sb, size_t capacity) {
     size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
     while (newCapacity < capacity) newCapacity *= 2;
 
-    char* newBuffer = (char*)sb_realloc(&sb->allocator, sizeof(char) * newCapacity);
+    char* newBuffer = (char*)sb_realloc(&sb->allocator, sb->buffer, sizeof(char) * newCapacity);
     sb->buffer = newBuffer;
     sb->capacity = newCapacity;
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
-    char* cstr = (char*)sb_realloc(&sb->allocator, sizeof(char) * (sb->length + 1));
+    char* cstr = (char*)sb_realloc(&sb->allocator, sb->buffer, sizeof(char) * (sb->length + 1));
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
     return cstr;
@@ -561,7 +561,7 @@ void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
-    char* formattedStr = (char*)sb_realloc(&cb->builder.allocator, sizeof(char) * ((size_t)formattedLength + 1));
+    char* formattedStr = (char*)sb_realloc(&cb->builder.allocator, NULL, sizeof(char) * ((size_t)formattedLength + 1));
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
     code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
     sb_free(&cb->builder.allocator, formattedStr);
