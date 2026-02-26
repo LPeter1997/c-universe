@@ -14,6 +14,10 @@
 #define STRING_BUILDER_STATIC
 #include "../src/string_builder.h"
 
+#define ARGPARSE_IMPLEMENTATION
+#define ARGPARSE_STATIC
+#include "../src/argparse.h"
+
 static char* format_string(char const* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -750,26 +754,30 @@ static void generate_c_param_assignment(CodeBuilder* cb, char const* prefix, cha
     }
 }
 
-static void generate_c_type(CodeBuilder* cb, Type* type) {
-    size_t headerLengthBefore = cb->builder.length;
-    code_builder_format(cb, "// %s ", type->name);
-    size_t headerLengthAfter = cb->builder.length;
-    // Pad up to 80 chars
-    for (size_t i = headerLengthAfter; i < headerLengthBefore + 80; ++i) code_builder_putc(cb, '/');
-    code_builder_putc(cb, '\n');
-    generate_c_doc(cb, type->doc);
-    if (type->kind == TYPE_STRONG_ID
-     || type->kind == TYPE_UINT32
-     || type->kind == TYPE_INT32
-     || type->kind == TYPE_FLOAT32
-     || type->kind == TYPE_STRING) {
+static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
+    if (declare) {
+        size_t headerLengthBefore = cb->builder.length;
+        code_builder_format(cb, "// %s ", type->name);
+        size_t headerLengthAfter = cb->builder.length;
+        // Pad up to 80 chars
+        for (size_t i = headerLengthAfter; i < headerLengthBefore + 80; ++i) code_builder_putc(cb, '/');
+        code_builder_putc(cb, '\n');
+        generate_c_doc(cb, type->doc);
+    }
+    if ((type->kind == TYPE_STRONG_ID
+      || type->kind == TYPE_UINT32
+      || type->kind == TYPE_INT32
+      || type->kind == TYPE_FLOAT32
+      || type->kind == TYPE_STRING) && declare) {
         code_builder_format(cb, "typedef %s Spv_%s;\n\n", type->value.type_name, type->name);
     }
     else if (type->kind == TYPE_ENUM) {
         Enum* enumeration = &type->value.enumeration;
         char const* enumSuffix = enumeration->flags ? "Flags" : "Tag";
         char const* tagName = enumeration->flags ? "flags" : "tag";
+        bool hasParameters = enum_has_parameters(enumeration);
 
+        if (!declare) goto enum_functions;
         code_builder_format(cb, "typedef enum Spv_%s%s {\n", type->name, enumSuffix);
         code_builder_indent(cb);
         for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
@@ -779,8 +787,6 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         }
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s%s;\n\n", type->name, enumSuffix);
-
-        bool hasParameters = enum_has_parameters(enumeration);
 
         // Define the struct describing the operand
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
@@ -811,22 +817,31 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
         code_builder_dedent(cb);
         code_builder_format(cb, "} Spv_%s;\n\n", type->name);
 
+    enum_functions:
         for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
             char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
             if (!enumeration->flags && enumerant->parameters.length == 0) {
                 // Value-enum element without parameters, we generate a constant for it
-                code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
+                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
+                if (!declare) code_builder_format(cb, " = { .%s = Spv_%s_%s }", tagName, type->name, originalMember);
+                code_builder_puts(cb, ";\n");
             }
             else if (!enumeration->flags) {
                 // Value-enum element with parameters, we generate a function that can create the struct with the parameters
-                code_builder_format(cb, "static inline Spv_%s spv_%s_%s(", type->name, type->name, enumerant->name);
+                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                code_builder_format(cb, "Spv_%s spv_%s_%s(", type->name, type->name, enumerant->name);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
                     generate_c_operand_declaration(cb, param);
                     if (j < DynamicArray_length(enumerant->parameters) - 1) {
                         code_builder_puts(cb, ", ");
                     }
+                }
+                if (declare) {
+                    code_builder_puts(cb, ");\n");
+                    continue;
                 }
                 code_builder_puts(cb, ") {\n");
                 code_builder_indent(cb);
@@ -842,11 +857,16 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             }
             else if (enumerant->value != 0) {
                 // If it's a flags enum, we generate a function that takes in a pointer to the struct and sets the flag and parameters on it
-                code_builder_format(cb, "static inline void spv_%s_set_%s(Spv_%s* operand", type->name, enumerant->name, type->name);
+                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                code_builder_format(cb, "void spv_%s_set_%s(Spv_%s* operand", type->name, enumerant->name, type->name);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
                     Operand* param = &DynamicArray_at(enumerant->parameters, j);
                     code_builder_puts(cb, ", ");
                     generate_c_operand_declaration(cb, param);
+                }
+                if (declare) {
+                    code_builder_puts(cb, ");\n");
+                    continue;
                 }
                 code_builder_puts(cb, ") {\n");
                 code_builder_indent(cb);
@@ -861,12 +881,15 @@ static void generate_c_type(CodeBuilder* cb, Type* type) {
             else {
                 // We expect 0 to be a special case, define a constant for it
                 assert(DynamicArray_length(enumerant->parameters) == 0);
-                code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
+                if (declare) code_builder_puts(cb, "SPV_DEF ");
+                code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
+                if (!declare) code_builder_format(cb, " = { .%s = 0 }", tagName);
+                code_builder_puts(cb, ";\n");
             }
         }
         code_builder_putc(cb, '\n');
     }
-    else if (type->kind == TYPE_TUPLE) {
+    else if (type->kind == TYPE_TUPLE && declare) {
         Tuple* tuple = &type->value.tuple;
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
@@ -986,12 +1009,17 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
     }
 }
 
-static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instruction* instruction) {
-    code_builder_format(cb, "static inline void spv_%s(Spv_Encoder* encoder", instruction->name);
+static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instruction* instruction, bool declare) {
+    if (declare) code_builder_puts(cb, "SPV_DEF ");
+    code_builder_format(cb, "void spv_%s(Spv_ChunkEncoder* encoder", instruction->name);
     for (size_t i = 0; i < DynamicArray_length(instruction->operands); ++i) {
         Operand* operand = &DynamicArray_at(instruction->operands, i);
         code_builder_puts(cb, ", ");
         generate_c_operand_declaration(cb, operand);
+    }
+    if (declare) {
+        code_builder_puts(cb, ");\n");
+        return;
     }
     code_builder_puts(cb, ") {\n");
     code_builder_indent(cb);
@@ -1012,19 +1040,21 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_puts(cb, "}\n\n");
 }
 
-static char* generate_c_code(Model* model) {
+static char* generate_c_code(Model* model, bool declare) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, model);
 
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
-        generate_c_type(&cb, type);
+        generate_c_type(&cb, type, declare);
     }
 
     for (size_t i = 0; i < DynamicArray_length(model->instructions); ++i) {
         Instruction* instruction = &DynamicArray_at(model->instructions, i);
-        generate_c_instruction_encoder(&cb, model, instruction);
+        generate_c_instruction_encoder(&cb, model, instruction, declare);
     }
+
+    code_builder_puts(&cb, "// End of auto-generated section ///////////////////////////////////////////////\n");
 
     char* result = code_builder_to_cstr(&cb);
     code_builder_free(&cb);
@@ -1049,8 +1079,11 @@ static char* read_file(char const* path) {
     return content;
 }
 
-int main(void) {
-    char* jsonStr = read_file("../third_party/spirv.core.grammar.json");
+// Naim program ////////////////////////////////////////////////////////////////
+
+static int handle_common(Argparse_Pack* pack, bool declare) {
+    char const* path = (char const*)argparse_get_positional(pack, 0)->values.elements[0];
+    char* jsonStr = read_file(path);
     if (!jsonStr) {
         fprintf(stderr, "Failed to read JSON file\n");
         return 1;
@@ -1063,9 +1096,40 @@ int main(void) {
         return 1;
     }
     Model model = json_model_to_domain(doc);
-    char* cCode = generate_c_code(&model);
+    char* cCode = generate_c_code(&model, declare);
     free_model(&model);
     printf("%s", cCode);
     json_free_document(&doc);
     return 0;
+}
+
+// TODO: This could be a default handler in Argparse?
+static int root_handler(Argparse_Pack* pack) {
+    argparse_print_usage(pack->command);
+    return 0;
+}
+
+static int declare_handler(Argparse_Pack* pack) {
+    return handle_common(pack, true);
+}
+
+static int define_handler(Argparse_Pack* pack) {
+    return handle_common(pack, false);
+}
+
+int main(int argc, char* argv[]) {
+    Argparse_Command rootCommand = { .name = "generate", .description = "SPIR-V C encoder API generator", .handler_fn = root_handler };
+
+    Argparse_Option json = { .description = "Path to the SPIR-V grammar JSON file", .arity = ARGPARSE_ARITY_EXACTLY_ONE };
+
+    Argparse_Command declareCommand = { .name = "declare", .description = "Generate C declarations for SPIR-V constructs", .handler_fn = declare_handler };
+    argparse_add_option(&declareCommand, json);
+
+    Argparse_Command defineCommand = { .name = "define", .description = "Generate C definitions for SPIR-V constructs", .handler_fn = define_handler };
+    argparse_add_option(&defineCommand, json);
+
+    argparse_add_subcommand(&rootCommand, declareCommand);
+    argparse_add_subcommand(&rootCommand, defineCommand);
+
+    return argparse_run(argc, argv, &rootCommand);
 }
