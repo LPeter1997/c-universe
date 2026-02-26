@@ -327,7 +327,7 @@ void sb_reserve(StringBuilder* sb, size_t capacity) {
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
-    char* cstr = (char*)sb_realloc(&sb->allocator, sb->buffer, sizeof(char) * (sb->length + 1));
+    char* cstr = (char*)sb_realloc(&sb->allocator, NULL, sizeof(char) * (sb->length + 1));
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
     return cstr;
