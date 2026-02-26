@@ -5,6 +5,10 @@
  * If needed, the tested code can override its assertion macros to seamlessly integrate with the framework, check the
  * self-test section or the example section at the end of this file for examples of how to do that.
  *
+ * Note, that this library has fairly limited allocation customization capabilities, mainly because it's hard for the user
+ * to provide custom allocators before auto-registration kicks in. There is no allocator structure like in the other libs,
+ * here it's merely a macro. Considering that this library will most likely be a test host, this is probably a reasonable limitation.
+ *
  * Configuration:
  *  - #define CTEST_IMPLEMENTATION before including this header in exactly one source file to include the implementation section
  *  - #define CTEST_STATIC before including this header to make all functions have internal linkage
@@ -273,7 +277,7 @@ CTEST_DEF void ctest_print_report(CTest_Report report);
 #include <stdlib.h>
 #include <stdio.h>
 
-#define CTEST_ASSERT(condition, message) assert(((void)message, condition))
+#define CTEST_INTERNAL_ASSERT(condition, message) assert(((void)message, condition))
 
 #ifdef __cplusplus
 extern "C" {
@@ -295,7 +299,7 @@ void ctest_register_case(CTest_Suite* suite, CTest_Case testCase) {
     if (suite->length + 1 > suite->capacity) {
         size_t newCapacity = (suite->capacity == 0) ? 8 : (suite->capacity * 2);
         CTest_Case* newCases = (CTest_Case*)CTEST_REALLOC((void*)suite->cases, sizeof(CTest_Case) * newCapacity);
-        CTEST_ASSERT(newCases != NULL, "failed to allocate memory for test suite");
+        CTEST_INTERNAL_ASSERT(newCases != NULL, "failed to allocate memory for test suite");
         suite->cases = newCases;
         suite->capacity = newCapacity;
     }
@@ -335,7 +339,7 @@ CTest_Report ctest_run_suite(CTest_Suite suite, CTest_Filter filter) {
         if (*targetListLength + 1 > *targetListCapacity) {
             size_t newCapacity = (*targetListCapacity == 0) ? 8 : (*targetListCapacity * 2);
             CTest_Execution* newList = (CTest_Execution*)CTEST_REALLOC(*targetList, newCapacity * sizeof(CTest_Execution));
-            CTEST_ASSERT(newList != NULL, "failed to allocate memory for test report");
+            CTEST_INTERNAL_ASSERT(newList != NULL, "failed to allocate memory for test report");
             *targetList = newList;
             *targetListCapacity = newCapacity;
         }
