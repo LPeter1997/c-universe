@@ -703,26 +703,42 @@ static Model json_model_to_domain(Json_Document doc) {
 
 // C code generation ///////////////////////////////////////////////////////////
 
+static bool is_type_used_with_quantifier(Model* model, char const* typeName, Quantifier quantifier) {
+    for (size_t i = 0; i < DynamicArray_length(model->instructions); ++i) {
+        Instruction* instruction = &DynamicArray_at(model->instructions, i);
+        for (size_t j = 0; j < DynamicArray_length(instruction->operands); ++j) {
+            Operand* operand = &DynamicArray_at(instruction->operands, j);
+            if (operand->quantifier != quantifier) continue;
+            if (strcmp(operand->typeName, typeName) == 0) return true;
+        }
+    }
+    for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
+        Type* type = &DynamicArray_at(model->types, i);
+        if (type->kind != TYPE_ENUM) continue;
+        Enum* enumeration = &type->value.enumeration;
+        for (size_t j = 0; j < DynamicArray_length(enumeration->enumerants); ++j) {
+            Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, j);
+            for (size_t k = 0; k < DynamicArray_length(enumerant->parameters); ++k) {
+                Operand* operand = &DynamicArray_at(enumerant->parameters, k);
+                if (operand->quantifier != quantifier) continue;
+                if (strcmp(operand->typeName, typeName) == 0) return true;
+            }
+        }
+    }
+    return false;
+
+}
+
 static void generate_c_operand_declaration(CodeBuilder* cb, Operand* operand, bool inStruct) {
     switch (operand->quantifier) {
     case QUANTIFIER_ONE:
         code_builder_format(cb, "Spv_%s %s", operand->typeName, operand->name);
         break;
     case QUANTIFIER_ANY:
-        if (inStruct) {
-            code_builder_format(cb, "struct { Spv_%s values[]; size_t count; } %s", operand->typeName, operand->name);
-        }
-        else {
-            code_builder_format(cb, "Spv_%s* %sValues, size_t %sCount", operand->typeName, operand->name, operand->name);
-        }
+        code_builder_format(cb, "Spv_%s_Array %s", operand->typeName, operand->name);
         break;
     case QUANTIFIER_OPTIONAL:
-        if (inStruct) {
-            code_builder_format(cb, "struct { bool present; Spv_%s value; } %s", operand->typeName, operand->name);
-        }
-        else {
-            code_builder_format(cb, "bool %sPresent, Spv_%s %sValue", operand->name, operand->typeName, operand->name);
-        }
+        code_builder_format(cb, "Spv_%s_Option %s", operand->typeName, operand->name);
         break;
     }
 }
@@ -764,7 +780,7 @@ static void generate_c_param_assignment(CodeBuilder* cb, char const* prefix, cha
     }
 }
 
-static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
+static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool declare) {
     if (declare) {
         size_t headerLengthBefore = cb->builder.length;
         code_builder_format(cb, "// %s ", type->name);
@@ -913,6 +929,24 @@ static void generate_c_type(CodeBuilder* cb, Type* type, bool declare) {
     else {
         code_builder_format(cb, "// TODO: %s\n", type->name);
     }
+
+    // We generate supporting T_Array and T_Option types if they are used with the respective quantifiers
+    if (declare && is_type_used_with_quantifier(model, type->name, QUANTIFIER_ANY)) {
+        code_builder_format(cb, "typedef struct Spv_%s_Array {\n", type->name);
+        code_builder_indent(cb);
+        code_builder_format(cb, "Spv_%s* values;\n", type->name);
+        code_builder_format(cb, "size_t count;\n");
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} Spv_%s_Array;\n\n", type->name);
+    }
+    if (declare && is_type_used_with_quantifier(model, type->name, QUANTIFIER_OPTIONAL)) {
+        code_builder_format(cb, "typedef struct Spv_%s_Option {\n", type->name);
+        code_builder_indent(cb);
+        code_builder_format(cb, "bool present;\n");
+        code_builder_format(cb, "Spv_%s value;\n", type->name);
+        code_builder_dedent(cb);
+        code_builder_format(cb, "} Spv_%s_Option;\n\n", type->name);
+    }
 }
 
 static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type* operandType, char const* name);
@@ -1045,7 +1079,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     // Patch instruction header with actual word count and opcode
     code_builder_format(cb, "size_t endOffset = encoder->offset;\n");
     code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
-    code_builder_format(cb, "encoder->words[startOffset] = (wordCount << 16) | %u;\n", instruction->opcode);
+    code_builder_format(cb, "encoder->words[startOffset] = (uint32_t)((wordCount << 16) | %u);\n", instruction->opcode);
     code_builder_dedent(cb);
     code_builder_puts(cb, "}\n\n");
 }
@@ -1064,7 +1098,7 @@ static char* generate_c_code(Model* model, bool declare) {
 
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
-        generate_c_type(&cb, type, declare);
+        generate_c_type(&cb, model, type, declare);
     }
 
     for (size_t i = 0; i < DynamicArray_length(model->instructions); ++i) {
