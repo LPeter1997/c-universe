@@ -121,6 +121,8 @@ typedef struct Model {
     long long revision;
     DynamicArray(Type) types;
     DynamicArray(Instruction) instructions;
+    DynamicArray(char const*) all_capabilities;
+    DynamicArray(char const*) all_extensions;
 } Model;
 
 static void free_metadata(Metadata* metadata) {
@@ -193,6 +195,8 @@ static void free_model(Model* model) {
         free_instruction(instruction);
     }
     DynamicArray_free(model->instructions);
+    DynamicArray_free(model->all_capabilities);
+    DynamicArray_free(model->all_extensions);
 }
 
 // JSON document manipulation //////////////////////////////////////////////////
@@ -649,6 +653,29 @@ start:
     }
 }
 
+static void add_capability(Model* model, char const* capability) {
+    for (size_t i = 0; i < DynamicArray_length(model->all_capabilities); ++i) {
+        if (strcmp(DynamicArray_at(model->all_capabilities, i), capability) == 0) return;
+    }
+    DynamicArray_append(model->all_capabilities, capability);
+}
+
+static void add_extension(Model* model, char const* extension) {
+    for (size_t i = 0; i < DynamicArray_length(model->all_extensions); ++i) {
+        if (strcmp(DynamicArray_at(model->all_extensions, i), extension) == 0) return;
+    }
+    DynamicArray_append(model->all_extensions, extension);
+}
+
+static void add_metadata(Model* model, Metadata* metadata) {
+    for (size_t i = 0; i < DynamicArray_length(metadata->capabilities); ++i) {
+        add_capability(model, DynamicArray_at(metadata->capabilities, i));
+    }
+    for (size_t i = 0; i < DynamicArray_length(metadata->extensions); ++i) {
+        add_extension(model, DynamicArray_at(metadata->extensions, i));
+    }
+}
+
 static Model json_model_to_domain(Json_Document doc) {
     json_model_simplification(doc);
 
@@ -681,6 +708,22 @@ static Model json_model_to_domain(Json_Document doc) {
         Json_Value* instruction = json_array_at(instructions, i);
         Instruction instr = json_instruction_to_domain(instruction);
         DynamicArray_append(model.instructions, instr);
+    }
+
+    // Collect all capabilities and extensions used in the model for easy reference
+    for (size_t i = 0; i < DynamicArray_length(model.types); ++i) {
+        Type* type = &DynamicArray_at(model.types, i);
+        if (type->kind == TYPE_ENUM) {
+            Enum* enumeration = &type->value.enumeration;
+            for (size_t j = 0; j < DynamicArray_length(enumeration->enumerants); ++j) {
+                Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, j);
+                add_metadata(&model, &enumerant->metadata);
+            }
+        }
+    }
+    for (size_t i = 0; i < DynamicArray_length(model.instructions); ++i) {
+        Instruction* instruction = &DynamicArray_at(model.instructions, i);
+        add_metadata(&model, &instruction->metadata);
     }
 
     // We need to go through each operand list in types and instructions, as there's a chance we have duplicate names...
