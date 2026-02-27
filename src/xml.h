@@ -32,6 +32,15 @@
 extern "C" {
 #endif
 
+typedef struct Xml_Allocator {
+    // Context pointer that will be passed to the realloc and free functions
+    void* context;
+    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
+    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
+    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
+    void(*free)(void* ctx, void* ptr);
+} Xml_Allocator;
+
 // TODO: Public API declarations
 
 #ifdef __cplusplus
@@ -51,7 +60,9 @@ extern "C" {
 extern "C" {
 #endif
 
-// TODO: Implementation goes here
+typedef struct Xml_Parser {
+    // TODO
+} Xml_Parser;
 
 #ifdef __cplusplus
 }
