@@ -61,7 +61,7 @@ typedef struct Xml_Attribute {
 typedef struct Xml_Sax {
     void(*on_start_element)(void* user_data, char* name, Xml_Attribute* attributes, size_t attribute_count);
     void(*on_end_element)(void* user_data, char* name);
-    void(*on_text)(void* user_data, char* text, size_t length);
+    void(*on_text)(void* user_data, char const* text, size_t length);
     void(*on_error)(void* user_data, Xml_Error error);
 } Xml_Sax;
 
@@ -83,6 +83,10 @@ typedef struct Xml_Sax {
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+static bool xml_is_legal_text(char ch) {
+    // TODO
+}
 
 // Allocation //////////////////////////////////////////////////////////////////
 
@@ -179,6 +183,25 @@ static void xml_parser_advance(Xml_Parser* parser, size_t count) {
         }
         ++parser->position.index;
     }
+}
+
+static void xml_parse_text(Xml_Parser* parser) {
+    size_t offset = 0;
+    while (true) {
+        char ch = xml_parser_peek(parser, offset, '\0');
+        if (!xml_is_legal_text(ch)) break;
+        ++offset;
+    }
+    if (offset == 0) return;
+    if (parser->sax.on_text != NULL) {
+        parser->sax.on_text(parser->user_data, &parser->text[parser->position.index], offset);
+    }
+    xml_parser_advance(parser, offset);
+}
+
+static void xml_parse_impl(Xml_Parser* parser) {
+    xml_parse_text(parser);
+    // TODO
 }
 
 #ifdef __cplusplus
