@@ -847,7 +847,7 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
         bool hasParameters = enum_has_parameters(enumeration);
 
         if (!declare) goto enum_functions;
-        code_builder_format(cb, "typedef enum Spv_%s%s {\n", type->name, enumSuffix);
+        code_builder_format(cb, "typedef enum Spv_%s_%s {\n", type->name, enumSuffix);
         code_builder_indent(cb);
         for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
             Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
@@ -855,12 +855,12 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
             code_builder_format(cb, "Spv_%s_%s = %lld,\n", type->name, enumerant->name, enumerant->value);
         }
         code_builder_dedent(cb);
-        code_builder_format(cb, "} Spv_%s%s;\n\n", type->name, enumSuffix);
+        code_builder_format(cb, "} Spv_%s_%s;\n\n", type->name, enumSuffix);
 
         // Define the struct describing the operand
         code_builder_format(cb, "typedef struct Spv_%s {\n", type->name);
         code_builder_indent(cb);
-        code_builder_format(cb, "Spv_%s%s %s;\n", type->name, enumSuffix, tagName);
+        code_builder_format(cb, "Spv_%s_%s %s;\n", type->name, enumSuffix, tagName);
         if (hasParameters && !enumeration->flags) {
             code_builder_puts(cb, "union {\n");
             code_builder_indent(cb);
