@@ -41,6 +41,30 @@ typedef struct Xml_Allocator {
     void(*free)(void* ctx, void* ptr);
 } Xml_Allocator;
 
+typedef struct Xml_Error {
+    // A human-readable message describing the error.
+    // Owned by the document it's added to, the library will call free on it when the document is freed.
+    char* message;
+    // The line number where the error occurred, starting from 0.
+    size_t line;
+    // The column number where the error occurred, starting from 0.
+    size_t column;
+    // The index in the input string where the error occurred, starting from 0.
+    size_t index;
+} Xml_Error;
+
+typedef struct Xml_Attribute {
+    char* name;
+    char* value;
+} Xml_Attribute;
+
+typedef struct Xml_Sax {
+    void(*on_start_element)(void* user_data, char* name, Xml_Attribute* attributes, size_t attribute_count);
+    void(*on_end_element)(void* user_data, char* name);
+    void(*on_text)(void* user_data, char* text, size_t length);
+    void(*on_error)(void* user_data, Xml_Error error);
+} Xml_Sax;
+
 // TODO: Public API declarations
 
 #ifdef __cplusplus
@@ -60,8 +84,53 @@ typedef struct Xml_Allocator {
 extern "C" {
 #endif
 
+// Allocation //////////////////////////////////////////////////////////////////
+
+static void* xml_default_realloc(void* ctx, void* ptr, size_t new_size) {
+    (void)ctx;
+    return realloc(ptr, new_size);
+}
+
+static void xml_default_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+static void xml_init_allocator(Xml_Allocator* allocator) {
+    if (allocator->realloc != NULL || allocator->free != NULL) {
+        XML_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
+        return;
+    }
+    allocator->realloc = xml_default_realloc;
+    allocator->free = xml_default_free;
+}
+
+static void* xml_realloc(Xml_Allocator* allocator, void* ptr, size_t size) {
+    xml_init_allocator(allocator);
+    void* result = allocator->realloc(allocator->context, ptr, size);
+    XML_ASSERT(result != NULL, "failed to allocate memory");
+    return result;
+}
+
+static void xml_free(Xml_Allocator* allocator, void* ptr) {
+    xml_init_allocator(allocator);
+    allocator->free(allocator->context, ptr);
+}
+
+// Parsing /////////////////////////////////////////////////////////////////////
+
+typedef struct Xml_Position {
+    size_t index;
+    size_t line;
+    size_t column;
+} Xml_Position;
+
 typedef struct Xml_Parser {
-    // TODO
+    char const* text;
+    size_t length;
+    Xml_Position position;
+    Xml_Sax sax;
+    void* user_data;
 } Xml_Parser;
 
 #ifdef __cplusplus
