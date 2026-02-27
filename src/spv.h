@@ -62,7 +62,21 @@ typedef struct Spv_ModuleEncoder {
     Spv_Allocator allocator;
 } Spv_ModuleEncoder;
 
-void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count);
+typedef struct Spv_Track {
+    struct {
+        uint32_t* elements;
+        size_t length;
+        size_t capacity;
+    } capabilities;
+    struct {
+        char const** elements;
+        size_t length;
+        size_t capacity;
+    } extensions;
+    Spv_Allocator allocator;
+} Spv_Track;
+
+SPV_DEF void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count);
 
 #ifdef __cplusplus
 }
