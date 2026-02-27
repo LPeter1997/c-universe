@@ -1127,6 +1127,17 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_puts(cb, "}\n\n");
 }
 
+static void generate_c_extension_constants(CodeBuilder* cb, Model* model, bool declare) {
+    for (size_t i = 0; i < DynamicArray_length(model->all_extensions); ++i) {
+        char const* extension = DynamicArray_at(model->all_extensions, i);
+        if (declare) code_builder_puts(cb, "extern ");
+        code_builder_format(cb, "const char* Spv_Extension_%s", extension);
+        if (!declare) code_builder_format(cb, " = \"%s\"", extension);
+        code_builder_puts(cb, ";\n");
+    }
+    if (DynamicArray_length(model->all_extensions) > 0) code_builder_putc(cb, '\n');
+}
+
 static char* generate_c_code(Model* model, bool declare) {
     CodeBuilder cb = {0};
     generate_c_header_comment(&cb, model);
@@ -1138,6 +1149,8 @@ static char* generate_c_code(Model* model, bool declare) {
     else {
         code_builder_puts(&cb, "#ifdef SPV_IMPLEMENTATION\n\n");
     }
+
+    generate_c_extension_constants(&cb, model, declare);
 
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
