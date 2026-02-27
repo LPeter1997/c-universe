@@ -45,9 +45,11 @@ typedef struct Spv_Allocator {
 } Spv_Allocator;
 
 typedef struct Spv_SectionEncoder {
-    uint32_t* words;
-    size_t offset;
-    size_t capacity;
+    struct {
+        uint32_t* elements;
+        size_t length;
+        size_t capacity;
+    } words;
     Spv_Allocator allocator;
 } Spv_SectionEncoder;
 
@@ -57,6 +59,7 @@ typedef struct Spv_ModuleEncoder {
         size_t length;
         size_t capacity;
     } chunks;
+    Spv_Allocator allocator;
 } Spv_ModuleEncoder;
 
 void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count);
@@ -114,8 +117,8 @@ static void spv_free(Spv_Allocator* allocator, void* ptr) {
 // Encoding ////////////////////////////////////////////////////////////////////
 
 static void spv_encode_u32(Spv_SectionEncoder* encoder, uint32_t value) {
-    spv_reserve(encoder, encoder->offset + 1);
-    encoder->words[encoder->offset++] = value;
+    spv_reserve(encoder, encoder->words.length + 1);
+    encoder->words.elements[encoder->words.length++] = value;
 }
 
 static void spv_encode_i32(Spv_SectionEncoder* encoder, int32_t value) {
@@ -132,20 +135,23 @@ static void spv_encode_string(Spv_SectionEncoder* encoder, char const* str) {
     size_t byteCount = strlen(str) + 1;
     // we pad to 4 bytes
     size_t wordCount = (byteCount + 3) / 4;
-    spv_reserve(encoder, encoder->offset + wordCount);
-    memcpy(&encoder->words[encoder->offset], str, byteCount);
-    encoder->offset += wordCount;
+    spv_reserve(encoder, encoder->words.length + wordCount);
+    memcpy(&encoder->words.elements[encoder->words.length], str, byteCount);
+    // Must 0 out the remaining padding bytes
+    size_t paddingBytes = wordCount * 4 - byteCount;
+    memset((uint8_t*)&encoder->words.elements[encoder->words.length] + byteCount, 0, paddingBytes);
+    encoder->words.length += wordCount;
 }
 
 void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count) {
-    if (word_count <= encoder->capacity) return;
+    if (word_count <= encoder->words.capacity) return;
 
-    size_t newCapacity = encoder->capacity == 0 ? 8 : encoder->capacity * 2;
-    while (newCapacity < encoder->offset + word_count) newCapacity *= 2;
+    size_t newCapacity = encoder->words.capacity == 0 ? 8 : encoder->words.capacity * 2;
+    while (newCapacity < encoder->words.length + word_count) newCapacity *= 2;
 
-    uint32_t* newWords = (uint32_t*)spv_realloc(&encoder->allocator, encoder->words, newCapacity * sizeof(uint32_t));
-    encoder->words = newWords;
-    encoder->capacity = newCapacity;
+    uint32_t* newWords = (uint32_t*)spv_realloc(&encoder->allocator, encoder->words.elements, newCapacity * sizeof(uint32_t));
+    encoder->words.elements = newWords;
+    encoder->words.capacity = newCapacity;
 }
 
 #ifdef __cplusplus
