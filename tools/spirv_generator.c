@@ -1068,7 +1068,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_puts(cb, ") {\n");
     code_builder_indent(cb);
     // Save encoder offset
-    code_builder_puts(cb, "size_t startOffset = encoder->offset;\n");
+    code_builder_puts(cb, "size_t startOffset = encoder->words.length;\n");
     // We skip one word for the instruction header which is (wordCount << 16) | opcode
     // We will need to come back to this to patch it at the end, when we actually know the number of words
     code_builder_puts(cb, "spv_encode_u32(encoder, 0);\n");
@@ -1077,9 +1077,9 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
         generate_c_operand_encoder(cb, model, operand, operand->name);
     }
     // Patch instruction header with actual word count and opcode
-    code_builder_format(cb, "size_t endOffset = encoder->offset;\n");
+    code_builder_format(cb, "size_t endOffset = encoder->words.length;\n");
     code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
-    code_builder_format(cb, "encoder->words[startOffset] = (uint32_t)((wordCount << 16) | %u);\n", instruction->opcode);
+    code_builder_format(cb, "encoder->words.elements[startOffset] = (uint32_t)((wordCount << 16) | %u);\n", instruction->opcode);
     code_builder_dedent(cb);
     code_builder_puts(cb, "}\n\n");
 }
