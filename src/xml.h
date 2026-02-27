@@ -84,7 +84,7 @@ typedef struct Xml_Sax {
 extern "C" {
 #endif
 
-static bool xml_is_legal_text(char ch) {
+static bool xml_is_text_char(char ch) {
     // TODO
 }
 
@@ -189,7 +189,7 @@ static void xml_parse_text(Xml_Parser* parser) {
     size_t offset = 0;
     while (true) {
         char ch = xml_parser_peek(parser, offset, '\0');
-        if (!xml_is_legal_text(ch)) break;
+        if (!xml_is_text_char(ch)) break;
         ++offset;
     }
     if (offset == 0) return;
