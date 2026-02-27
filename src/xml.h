@@ -133,6 +133,54 @@ typedef struct Xml_Parser {
     void* user_data;
 } Xml_Parser;
 
+static void xml_parser_report_error(Xml_Parser* parser, Xml_Position position, char* message) {
+    Xml_Allocator* allocator = &parser->options.allocator;
+    if (parser->sax.on_error == NULL) {
+        xml_free(allocator, message);
+        return;
+    }
+    Xml_Error error = {
+        .message = message,
+        .line = position.line,
+        .column = position.column,
+        .index = position.index,
+    };
+    parser->sax.on_error(parser->user_data, error);
+}
+
+static char xml_parser_peek(Xml_Parser* parser, size_t offset, char def) {
+    if (parser->position.index + offset >= parser->length) return def;
+    return parser->text[parser->position.index + offset];
+}
+
+static void xml_parser_advance(Xml_Parser* parser, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        XML_ASSERT(parser->position.index < parser->length, "attempted to advance past end of input");
+        char ch = parser->text[parser->position.index];
+        if (ch == '\r') {
+            // Could be an OS-X or Windows-style newline
+            // If Windows-style, we'll go to the next line in the next iteration
+            if (xml_parser_peek(parser, 1, '\0') == '\n') {
+                // Windows-style newline, will step to newline in the next iteration
+            }
+            else {
+                // OSX-style newline
+                ++parser->position.line;
+                parser->position.column = 0;
+            }
+        }
+        else if (ch == '\n') {
+            // Unix-style newline
+            ++parser->position.line;
+            parser->position.column = 0;
+        }
+        else {
+            ++parser->position.column;
+        }
+        ++parser->position.index;
+    }
+}
+
 #ifdef __cplusplus
 }
 #endif
