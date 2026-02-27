@@ -201,7 +201,19 @@ static void xml_parse_text(Xml_Parser* parser) {
 
 static void xml_parse_impl(Xml_Parser* parser) {
     xml_parse_text(parser);
-    // TODO
+    char ch = xml_parser_peek(parser, 0, '\0');
+    if (ch == '\0') {
+        // TODO
+    }
+    else if (ch == '<') {
+        // TODO
+    }
+    else if (ch == '&') {
+        // TODO
+    }
+    else {
+        // TODO
+    }
 }
 
 #ifdef __cplusplus
