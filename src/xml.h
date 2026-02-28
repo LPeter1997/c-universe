@@ -379,7 +379,29 @@ static void xml_parse_element(Xml_Parser* parser) {
         // TODO
     }
     else if (next == '/') {
-        // TODO
+        ++offset;
+        size_t tagStart = offset;
+        while (true) {
+            char c = xml_parser_peek(parser, offset, '\0');
+            if (c == '\0') {
+                // TODO
+                return;
+            }
+            else if (c == '>') {
+                ++offset;
+                break;
+            }
+            else if (!xml_is_tag_char(c, offset == tagStart)) {
+                char* message = xml_format(allocator, "invalid character '%c' in tag name", c);
+                xml_parser_report_error(parser, parser->position, message);
+                return;
+            }
+            ++offset;
+        }
+        char* tagName = xml_strndup(allocator, &parser->text[tagStart], offset - tagStart - 1);
+        if (parser->sax.on_end_element != NULL) {
+            parser->sax.on_end_element(parser->user_data, tagName);
+        }
     }
     else if (next == '?') {
         // TODO
