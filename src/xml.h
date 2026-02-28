@@ -92,6 +92,61 @@ static bool xml_is_text_char(char ch) {
         && ch != ']';
 }
 
+static bool xml_isdigit(char ch, int* out_value) {
+    if (ch >= '0' && ch <= '9') {
+        *out_value = ch - '0';
+        return true;
+    }
+    return false;
+}
+
+static bool xml_isxdigit(char ch, int* out_value) {
+    if (ch >= '0' && ch <= '9') {
+        *out_value = ch - '0';
+        return true;
+    }
+    else if (ch >= 'a' && ch <= 'f') {
+        *out_value = 10 + (ch - 'a');
+        return true;
+    }
+    else if (ch >= 'A' && ch <= 'F') {
+        *out_value = 10 + (ch - 'A');
+        return true;
+    }
+    return false;
+}
+
+static size_t xml_utf8_encode(uint32_t cp, char out[4]) {
+    if (cp <= 0x7F) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    else if (cp <= 0x7FF) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    else if (cp <= 0xFFFF) {
+        // exclude UTF-16 surrogate range
+        if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
+
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    else if (cp <= 0x10FFFF) {
+        out[0] = (char)(0xF0 | (cp >> 18));
+        out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+
+    // invalid Unicode code point
+    return 0;
+}
+
 // Allocation //////////////////////////////////////////////////////////////////
 
 static void* xml_default_realloc(void* ctx, void* ptr, size_t new_size) {
@@ -231,6 +286,8 @@ static void xml_parse_text(Xml_Parser* parser) {
 }
 
 static void xml_parse_entity_ref(Xml_Parser* parser) {
+    Xml_Allocator* allocator = &parser->options.allocator;
+
     char ch = xml_parser_peek(parser, 0, '\0');
     if (ch != '&') return;
 
@@ -241,12 +298,41 @@ static void xml_parse_entity_ref(Xml_Parser* parser) {
     }
     else if (next == '#') {
         ++offset;
+        bool isHex = false;
         if (xml_parser_peek(parser, offset, '\0') == 'x') {
             ++offset;
-            // TODO
+            isHex = true;
+        }
+        uint32_t codepoint = 0;
+        size_t codepointLength = 0;
+        int digitValue;
+        while (true) {
+            char c = xml_parser_peek(parser, offset, '\0');
+            if (isHex) {
+                if (!xml_isxdigit(c, &digitValue)) break;
+            }
+            else {
+                if (!xml_isdigit(c, &digitValue)) break;
+            }
+            codepoint = codepoint * (isHex ? 16 : 10) + (uint32_t)digitValue;
+            ++offset;
+            ++codepointLength;
+        }
+        if (xml_parser_peek(parser, offset, '\0') == ';') {
+            ++offset;
+            if (codepointLength == 0) {
+                char* message = xml_format(allocator, "invalid character reference, expected at least one digit");
+                xml_parser_report_error(parser, parser->position, message);
+            }
+            else {
+                char utf8[4];
+                size_t utf8Length = xml_utf8_encode(codepoint, utf8);
+                xml_parser_report_text(parser, utf8, utf8Length);
+            }
         }
         else {
-            // TODO
+            char* message = xml_format(allocator, "invalid character reference, expected ';' at the end");
+            xml_parser_report_error(parser, parser->position, message);
         }
     }
     else {
@@ -271,7 +357,8 @@ static void xml_parse_entity_ref(Xml_Parser* parser) {
             xml_parser_report_text(parser, "'", 1);
         }
         else {
-            // TODO
+            char* message = xml_format(allocator, "invalid character '%c' after '&', expected a valid entity reference", next);
+            xml_parser_report_error(parser, parser->position, message);
         }
         xml_parser_advance(parser, offset);
     }
