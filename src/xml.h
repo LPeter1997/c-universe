@@ -85,7 +85,11 @@ extern "C" {
 #endif
 
 static bool xml_is_text_char(char ch) {
-    // TODO
+    return ch != '<'
+        // '&' can start an entity ref, which we handle separately
+        && ch != '&'
+        // ']' can end a CDATA section, which we handle separately
+        && ch != ']';
 }
 
 // Allocation //////////////////////////////////////////////////////////////////
@@ -185,6 +189,22 @@ static void xml_parser_advance(Xml_Parser* parser, size_t count) {
     }
 }
 
+static bool xml_parser_matches(Xml_Parser* parser, size_t offset, char const* str) {
+    while (*str != '\0') {
+        char ch = xml_parser_peek(parser, offset, '\0');
+        if (ch != *str) return false;
+        ++offset;
+        ++str;
+    }
+    return true;
+}
+
+static void xml_parser_report_text(Xml_Parser* parser, char* text, size_t length) {
+    if (length == 0) return;
+    if (parser->sax.on_text == NULL) return;
+    parser->sax.on_text(parser->user_data, text, length);
+}
+
 static void xml_parse_text(Xml_Parser* parser) {
     size_t offset = 0;
     while (true) {
@@ -192,24 +212,79 @@ static void xml_parse_text(Xml_Parser* parser) {
         if (!xml_is_text_char(ch)) break;
         ++offset;
     }
-    if (offset == 0) return;
-    if (parser->sax.on_text != NULL) {
-        parser->sax.on_text(parser->user_data, &parser->text[parser->position.index], offset);
-    }
+    xml_parser_report_text(parser, &parser->text[parser->position.index], offset);
     xml_parser_advance(parser, offset);
 }
 
 static void xml_parse_impl(Xml_Parser* parser) {
+start:
     xml_parse_text(parser);
     char ch = xml_parser_peek(parser, 0, '\0');
     if (ch == '\0') {
         // TODO
     }
     else if (ch == '<') {
-        // TODO
+        char next = xml_parser_peek(parser, 1, '\0');
+        if (next == '\0') {
+            // TODO
+        }
+        else if (next == '/') {
+            // TODO
+        }
+        else if (next == '?') {
+            // TODO
+        }
+        else if (next == '!') {
+            // TODO
+        }
+        else {
+            // TODO
+        }
     }
     else if (ch == '&') {
-        // TODO
+        char next = xml_parser_peek(parser, 1, '\0');
+        if (next == '\0') {
+            // TODO
+        }
+        else if (next == '#') {
+            if (xml_parser_peek(parser, 2, '\0') == 'x') {
+                // TODO
+            }
+            else {
+                // TODO
+            }
+        }
+        else {
+            size_t offset = 1;
+            if (xml_parser_matches(parser, offset, "amp;")) {
+                offset += 4;
+                xml_parser_report_text(parser, "&", 1);
+                goto start;
+            }
+            else if (xml_parser_matches(parser, offset, "lt;")) {
+                offset += 3;
+                xml_parser_report_text(parser, "<", 1);
+                goto start;
+            }
+            else if (xml_parser_matches(parser, offset, "gt;")) {
+                offset += 3;
+                xml_parser_report_text(parser, ">", 1);
+                goto start;
+            }
+            else if (xml_parser_matches(parser, offset, "quot;")) {
+                offset += 5;
+                xml_parser_report_text(parser, "\"", 1);
+                goto start;
+            }
+            else if (xml_parser_matches(parser, offset, "apos;")) {
+                offset += 5;
+                xml_parser_report_text(parser, "'", 1);
+                goto start;
+            }
+            else {
+                // TODO
+            }
+        }
     }
     else {
         // TODO
