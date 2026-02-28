@@ -92,6 +92,11 @@ static bool xml_is_text_char(char ch) {
         && ch != ']';
 }
 
+static bool xml_is_tag_char(char ch, bool isFirst) {
+    return isletter(ch) || ch == '_'
+        || (!isFirst && (isdigit(ch) || ch == '-' || ch == '.' || ch == ':'));
+}
+
 static bool xml_isdigit(char ch, int* out_value) {
     if (ch >= '0' && ch <= '9') {
         *out_value = ch - '0';
@@ -364,6 +369,29 @@ static void xml_parse_entity_ref(Xml_Parser* parser) {
     }
 }
 
+static void xml_parse_element(Xml_Parser* parser) {
+    char ch = xml_parser_peek(parser, 0, '\0');
+    if (ch != '<') return;
+
+    size_t offset = 1;
+    char next = xml_parser_peek(parser, offset, '\0');
+    if (next == '\0') {
+        // TODO
+    }
+    else if (next == '/') {
+        // TODO
+    }
+    else if (next == '?') {
+        // TODO
+    }
+    else if (next == '!') {
+        // TODO
+    }
+    else {
+        // TODO
+    }
+}
+
 static void xml_parse_impl(Xml_Parser* parser) {
 start:
     xml_parse_text(parser);
@@ -372,22 +400,7 @@ start:
         // TODO
     }
     else if (ch == '<') {
-        char next = xml_parser_peek(parser, 1, '\0');
-        if (next == '\0') {
-            // TODO
-        }
-        else if (next == '/') {
-            // TODO
-        }
-        else if (next == '?') {
-            // TODO
-        }
-        else if (next == '!') {
-            // TODO
-        }
-        else {
-            // TODO
-        }
+        xml_parse_element(parser);
     }
     else if (ch == '&') {
         xml_parse_entity_ref(parser);
