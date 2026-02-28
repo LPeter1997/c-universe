@@ -189,6 +189,20 @@ static void xml_parser_advance(Xml_Parser* parser, size_t count) {
     }
 }
 
+static bool xml_parser_expect_char(Xml_Parser* parser, char expected) {
+    char c = xml_parser_peek(parser, 0, '\0');
+    if (c == expected) {
+        xml_parser_advance(parser, 1);
+        return true;
+    }
+    else {
+        Xml_Allocator* allocator = &parser->options.allocator;
+        char* message = xml_format(allocator, "expected character '%c', but got '%c'", expected, c);
+        xml_parser_report_error(parser, parser->position, message);
+        return false;
+    }
+}
+
 static bool xml_parser_matches(Xml_Parser* parser, size_t offset, char const* str) {
     while (*str != '\0') {
         char ch = xml_parser_peek(parser, offset, '\0');
@@ -214,6 +228,53 @@ static void xml_parse_text(Xml_Parser* parser) {
     }
     xml_parser_report_text(parser, &parser->text[parser->position.index], offset);
     xml_parser_advance(parser, offset);
+}
+
+static void xml_parse_entity_ref(Xml_Parser* parser) {
+    char ch = xml_parser_peek(parser, 0, '\0');
+    if (ch != '&') return;
+
+    size_t offset = 1;
+    char next = xml_parser_peek(parser, offset, '\0');
+    if (next == '\0') {
+        // TODO
+    }
+    else if (next == '#') {
+        ++offset;
+        if (xml_parser_peek(parser, offset, '\0') == 'x') {
+            ++offset;
+            // TODO
+        }
+        else {
+            // TODO
+        }
+    }
+    else {
+        if (xml_parser_matches(parser, offset, "amp;")) {
+            offset += 4;
+            xml_parser_report_text(parser, "&", 1);
+        }
+        else if (xml_parser_matches(parser, offset, "lt;")) {
+            offset += 3;
+            xml_parser_report_text(parser, "<", 1);
+        }
+        else if (xml_parser_matches(parser, offset, "gt;")) {
+            offset += 3;
+            xml_parser_report_text(parser, ">", 1);
+        }
+        else if (xml_parser_matches(parser, offset, "quot;")) {
+            offset += 5;
+            xml_parser_report_text(parser, "\"", 1);
+        }
+        else if (xml_parser_matches(parser, offset, "apos;")) {
+            offset += 5;
+            xml_parser_report_text(parser, "'", 1);
+        }
+        else {
+            // TODO
+        }
+        xml_parser_advance(parser, offset);
+    }
 }
 
 static void xml_parse_impl(Xml_Parser* parser) {
@@ -242,49 +303,7 @@ start:
         }
     }
     else if (ch == '&') {
-        char next = xml_parser_peek(parser, 1, '\0');
-        if (next == '\0') {
-            // TODO
-        }
-        else if (next == '#') {
-            if (xml_parser_peek(parser, 2, '\0') == 'x') {
-                // TODO
-            }
-            else {
-                // TODO
-            }
-        }
-        else {
-            size_t offset = 1;
-            if (xml_parser_matches(parser, offset, "amp;")) {
-                offset += 4;
-                xml_parser_report_text(parser, "&", 1);
-                goto start;
-            }
-            else if (xml_parser_matches(parser, offset, "lt;")) {
-                offset += 3;
-                xml_parser_report_text(parser, "<", 1);
-                goto start;
-            }
-            else if (xml_parser_matches(parser, offset, "gt;")) {
-                offset += 3;
-                xml_parser_report_text(parser, ">", 1);
-                goto start;
-            }
-            else if (xml_parser_matches(parser, offset, "quot;")) {
-                offset += 5;
-                xml_parser_report_text(parser, "\"", 1);
-                goto start;
-            }
-            else if (xml_parser_matches(parser, offset, "apos;")) {
-                offset += 5;
-                xml_parser_report_text(parser, "'", 1);
-                goto start;
-            }
-            else {
-                // TODO
-            }
-        }
+        xml_parse_entity_ref(parser);
     }
     else {
         // TODO
