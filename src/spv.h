@@ -55,11 +55,25 @@ typedef struct Spv_SectionEncoder {
 } Spv_SectionEncoder;
 
 typedef struct Spv_ModuleEncoder {
+    uint32_t header;
     struct {
-        Spv_SectionEncoder* elements;
-        size_t length;
-        size_t capacity;
-    } chunks;
+        Spv_SectionEncoder capabilities;
+        Spv_SectionEncoder extensions;
+        Spv_SectionEncoder imports;
+
+        Spv_SectionEncoder memory_model;
+
+        Spv_SectionEncoder entry_points;
+        Spv_SectionEncoder execution_modes;
+
+        Spv_SectionEncoder debug;
+        Spv_SectionEncoder annotations;
+
+        Spv_SectionEncoder types;
+        Spv_SectionEncoder constants;
+        Spv_SectionEncoder globals;
+        Spv_SectionEncoder functions;
+    } sections;
     Spv_Allocator allocator;
 } Spv_ModuleEncoder;
 
