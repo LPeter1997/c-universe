@@ -528,14 +528,14 @@ static bool xml_parse_element(Xml_Parser* parser) {
             // Self-closing tag
             if (ch == '/' && xml_parser_peek(parser, 1, '\0') == '>') {
                 xml_parser_advance(parser, 2);
-                if (parser->sax.on_start_element != NULL) {
+                if (parser->sax.on_start_element == NULL) {
+                    goto cleanup_start_tag;
+                }
+                else {
                     parser->sax.on_start_element(parser->user_data, tagName, attributes.elements, attributes.length);
                     // To avoid double-freeing, copy tag name
                     char* tagNameCopy = xml_strdup(allocator, tagName);
                     parser->sax.on_end_element(parser->user_data, tagNameCopy);
-                }
-                else {
-                    goto cleanup_start_tag;
                 }
                 return true;
             }
