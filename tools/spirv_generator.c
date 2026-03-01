@@ -153,6 +153,16 @@ static bool enum_has_parameters(Enum* enumeration) {
     return false;
 }
 
+static bool enum_needs_capabilities_or_extensions(Enum* enumeration) {
+    for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+        Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
+        if (enumerant->metadata.capabilities.length > 0 || enumerant->metadata.extensions.length > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void free_type(Type* type) {
     switch (type->kind) {
     case TYPE_ENUM: {
@@ -1061,13 +1071,16 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
         code_builder_format(cb, "spv_encode_u32(encoder, %s.%s);\n", name, enumeration->flags ? "flags" : "tag");
 
         bool hasParameters = enum_has_parameters(enumeration);
-        if (hasParameters && !enumeration->flags) {
+        bool needsTracking = enum_needs_capabilities_or_extensions(enumeration);
+        if ((hasParameters || needsTracking) && !enumeration->flags) {
             // Simpler, we can just do a singular switch on the tag and determine which alternative to write
             code_builder_format(cb, "switch (%s.%s) {\n", name, "tag");
             for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
                 Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
                 if (enumerant->alias_of != NULL) continue;
-                if (enumerant->parameters.length == 0) continue;
+                if (enumerant->parameters.length == 0 
+                 && enumerant->metadata.capabilities.length == 0 
+                 && enumerant->metadata.extensions.length == 0) continue;
                 code_builder_format(cb, "case Spv_%s_%s:\n", operandType->name, enumerant->name);
                 code_builder_indent(cb);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
@@ -1076,18 +1089,21 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                     generate_c_operand_encoder(cb, model, param, accessor);
                     free(accessor);
                 }
+                generate_c_tracking(cb, &enumerant->metadata);
                 code_builder_format(cb, "break;\n");
                 code_builder_dedent(cb);
             }
             code_builder_puts(cb, "default: break;\n");
             code_builder_puts(cb, "}\n");
         }
-        else if (hasParameters && enumeration->flags) {
+        else if ((hasParameters || needsTracking) && enumeration->flags) {
             // We actually need to go through EACH parametric flag and check if it's set and if so, write the parameters for it
             for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
                 Enumerant* enumerant = &DynamicArray_at(enumeration->enumerants, i);
                 if (enumerant->alias_of != NULL) continue;
-                if (enumerant->parameters.length == 0) continue;
+                if (enumerant->parameters.length == 0 
+                 && enumerant->metadata.capabilities.length == 0 
+                 && enumerant->metadata.extensions.length == 0) continue;
                 code_builder_format(cb, "if ((%s.flags & Spv_%s_%s) != 0) {\n", name, operandType->name, enumerant->name);
                 code_builder_indent(cb);
                 for (size_t j = 0; j < DynamicArray_length(enumerant->parameters); ++j) {
@@ -1096,6 +1112,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                     generate_c_operand_encoder(cb, model, param, accessor);
                     free(accessor);
                 }
+                generate_c_tracking(cb, &enumerant->metadata);
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
             }
