@@ -45,6 +45,7 @@ typedef struct Xml_Allocator {
 
 typedef struct Xml_Options {
     Xml_Allocator allocator;
+    bool namespace_aware;
 } Xml_Options;
 
 typedef struct Xml_Error {
@@ -59,14 +60,19 @@ typedef struct Xml_Error {
     size_t index;
 } Xml_Error;
 
-typedef struct Xml_Attribute {
+typedef struct Xml_QualifiedName {
+    char* ns;
     char* name;
+} Xml_QualifiedName;
+
+typedef struct Xml_Attribute {
+    Xml_QualifiedName name;
     char* value;
 } Xml_Attribute;
 
 typedef struct Xml_Sax {
-    void(*on_start_element)(void* user_data, char* name, Xml_Attribute* attributes, size_t attribute_count);
-    void(*on_end_element)(void* user_data, char* name);
+    void(*on_start_element)(void* user_data, Xml_QualifiedName name, Xml_Attribute* attributes, size_t attribute_count);
+    void(*on_end_element)(void* user_data, Xml_QualifiedName name);
     void(*on_text)(void* user_data, char* text, size_t length);
     void(*on_error)(void* user_data, Xml_Error error);
 } Xml_Sax;
