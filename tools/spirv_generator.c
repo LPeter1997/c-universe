@@ -391,6 +391,18 @@ static Type* find_type_by_name(Model* model, char const* name) {
     return NULL;
 }
 
+static Enumerant* find_enumerant_by_name(Enum* enumeration, char const* name) {
+    for (size_t i = 0; i < DynamicArray_length(enumeration->enumerants); ++i) {
+        Enumerant* candidate = &DynamicArray_at(enumeration->enumerants, i);
+        if (candidate->name != NULL && strcmp(candidate->name, name) == 0) {
+            return candidate;
+        }
+    }
+    fprintf(stderr, "Unknown enumerant %s\n", name);
+    assert(false);
+    return NULL;
+}
+
 static Metadata json_metadata_to_domain(Json_Value* value) {
     Metadata metadata = {0};
     Json_Value* minVersion = json_object_get(value, "version");
@@ -1010,9 +1022,15 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
     }
 }
 
-static void generate_c_tracking(CodeBuilder* cb, Metadata* metadata) {
+static void generate_c_tracking(CodeBuilder* cb, Model* model, Metadata* metadata) {
     for (size_t i = 0; i < DynamicArray_length(metadata->capabilities); ++i) {
         char const* capability = DynamicArray_at(metadata->capabilities, i);
+        // For capabilities, we need to track them recursively as a capability can require another
+        Type* capabilitiesType = find_type_by_name(model, "Capability");
+        assert(capabilitiesType != NULL && capabilitiesType->kind == TYPE_ENUM);
+        Enumerant* capabilityEnumerant = find_enumerant_by_name(&capabilitiesType->value.enumeration, capability);
+        assert(capabilityEnumerant != NULL);
+        generate_c_tracking(cb, model, &capabilityEnumerant->metadata);
         code_builder_format(cb, "spv_track_capability(&encoder->track, Spv_Capability_%s);\n", capability);
     }
     for (size_t i = 0; i < DynamicArray_length(metadata->extensions); ++i) {
@@ -1089,7 +1107,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                     generate_c_operand_encoder(cb, model, param, accessor);
                     free(accessor);
                 }
-                generate_c_tracking(cb, &enumerant->metadata);
+                generate_c_tracking(cb, model, &enumerant->metadata);
                 code_builder_format(cb, "break;\n");
                 code_builder_dedent(cb);
             }
@@ -1112,7 +1130,7 @@ static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type
                     generate_c_operand_encoder(cb, model, param, accessor);
                     free(accessor);
                 }
-                generate_c_tracking(cb, &enumerant->metadata);
+                generate_c_tracking(cb, model, &enumerant->metadata);
                 code_builder_dedent(cb);
                 code_builder_puts(cb, "}\n");
             }
@@ -1159,7 +1177,7 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_format(cb, "size_t endOffset = encoder->words.length;\n");
     code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
     code_builder_format(cb, "encoder->words.elements[startOffset] = (uint32_t)((wordCount << 16) | %u);\n", instruction->opcode);
-    generate_c_tracking(cb, &instruction->metadata);
+    generate_c_tracking(cb, model, &instruction->metadata);
     code_builder_dedent(cb);
     code_builder_puts(cb, "}\n\n");
 }
