@@ -297,9 +297,12 @@ static bool xml_parser_matches(Xml_Parser* parser, size_t offset, char const* st
     return true;
 }
 
-static void xml_parser_report_text(Xml_Parser* parser, char const* text, size_t length) {
+static void xml_parser_report_text(Xml_Parser* parser, char* text, size_t length) {
     if (length == 0) return;
-    if (parser->sax.on_text == NULL) return;
+    if (parser->sax.on_text == NULL) {
+        xml_free(&parser->options.allocator, text);
+        return;
+    }
     parser->sax.on_text(parser->user_data, text, length);
 }
 
