@@ -1000,6 +1000,17 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
     }
 }
 
+static void generate_c_tracking(CodeBuilder* cb, Metadata* metadata) {
+    for (size_t i = 0; i < DynamicArray_length(metadata->capabilities); ++i) {
+        char const* capability = DynamicArray_at(metadata->capabilities, i);
+        code_builder_format(cb, "spv_track_capability(&encoder->track, Spv_Capability_%s);\n", capability);
+    }
+    for (size_t i = 0; i < DynamicArray_length(metadata->extensions); ++i) {
+        char const* extension = DynamicArray_at(metadata->extensions, i);
+        code_builder_format(cb, "spv_track_extension(&encoder->track, Spv_Extension_%s);\n", extension);
+    }
+}
+
 static void generate_c_operand_value_encoder(CodeBuilder* cb, Model* model, Type* operandType, char const* name);
 
 static void generate_c_operand_encoder(CodeBuilder* cb, Model* model, Operand* operand, char const* name) {
@@ -1131,11 +1142,12 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
     code_builder_format(cb, "size_t endOffset = encoder->words.length;\n");
     code_builder_format(cb, "size_t wordCount = (endOffset - startOffset);\n");
     code_builder_format(cb, "encoder->words.elements[startOffset] = (uint32_t)((wordCount << 16) | %u);\n", instruction->opcode);
+    generate_c_tracking(cb, &instruction->metadata);
     code_builder_dedent(cb);
     code_builder_puts(cb, "}\n\n");
 }
 
-static void generate_c_extension_constants(CodeBuilder* cb, Model* model, bool declare) {
+static void generate_c_extension_enum(CodeBuilder* cb, Model* model, bool declare) {
     if (!declare) return;
     code_builder_puts(cb, "typedef enum Spv_Extension {\n");
     code_builder_indent(cb);
@@ -1159,7 +1171,7 @@ static char* generate_c_code(Model* model, bool declare) {
         code_builder_puts(&cb, "#ifdef SPV_IMPLEMENTATION\n\n");
     }
 
-    generate_c_extension_constants(&cb, model, declare);
+    generate_c_extension_enum(&cb, model, declare);
 
     for (size_t i = 0; i < DynamicArray_length(model->types); ++i) {
         Type* type = &DynamicArray_at(model->types, i);
