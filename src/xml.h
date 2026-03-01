@@ -119,7 +119,7 @@ static bool xml_is_text_char(char ch) {
         && ch != ']';
 }
 
-static bool xml_is_tag_char(char ch, bool isFirst) {
+static bool xml_is_qualified_name_char(char ch, bool isFirst) {
     return isalpha((unsigned char)ch) || ch == '_'
         || (!isFirst && (isdigit((unsigned char)ch) || ch == '-' || ch == '.' || ch == ':'));
 }
@@ -493,6 +493,24 @@ static bool xml_parse_text(Xml_Parser* parser) {
     }
     // NOTE: On 0 length, we haven't allocated anything, no need to free
     return false;
+}
+
+static Xml_QualifiedName xml_parse_namespace_aware_qualified_name(Xml_Parser* parser, size_t* offset) {
+    // TODO
+}
+
+static Xml_QualifiedName xml_parse_non_namespace_aware_qualified_name(Xml_Parser* parser, size_t* offset) {
+    // TODO
+}
+
+static Xml_QualifiedName xml_parse_qualified_name(Xml_Parser* parser, size_t* offset) {
+    Xml_Options* options = &parser->options;
+    if (options->namespace_aware) {
+        return xml_parse_namespace_aware_qualified_name(parser, offset);
+    }
+    else {
+        return xml_parse_non_namespace_aware_qualified_name(parser, offset);
+    }
 }
 
 static size_t xml_parse_tag_name(Xml_Parser* parser, size_t offset) {
