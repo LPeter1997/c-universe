@@ -416,16 +416,22 @@ static void xml_parse_element(Xml_Parser* parser) {
     size_t offset = 1;
     char next = xml_parser_peek(parser, offset, '\0');
     if (next == '\0') {
-        // TODO
+        char* message = xml_format(allocator, "unexpected end of input after '<'");
+        xml_parser_report_error(parser, parser->position, message);
+        xml_parser_advance(parser, 1);
+        return false;
     }
     else if (next == '/') {
+        // End tag
         ++offset;
         size_t tagStart = offset;
         while (true) {
             char c = xml_parser_peek(parser, offset, '\0');
             if (c == '\0') {
-                // TODO
-                return;
+                char* message = xml_format(allocator, "unexpected end of input in end tag");
+                xml_parser_report_error(parser, parser->position, message);
+                xml_parser_advance(parser, offset);
+                return false;
             }
             else if (c == '>') {
                 ++offset;
@@ -434,23 +440,40 @@ static void xml_parse_element(Xml_Parser* parser) {
             else if (!xml_is_tag_char(c, offset == tagStart)) {
                 char* message = xml_format(allocator, "invalid character '%c' in tag name", c);
                 xml_parser_report_error(parser, parser->position, message);
-                return;
+                xml_parser_advance(parser, offset);
+                return false;
             }
             ++offset;
         }
-        char* tagName = xml_strndup(allocator, &parser->text[tagStart], offset - tagStart - 1);
+        if (offset == tagStart + 1) {
+            char* message = xml_format(allocator, "tag name cannot be empty");
+            xml_parser_report_error(parser, parser->position, message);
+            xml_parser_advance(parser, offset);
+            return false;
+        }
         if (parser->sax.on_end_element != NULL) {
+            char* tagName = xml_strndup(allocator, &parser->text[tagStart], offset - tagStart - 1);
             parser->sax.on_end_element(parser->user_data, tagName);
         }
+        xml_parser_advance(parser, offset);
+        return true;
     }
     else if (next == '?') {
-        // TODO
+        // TODO: processing instruction
     }
     else if (next == '!') {
-        // TODO
+        // TODO: comment, CDATA section, DOCTYPE, etc.
+    }
+    else if (xml_is_tag_char(next, true)) {
+        size_t tagStart = offset;
+        // TODO: tag start
     }
     else {
-        // TODO
+        ++offset;
+        char* message = xml_format(allocator, "invalid character '%c' after '<', expected a valid tag name", next);
+        xml_parser_report_error(parser, parser->position, message);
+        xml_parser_advance(parser, offset);
+        return false;
     }
 }
 
@@ -458,7 +481,9 @@ static void xml_parse_impl(Xml_Parser* parser) {
     if (xml_parse_text(parser)) return;
     if (xml_parse_element(parser)) return;
 
-    // TODO
+    char* message = xml_format(allocator, "unexpected character '%c'", xml_parser_peek(parser, 0, '\0'));
+    xml_parser_report_error(parser, parser->position, message);
+    xml_parser_advance(parser, 1);
 }
 
 #ifdef __cplusplus
