@@ -55,7 +55,7 @@ typedef struct Spv_SectionEncoder {
 } Spv_SectionEncoder;
 
 typedef struct Spv_ModuleEncoder {
-    uint32_t header;
+    uint32_t header[5];
     struct {
         Spv_SectionEncoder capabilities;
         Spv_SectionEncoder extensions;
