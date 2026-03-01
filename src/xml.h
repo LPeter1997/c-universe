@@ -306,18 +306,7 @@ static void xml_parser_report_text(Xml_Parser* parser, char* text, size_t length
     parser->sax.on_text(parser->user_data, text, length);
 }
 
-static void xml_parse_text(Xml_Parser* parser) {
-    size_t offset = 0;
-    while (true) {
-        char ch = xml_parser_peek(parser, offset, '\0');
-        if (!xml_is_text_char(ch)) break;
-        ++offset;
-    }
-    xml_parser_report_text(parser, &parser->text[parser->position.index], offset);
-    xml_parser_advance(parser, offset);
-}
-
-static void xml_parse_entity_ref(Xml_Parser* parser) {
+static void xml_parse_entity_ref(Xml_Parser* parser, Xml_StringBuilder* builder) {
     Xml_Allocator* allocator = &parser->options.allocator;
 
     char ch = xml_parser_peek(parser, 0, '\0');
@@ -359,7 +348,7 @@ static void xml_parse_entity_ref(Xml_Parser* parser) {
             else {
                 char utf8[4];
                 size_t utf8Length = xml_utf8_encode(codepoint, utf8);
-                xml_parser_report_text(parser, utf8, utf8Length);
+                xml_string_builder_append(builder, utf8, utf8Length);
             }
         }
         else {
@@ -370,35 +359,59 @@ static void xml_parse_entity_ref(Xml_Parser* parser) {
     else {
         if (xml_parser_matches(parser, offset, "amp;")) {
             offset += 4;
-            xml_parser_report_text(parser, "&", 1);
+            xml_string_builder_append(builder, "&", 1);
         }
         else if (xml_parser_matches(parser, offset, "lt;")) {
             offset += 3;
-            xml_parser_report_text(parser, "<", 1);
+            xml_string_builder_append(builder, "<", 1);
         }
         else if (xml_parser_matches(parser, offset, "gt;")) {
             offset += 3;
-            xml_parser_report_text(parser, ">", 1);
+            xml_string_builder_append(builder, ">", 1);
         }
         else if (xml_parser_matches(parser, offset, "quot;")) {
             offset += 5;
-            xml_parser_report_text(parser, "\"", 1);
+            xml_string_builder_append(builder, "\"", 1);
         }
         else if (xml_parser_matches(parser, offset, "apos;")) {
             offset += 5;
-            xml_parser_report_text(parser, "'", 1);
+            xml_string_builder_append(builder, "'", 1);
         }
         else {
             char* message = xml_format(allocator, "invalid character '%c' after '&', expected a valid entity reference", next);
             xml_parser_report_error(parser, parser->position, message);
         }
-        xml_parser_advance(parser, offset);
     }
+    xml_parser_advance(parser, offset);
+}
+
+static bool xml_parse_text(Xml_Parser* parser) {
+    Xml_StringBuilder builder = {0};
+    while (true) {
+        char ch = xml_parser_peek(parser, 0, '\0');
+        if (ch == '&') {
+            xml_parse_entity_ref(parser, &builder);
+        }
+        else if (xml_is_text_char(ch)) {
+            xml_string_builder_appendc(&builder, ch);
+            xml_parser_advance(parser, 1);
+        }
+        else {
+            break;
+        }
+    }
+    if (builder.length > 0) {
+        char* text = xml_string_builder_take(&builder);
+        xml_parser_report_text(parser, text, builder.length);
+        return true;
+    }
+    // NOTE: On 0 length, we haven't allocated anything, no need to free
+    return false;
 }
 
 static void xml_parse_element(Xml_Parser* parser) {
     char ch = xml_parser_peek(parser, 0, '\0');
-    if (ch != '<') return;
+    if (ch != '<') return false;
 
     size_t offset = 1;
     char next = xml_parser_peek(parser, offset, '\0');
@@ -442,21 +455,10 @@ static void xml_parse_element(Xml_Parser* parser) {
 }
 
 static void xml_parse_impl(Xml_Parser* parser) {
-start:
-    xml_parse_text(parser);
-    char ch = xml_parser_peek(parser, 0, '\0');
-    if (ch == '\0') {
-        // TODO
-    }
-    else if (ch == '<') {
-        xml_parse_element(parser);
-    }
-    else if (ch == '&') {
-        xml_parse_entity_ref(parser);
-    }
-    else {
-        // TODO
-    }
+    if (xml_parse_text(parser)) return;
+    if (xml_parse_element(parser)) return;
+
+    // TODO
 }
 
 #ifdef __cplusplus
