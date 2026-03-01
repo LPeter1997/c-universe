@@ -530,7 +530,9 @@ static bool xml_parse_element(Xml_Parser* parser) {
                 xml_parser_advance(parser, 2);
                 if (parser->sax.on_start_element != NULL) {
                     parser->sax.on_start_element(parser->user_data, tagName, attributes.elements, attributes.length);
-                    parser->sax.on_end_element(parser->user_data, tagName);
+                    // To avoid double-freeing, copy tag name
+                    char* tagNameCopy = xml_strdup(allocator, tagName);
+                    parser->sax.on_end_element(parser->user_data, tagNameCopy);
                 }
                 else {
                     goto cleanup_start_tag;
