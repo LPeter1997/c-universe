@@ -80,6 +80,17 @@ typedef struct Xml_Sax {
 
 #include <assert.h>
 
+#define XML_ADD_TO_ARRAY(allocator, array, element) \
+    do { \
+        if ((array).length + 1 > (array).capacity) { \
+            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
+            void* newElements = xml_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
+            (array).elements = newElements; \
+            (array).capacity = newCapacity; \
+        } \
+        (array).elements[(array).length++] = element; \
+    } while (false)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -431,7 +442,9 @@ static size_t xml_parse_tag_name(Xml_Parser* parser, size_t offset) {
     return length;
 }
 
-static void xml_parse_element(Xml_Parser* parser) {
+static bool xml_parse_element(Xml_Parser* parser) {
+    Xml_Allocator* allocator = &parser->options.allocator;
+
     char ch = xml_parser_peek(parser, 0, '\0');
     if (ch != '<') return false;
 
@@ -472,8 +485,73 @@ static void xml_parse_element(Xml_Parser* parser) {
     else if (xml_is_tag_char(next, true)) {
         size_t tagNameLength = xml_parse_tag_name(parser, offset);
         if (tagNameLength == 0) return false;
-
-        // TODO
+        offset += tagNameLength;
+        char* tagName = xml_strndup(&parser->options.allocator, &parser->text[offset - tagNameLength], tagNameLength);
+        xml_parser_advance(parser, offset);
+        // We can have arbitrary attributes, then either a '>' or a '/>' at the end
+        struct {
+            Xml_Attribute* elements;
+            size_t length;
+            size_t capacity;
+        } attributes = {0};
+        bool returnValue = true;
+        while (true) {
+            char ch = xml_parser_peek(parser, 0, '\0');
+            if (ch == '\0') {
+                char* message = xml_format(allocator, "unexpected end of input in start tag");
+                xml_parser_report_error(parser, parser->position, message);
+                xml_parser_advance(parser, 1);
+                returnValue = false;
+                goto cleanup_start_tag;
+            }
+            // Skip space
+            if (isspace((unsigned char)ch)) {
+                xml_parser_advance(parser, 1);
+                continue;
+            }
+            // End of start tag
+            if (ch == '>') {
+                xml_parser_advance(parser, 1);
+                if (parser->sax.on_start_element == NULL) {
+                    goto cleanup_start_tag;
+                }
+                else {
+                    parser->sax.on_start_element(parser->user_data, tagName, attributes.elements, attributes.length);
+                }
+                return true;
+            }
+            // Attribute
+            if (xml_is_tag_char(ch, true)) {
+                // TODO
+                continue;
+            }
+            // Self-closing tag
+            if (ch == '/' && xml_parser_peek(parser, 1, '\0') == '>') {
+                xml_parser_advance(parser, 2);
+                if (parser->sax.on_start_element != NULL) {
+                    parser->sax.on_start_element(parser->user_data, tagName, attributes.elements, attributes.length);
+                    parser->sax.on_end_element(parser->user_data, tagName);
+                }
+                else {
+                    goto cleanup_start_tag;
+                }
+                return true;
+            }
+            // Invalid character
+            char* message = xml_format(allocator, "invalid character '%c' in start tag, expected space, '>', '/', or attribute name", ch);
+            xml_parser_report_error(parser, parser->position, message);
+            xml_parser_advance(parser, 1);
+            // We keep going
+        }
+    cleanup_start_tag:
+        xml_free(allocator, tagName);
+        // Free attributes
+        for (size_t i = 0; i < attributes.length; ++i) {
+            xml_free(allocator, attributes.elements[i].name);
+            xml_free(allocator, attributes.elements[i].value);
+        }
+        xml_free(allocator, attributes.elements);
+        return false;
     }
     else {
         ++offset;
@@ -496,6 +574,8 @@ static void xml_parse_impl(Xml_Parser* parser) {
 #ifdef __cplusplus
 }
 #endif
+
+#undef XML_ADD_TO_ARRAY
 
 #endif /* XML_IMPLEMENTATION */
 
