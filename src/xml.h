@@ -239,6 +239,11 @@ static char* xml_format(Xml_Allocator* allocator, const char* format, ...) {
     return buffer;
 }
 
+static void xml_free_qualified_name(Xml_Allocator* allocator, Xml_QualifiedName name) {
+    xml_free(allocator, name.ns);
+    xml_free(allocator, name.name);
+}
+
 // String builder //////////////////////////////////////////////////////////////
 
 typedef struct Xml_StringBuilder {
@@ -275,6 +280,30 @@ static char* xml_string_builder_take(Xml_StringBuilder* builder) {
     builder->length = 0;
     builder->capacity = 0;
     return result;
+}
+
+// Attribute list builder //////////////////////////////////////////////////////
+
+typedef struct Xml_AttributeList {
+    Xml_Allocator allocator;
+    Xml_Attribute* elements;
+    size_t length;
+    size_t capacity;
+} Xml_AttributeList;
+
+static void xml_attribute_list_append(Xml_AttributeList* list, Xml_Attribute attribute) {
+    XML_ADD_TO_ARRAY(&list->allocator, *list, attribute);
+}
+
+static void xml_attribute_list_free(Xml_AttributeList* list) {
+    for (size_t i = 0; i < list->length; ++i) {
+        xml_free_qualified_name(&list->allocator, list->elements[i].name);
+        xml_free(&list->allocator, list->elements[i].value);
+    }
+    xml_free(&list->allocator, list->elements);
+    list->elements = NULL;
+    list->length = 0;
+    list->capacity = 0;
 }
 
 // Parsing /////////////////////////////////////////////////////////////////////
