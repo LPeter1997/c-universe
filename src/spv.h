@@ -51,6 +51,7 @@ typedef struct Spv_SectionEncoder {
         size_t capacity;
     } words;
     Spv_Allocator allocator;
+    Spv_Track track;
 } Spv_SectionEncoder;
 
 typedef struct Spv_ModuleEncoder {
