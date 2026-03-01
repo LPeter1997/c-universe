@@ -85,6 +85,10 @@ typedef struct Xml_Sax {
 #ifdef XML_IMPLEMENTATION
 
 #include <assert.h>
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define XML_ADD_TO_ARRAY(allocator, array, element) \
     do { \
@@ -431,7 +435,7 @@ static void xml_parse_entity_ref(Xml_Parser* parser, Xml_StringBuilder* builder)
 }
 
 static bool xml_parse_text(Xml_Parser* parser) {
-    Xml_StringBuilder builder = {0};
+    Xml_StringBuilder builder = {.allocator = parser->options.allocator};
     while (true) {
         char ch = xml_parser_peek(parser, 0, '\0');
         if (ch == '&') {
@@ -507,7 +511,7 @@ static bool xml_parse_element(Xml_Parser* parser) {
         }
         ++offset;
         if (parser->sax.on_end_element != NULL) {
-            char* tagName = xml_strndup(&parser->options.allocator, &parser->text[offset - tagNameLength - 1], tagNameLength);
+            char* tagName = xml_strndup(&parser->options.allocator, &parser->text[parser->position.index + offset - tagNameLength - 1], tagNameLength);
             parser->sax.on_end_element(parser->user_data, tagName);
         }
         xml_parser_advance(parser, offset);
@@ -523,7 +527,7 @@ static bool xml_parse_element(Xml_Parser* parser) {
         size_t tagNameLength = xml_parse_tag_name(parser, offset);
         if (tagNameLength == 0) return false;
         offset += tagNameLength;
-        char* tagName = xml_strndup(&parser->options.allocator, &parser->text[offset - tagNameLength], tagNameLength);
+        char* tagName = xml_strndup(&parser->options.allocator, &parser->text[parser->position.index + offset - tagNameLength], tagNameLength);
         xml_parser_advance(parser, offset);
         // We can have arbitrary attributes, then either a '>' or a '/>' at the end
         struct {
@@ -570,9 +574,11 @@ static bool xml_parse_element(Xml_Parser* parser) {
                 }
                 else {
                     parser->sax.on_start_element(parser->user_data, tagName, attributes.elements, attributes.length);
-                    // To avoid double-freeing, copy tag name
-                    char* tagNameCopy = xml_strdup(allocator, tagName);
-                    parser->sax.on_end_element(parser->user_data, tagNameCopy);
+                    if (parser->sax.on_end_element != NULL) {
+                        // To avoid double-freeing, copy tag name
+                        char* tagNameCopy = xml_strdup(allocator, tagName);
+                        parser->sax.on_end_element(parser->user_data, tagNameCopy);
+                    }
                 }
                 return true;
             }
