@@ -409,6 +409,28 @@ static bool xml_parse_text(Xml_Parser* parser) {
     return false;
 }
 
+static size_t xml_parse_tag_name(Xml_Parser* parser, size_t offset) {
+    size_t length = 0;
+    while (true) {
+        char c = xml_parser_peek(parser, offset + length, '\0');
+        if (c == '\0') {
+            char* message = xml_format(allocator, "unexpected end of input in tag name");
+            xml_parser_report_error(parser, parser->position, message);
+            xml_parser_advance(parser, offset + length);
+            return 0;
+        }
+        if (!xml_is_tag_char(c, length == 0)) break;
+        ++length;
+    }
+    if (length == 0) {
+        char* message = xml_format(allocator, "tag name cannot be empty");
+        xml_parser_report_error(parser, parser->position, message);
+        xml_parser_advance(parser, offset);
+        return 0;
+    }
+    return length;
+}
+
 static void xml_parse_element(Xml_Parser* parser) {
     char ch = xml_parser_peek(parser, 0, '\0');
     if (ch != '<') return false;
@@ -424,35 +446,18 @@ static void xml_parse_element(Xml_Parser* parser) {
     else if (next == '/') {
         // End tag
         ++offset;
-        size_t tagStart = offset;
-        while (true) {
-            char c = xml_parser_peek(parser, offset, '\0');
-            if (c == '\0') {
-                char* message = xml_format(allocator, "unexpected end of input in end tag");
-                xml_parser_report_error(parser, parser->position, message);
-                xml_parser_advance(parser, offset);
-                return false;
-            }
-            else if (c == '>') {
-                ++offset;
-                break;
-            }
-            else if (!xml_is_tag_char(c, offset == tagStart)) {
-                char* message = xml_format(allocator, "invalid character '%c' in tag name", c);
-                xml_parser_report_error(parser, parser->position, message);
-                xml_parser_advance(parser, offset);
-                return false;
-            }
-            ++offset;
-        }
-        if (offset == tagStart + 1) {
-            char* message = xml_format(allocator, "tag name cannot be empty");
+        size_t tagNameLength = xml_parse_tag_name(parser, offset);
+        if (tagNameLength == 0) return false;
+        offset += tagNameLength;
+        if (xml_parser_peek(parser, offset, '\0') != '>') {
+            char* message = xml_format(allocator, "expected '>' at the end of end tag");
             xml_parser_report_error(parser, parser->position, message);
             xml_parser_advance(parser, offset);
             return false;
         }
+        ++offset;
         if (parser->sax.on_end_element != NULL) {
-            char* tagName = xml_strndup(allocator, &parser->text[tagStart], offset - tagStart - 1);
+            char* tagName = xml_strndup(&parser->options.allocator, &parser->text[offset - tagNameLength - 1], tagNameLength);
             parser->sax.on_end_element(parser->user_data, tagName);
         }
         xml_parser_advance(parser, offset);
@@ -465,8 +470,10 @@ static void xml_parse_element(Xml_Parser* parser) {
         // TODO: comment, CDATA section, DOCTYPE, etc.
     }
     else if (xml_is_tag_char(next, true)) {
-        size_t tagStart = offset;
-        // TODO: tag start
+        size_t tagNameLength = xml_parse_tag_name(parser, offset);
+        if (tagNameLength == 0) return false;
+
+        // TODO
     }
     else {
         ++offset;
