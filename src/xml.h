@@ -56,12 +56,12 @@ typedef struct Xml_Error {
 typedef struct Xml_Attribute {
     char* name;
     char* value;
-} Xml_Attribute;
+} Xml_AttributeView;
 
 typedef struct Xml_Sax {
     void(*on_start_element)(void* user_data, char* name, Xml_Attribute* attributes, size_t attribute_count);
     void(*on_end_element)(void* user_data, char* name);
-    void(*on_text)(void* user_data, char const* text, size_t length);
+    void(*on_text)(void* user_data, char* text, size_t length);
     void(*on_error)(void* user_data, Xml_Error error);
 } Xml_Sax;
 
@@ -185,6 +185,44 @@ static void xml_free(Xml_Allocator* allocator, void* ptr) {
     allocator->free(allocator->context, ptr);
 }
 
+// String builder //////////////////////////////////////////////////////////////
+
+typedef struct Xml_StringBuilder {
+    Xml_Allocator allocator;
+    char* data;
+    size_t length;
+    size_t capacity;
+} Xml_StringBuilder;
+
+static void xml_string_builder_reserve(Xml_StringBuilder* builder, size_t new_capacity) {
+    if (new_capacity <= builder->capacity) return;
+    size_t new_cap = builder->capacity == 0 ? 16 : builder->capacity * 2;
+    while (new_cap < new_capacity) new_cap *= 2;
+    char* new_data = xml_realloc(&builder->allocator, builder->data, new_cap);
+    builder->data = new_data;
+    builder->capacity = new_cap;
+}
+
+static void xml_string_builder_appendc(Xml_StringBuilder* builder, char ch) {
+    xml_string_builder_reserve(builder, builder->length + 1);
+    builder->data[builder->length++] = ch;
+}
+
+static void xml_string_builder_append(Xml_StringBuilder* builder, char const* str, size_t length) {
+    xml_string_builder_reserve(builder, builder->length + length);
+    memcpy(builder->data + builder->length, str, length);
+    builder->length += length;
+}
+
+static char* xml_string_builder_take(Xml_StringBuilder* builder) {
+    xml_string_builder_appendc(builder, '\0');
+    char* result = builder->data;
+    builder->data = NULL;
+    builder->length = 0;
+    builder->capacity = 0;
+    return result;
+}
+
 // Parsing /////////////////////////////////////////////////////////////////////
 
 typedef struct Xml_Position {
@@ -249,20 +287,6 @@ static void xml_parser_advance(Xml_Parser* parser, size_t count) {
     }
 }
 
-static bool xml_parser_expect_char(Xml_Parser* parser, char expected) {
-    char c = xml_parser_peek(parser, 0, '\0');
-    if (c == expected) {
-        xml_parser_advance(parser, 1);
-        return true;
-    }
-    else {
-        Xml_Allocator* allocator = &parser->options.allocator;
-        char* message = xml_format(allocator, "expected character '%c', but got '%c'", expected, c);
-        xml_parser_report_error(parser, parser->position, message);
-        return false;
-    }
-}
-
 static bool xml_parser_matches(Xml_Parser* parser, size_t offset, char const* str) {
     while (*str != '\0') {
         char ch = xml_parser_peek(parser, offset, '\0');
@@ -273,7 +297,7 @@ static bool xml_parser_matches(Xml_Parser* parser, size_t offset, char const* st
     return true;
 }
 
-static void xml_parser_report_text(Xml_Parser* parser, char* text, size_t length) {
+static void xml_parser_report_text(Xml_Parser* parser, char const* text, size_t length) {
     if (length == 0) return;
     if (parser->sax.on_text == NULL) return;
     parser->sax.on_text(parser->user_data, text, length);
