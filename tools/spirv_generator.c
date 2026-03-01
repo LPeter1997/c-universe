@@ -892,10 +892,14 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
             char const* originalMember = enumerant->alias_of == NULL ? enumerant->name : enumerant->alias_of;
             if (!enumeration->flags && enumerant->parameters.length == 0) {
                 // Value-enum element without parameters, we generate a constant for it
+                code_builder_puts(cb, "#ifdef SPV_STATIC\n");
+                if (declare) code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = Spv_%s_%s };\n", type->name, type->name, enumerant->name, tagName, type->name, originalMember);
+                code_builder_puts(cb, "#else\n");
                 if (declare) code_builder_puts(cb, "extern ");
                 code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
                 if (!declare) code_builder_format(cb, " = { .%s = Spv_%s_%s }", tagName, type->name, originalMember);
                 code_builder_puts(cb, ";\n");
+                code_builder_puts(cb, "#endif\n");
             }
             else if (!enumeration->flags) {
                 // Value-enum element with parameters, we generate a function that can create the struct with the parameters
@@ -950,10 +954,14 @@ static void generate_c_type(CodeBuilder* cb, Model* model, Type* type, bool decl
             else {
                 // We expect 0 to be a special case, define a constant for it
                 assert(DynamicArray_length(enumerant->parameters) == 0);
+                code_builder_puts(cb, "#ifdef SPV_STATIC\n");
+                if (declare) code_builder_format(cb, "static const Spv_%s spv_%s_%s = { .%s = 0 };\n", type->name, type->name, enumerant->name, tagName);
+                code_builder_puts(cb, "#else\n");
                 if (declare) code_builder_puts(cb, "extern ");
                 code_builder_format(cb, "const Spv_%s spv_%s_%s", type->name, type->name, enumerant->name);
                 if (!declare) code_builder_format(cb, " = { .%s = 0 }", tagName);
                 code_builder_puts(cb, ";\n");
+                code_builder_puts(cb, "#endif\n");
             }
         }
         code_builder_putc(cb, '\n');
@@ -1128,14 +1136,15 @@ static void generate_c_instruction_encoder(CodeBuilder* cb, Model* model, Instru
 }
 
 static void generate_c_extension_constants(CodeBuilder* cb, Model* model, bool declare) {
+    if (!declare) return;
+    code_builder_puts(cb, "typedef enum Spv_Extension {\n");
+    code_builder_indent(cb);
     for (size_t i = 0; i < DynamicArray_length(model->all_extensions); ++i) {
         char const* extension = DynamicArray_at(model->all_extensions, i);
-        if (declare) code_builder_puts(cb, "extern ");
-        code_builder_format(cb, "const char* Spv_Extension_%s", extension);
-        if (!declare) code_builder_format(cb, " = \"%s\"", extension);
-        code_builder_puts(cb, ";\n");
+        code_builder_format(cb, "Spv_Extension_%s = %zu,\n", extension, i + 1);
     }
-    if (DynamicArray_length(model->all_extensions) > 0) code_builder_putc(cb, '\n');
+    code_builder_dedent(cb);
+    code_builder_puts(cb, "} Spv_Extension;\n\n");
 }
 
 static char* generate_c_code(Model* model, bool declare) {
