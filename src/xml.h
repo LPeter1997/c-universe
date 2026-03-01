@@ -16,7 +16,9 @@
 #ifndef XML_H
 #define XML_H
 
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef XML_STATIC
     #define XML_DEF static
@@ -41,6 +43,10 @@ typedef struct Xml_Allocator {
     void(*free)(void* ctx, void* ptr);
 } Xml_Allocator;
 
+typedef struct Xml_Options {
+    Xml_Allocator allocator;
+} Xml_Options;
+
 typedef struct Xml_Error {
     // A human-readable message describing the error.
     // Owned by the document it's added to, the library will call free on it when the document is freed.
@@ -56,7 +62,7 @@ typedef struct Xml_Error {
 typedef struct Xml_Attribute {
     char* name;
     char* value;
-} Xml_AttributeView;
+} Xml_Attribute;
 
 typedef struct Xml_Sax {
     void(*on_start_element)(void* user_data, char* name, Xml_Attribute* attributes, size_t attribute_count);
@@ -104,8 +110,8 @@ static bool xml_is_text_char(char ch) {
 }
 
 static bool xml_is_tag_char(char ch, bool isFirst) {
-    return isletter(ch) || ch == '_'
-        || (!isFirst && (isdigit(ch) || ch == '-' || ch == '.' || ch == ':'));
+    return isalpha((unsigned char)ch) || ch == '_'
+        || (!isFirst && (isdigit((unsigned char)ch) || ch == '-' || ch == '.' || ch == ':'));
 }
 
 static bool xml_isdigit(char ch, int* out_value) {
@@ -196,6 +202,33 @@ static void xml_free(Xml_Allocator* allocator, void* ptr) {
     allocator->free(allocator->context, ptr);
 }
 
+// Helpers /////////////////////////////////////////////////////////////////////
+
+static char* xml_strndup(Xml_Allocator* allocator, char const* str, size_t length) {
+    char* copy = (char*)xml_realloc(allocator, NULL, (length + 1) * sizeof(char));
+    memcpy(copy, str, length);
+    copy[length] = '\0';
+    return copy;
+}
+
+static char* xml_strdup(Xml_Allocator* allocator, char const* str) {
+    return xml_strndup(allocator, str, strlen(str));
+}
+
+static char* xml_format(Xml_Allocator* allocator, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int length = vsnprintf(NULL, 0, format, args_copy);
+    XML_ASSERT(length >= 0, "failed to compute length of formatted string");
+    va_end(args_copy);
+    char* buffer = (char*)xml_realloc(allocator, NULL, ((size_t)length + 1) * sizeof(char));
+    vsnprintf(buffer, (size_t)length + 1, format, args);
+    va_end(args);
+    return buffer;
+}
+
 // String builder //////////////////////////////////////////////////////////////
 
 typedef struct Xml_StringBuilder {
@@ -248,6 +281,7 @@ typedef struct Xml_Parser {
     Xml_Position position;
     Xml_Sax sax;
     void* user_data;
+    Xml_Options options;
 } Xml_Parser;
 
 static void xml_parser_report_error(Xml_Parser* parser, Xml_Position position, char* message) {
@@ -412,8 +446,10 @@ static bool xml_parse_text(Xml_Parser* parser) {
         }
     }
     if (builder.length > 0) {
+        // NOTE: We copy out length, as _take resets the builder
+        size_t textLength = builder.length;
         char* text = xml_string_builder_take(&builder);
-        xml_parser_report_text(parser, text, builder.length);
+        xml_parser_report_text(parser, text, textLength);
         return true;
     }
     // NOTE: On 0 length, we haven't allocated anything, no need to free
@@ -421,6 +457,7 @@ static bool xml_parse_text(Xml_Parser* parser) {
 }
 
 static size_t xml_parse_tag_name(Xml_Parser* parser, size_t offset) {
+    Xml_Allocator* allocator = &parser->options.allocator;
     size_t length = 0;
     while (true) {
         char c = xml_parser_peek(parser, offset + length, '\0');
@@ -553,7 +590,7 @@ static bool xml_parse_element(Xml_Parser* parser) {
             xml_free(allocator, attributes.elements[i].value);
         }
         xml_free(allocator, attributes.elements);
-        return false;
+        return returnValue;
     }
     else {
         ++offset;
@@ -568,6 +605,8 @@ static void xml_parse_impl(Xml_Parser* parser) {
     if (xml_parse_text(parser)) return;
     if (xml_parse_element(parser)) return;
 
+    // Unexpected
+    Xml_Allocator* allocator = &parser->options.allocator;
     char* message = xml_format(allocator, "unexpected character '%c'", xml_parser_peek(parser, 0, '\0'));
     xml_parser_report_error(parser, parser->position, message);
     xml_parser_advance(parser, 1);
