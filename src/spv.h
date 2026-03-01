@@ -69,7 +69,7 @@ typedef struct Spv_Track {
         size_t capacity;
     } capabilities;
     struct {
-        char const** elements;
+        int* elements;
         size_t length;
         size_t capacity;
     } extensions;
@@ -90,6 +90,17 @@ SPV_DEF void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count);
 #ifdef SPV_IMPLEMENTATION
 
 #include <assert.h>
+
+#define SPV_ADD_TO_ARRAY(allocator, array, element) \
+    do { \
+        if ((array).length + 1 > (array).capacity) { \
+            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
+            void* newElements = spv_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
+            (array).elements = newElements; \
+            (array).capacity = newCapacity; \
+        } \
+        (array).elements[(array).length++] = element; \
+    } while (false)
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,9 +179,29 @@ void spv_reserve(Spv_SectionEncoder* encoder, size_t word_count) {
     encoder->words.capacity = newCapacity;
 }
 
+// Tracking utilities used by implementation ///////////////////////////////////
+
+static void spv_track_capability(Spv_Track* track, int capability) {
+    // First, we check if we already have this capability
+    for (size_t i = 0; i < track->capabilities.length; ++i) {
+        if (track->capabilities.elements[i] == capability) return;
+    }
+    SPV_ADD_TO_ARRAY(&track->allocator, track->capabilities, capability);
+}
+
+static void spv_track_extension(Spv_Track* track, int extension) {
+    // First, we check if we already have this extension
+    for (size_t i = 0; i < track->extensions.length; ++i) {
+        if (track->extensions.elements[i] == extension) return;
+    }
+    SPV_ADD_TO_ARRAY(&track->allocator, track->extensions, extension);
+}
+
 #ifdef __cplusplus
 }
 #endif
+
+#undef SPV_ADD_TO_ARRAY
 
 #endif /* SPV_IMPLEMENTATION */
 
