@@ -4,8 +4,8 @@
  * Platform support:
  *  - Windows + MSVC/Clang-cl: Uses CaptureStackBackTrace + DbgHelp
  *  - Windows + MinGW GCC: Uses CaptureStackBackTrace + addr2line
- *  - Linux (GCC, Clang): Uses backtrace() + dladdr()
- *  - macOS (GCC, Clang): Uses backtrace() + dladdr()
+ *  - Linux (GCC, Clang): Uses backtrace() + addr2line
+ *  - macOS (GCC, Clang): Uses backtrace() + atos
  *
  * Configuration:
  *  - STACKTRACE_IMPLEMENTATION: Define in ONE .c file before including
@@ -16,8 +16,8 @@
  * Compile flags:
  *  - Windows + MSVC: Link with dbghelp.lib (auto-linked via pragma)
  *  - Windows + MinGW: Compile with -g, ensure addr2line is in PATH
- *  - Linux: Compile with -rdynamic for symbol names, link with -ldl
- *  - macOS: Link with -ldl
+ *  - Linux: Compile with -g -rdynamic, ensure addr2line is in PATH
+ *  - macOS: Compile with -g, atos is included with Xcode
  *
  * API:
  *  - stacktrace_capture(allocator): Captures the current stack trace
@@ -168,9 +168,16 @@ static char* stacktrace_strdup(StackTrace_Allocator* allocator, const char* str)
             #pragma comment(lib, "dbghelp.lib")
         #endif
     #endif
-#elif defined(STACKTRACE_PLATFORM_LINUX) || defined(STACKTRACE_PLATFORM_MACOS)
+#elif defined(STACKTRACE_PLATFORM_LINUX)
     #include <execinfo.h>
     #include <dlfcn.h>
+    #include <unistd.h>
+#elif defined(STACKTRACE_PLATFORM_MACOS)
+    #include <execinfo.h>
+    #include <dlfcn.h>
+    #include <unistd.h>
+    #include <mach-o/dyld.h>
+    #include <sys/types.h>
 #endif
 
 #include <stdio.h>
@@ -402,7 +409,56 @@ static StackTrace stacktrace_capture_windows(StackTrace_Allocator allocator) {
 
 #endif /* STACKTRACE_PLATFORM_WINDOWS && !STACKTRACE_COMPILER_MINGW */
 
-#if defined(STACKTRACE_PLATFORM_LINUX) || defined(STACKTRACE_PLATFORM_MACOS)
+#if defined(STACKTRACE_PLATFORM_LINUX)
+
+// Linux implementation using addr2line for symbol resolution
+
+// Helper to parse addr2line output: "function_name\nfile:line\n"
+// (same format as MinGW version)
+static void stacktrace_parse_addr2line_linux(StackTrace_Allocator* allocator,
+                                              const char* output,
+                                              char** func_name,
+                                              char** file_name,
+                                              size_t* line_num) {
+    *func_name = NULL;
+    *file_name = NULL;
+    *line_num = 0;
+
+    if (output == NULL || output[0] == '\0') {
+        return;
+    }
+
+    const char* newline = strchr(output, '\n');
+    if (newline == NULL) {
+        return;
+    }
+
+    // Extract function name (skip if it's "??")
+    size_t func_len = (size_t)(newline - output);
+    if (func_len > 0 && !(func_len == 2 && output[0] == '?' && output[1] == '?')) {
+        char* func = (char*)stacktrace_alloc_realloc(allocator, NULL, func_len + 1);
+        memcpy(func, output, func_len);
+        func[func_len] = '\0';
+        *func_name = func;
+    }
+
+    // Parse file:line
+    const char* file_start = newline + 1;
+    const char* colon = strrchr(file_start, ':');
+    if (colon != NULL && colon > file_start) {
+        size_t file_len = (size_t)(colon - file_start);
+        // Skip if file is "??" or empty
+        if (!(file_len == 2 && file_start[0] == '?' && file_start[1] == '?') && file_len > 0) {
+            // Remove trailing newline from file path if present
+            const char* file_end = colon;
+            char* file = (char*)stacktrace_alloc_realloc(allocator, NULL, file_len + 1);
+            memcpy(file, file_start, file_len);
+            file[file_len] = '\0';
+            *file_name = file;
+            *line_num = (size_t)atoi(colon + 1);
+        }
+    }
+}
 
 static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
     StackTrace trace = {0};
@@ -411,53 +467,84 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
 
     void* stack[STACKTRACE_MAX_FRAMES];
 
-    // Capture stack frames (skip this function)
     int frames_count = backtrace(stack, STACKTRACE_MAX_FRAMES);
     if (frames_count <= 1) {
-        // No frames captured (or only this function)
         return trace;
     }
 
-    // Skip the first frame (this function)
     int start_frame = 1;
     int actual_count = frames_count - start_frame;
 
-    // Allocate frames array
     trace.frames = (StackTrace_Frame*)stacktrace_alloc_realloc(&trace.allocator, NULL, (size_t)actual_count * sizeof(StackTrace_Frame));
     trace.length = (size_t)actual_count;
 
-    // Get symbol names using backtrace_symbols for fallback
+    // Get executable path
+    char exe_path[4096];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    int have_exe_path = (len > 0);
+    if (have_exe_path) {
+        exe_path[len] = '\0';
+    }
+
+    // Fallback symbols from backtrace_symbols
     char** symbols = backtrace_symbols(stack, frames_count);
 
     for (int i = 0; i < actual_count; i++) {
         int stack_idx = i + start_frame;
-        Dl_info info;
+        void* addr = stack[stack_idx];
+        char* func_name = NULL;
+        char* file_name = NULL;
+        size_t line_num = 0;
 
-        if (dladdr(stack[stack_idx], &info) && info.dli_sname != NULL) {
-            // We got symbol info from dladdr
-            trace.frames[i].function_name = stacktrace_strdup(&trace.allocator, info.dli_sname);
-        } else if (symbols != NULL && symbols[stack_idx] != NULL) {
-            // Fall back to backtrace_symbols output
-            trace.frames[i].function_name = stacktrace_strdup(&trace.allocator, symbols[stack_idx]);
-        } else {
-            // No symbol info available
-            char unknown_func[32];
-            snprintf(unknown_func, sizeof(unknown_func), "%p", stack[stack_idx]);
-            trace.frames[i].function_name = stacktrace_strdup(&trace.allocator, unknown_func);
+        // Try addr2line first if we have the executable path
+        if (have_exe_path) {
+            char cmd[4200];
+            snprintf(cmd, sizeof(cmd), "addr2line -f -C -e \"%s\" %p 2>/dev/null", exe_path, addr);
+
+            FILE* pipe = popen(cmd, "r");
+            if (pipe != NULL) {
+                char output[2048];
+                size_t total_read = 0;
+                while (total_read < sizeof(output) - 1) {
+                    size_t bytes = fread(output + total_read, 1, sizeof(output) - 1 - total_read, pipe);
+                    if (bytes == 0) break;
+                    total_read += bytes;
+                }
+                output[total_read] = '\0';
+                pclose(pipe);
+
+                stacktrace_parse_addr2line_linux(&trace.allocator, output, &func_name, &file_name, &line_num);
+            }
         }
 
-        // dladdr gives us the shared object path, but not source file/line
-        // Source file and line info require debug info parsing (DWARF), which is complex
-        // For now, we use the shared object name if available
-        if (dladdr(stack[stack_idx], &info) && info.dli_fname != NULL) {
-            trace.frames[i].file_name = stacktrace_strdup(&trace.allocator, info.dli_fname);
-        } else {
-            trace.frames[i].file_name = stacktrace_strdup(&trace.allocator, "<unknown>");
+        // Fall back to dladdr/backtrace_symbols if addr2line didn't work
+        if (func_name == NULL) {
+            Dl_info info;
+            if (dladdr(addr, &info) && info.dli_sname != NULL) {
+                func_name = stacktrace_strdup(&trace.allocator, info.dli_sname);
+            } else if (symbols != NULL && symbols[stack_idx] != NULL) {
+                func_name = stacktrace_strdup(&trace.allocator, symbols[stack_idx]);
+            } else {
+                char unknown_func[32];
+                snprintf(unknown_func, sizeof(unknown_func), "%p", addr);
+                func_name = stacktrace_strdup(&trace.allocator, unknown_func);
+            }
         }
-        trace.frames[i].line_number = 0; // Line numbers require DWARF parsing
+
+        if (file_name == NULL) {
+            Dl_info info;
+            if (dladdr(addr, &info) && info.dli_fname != NULL) {
+                file_name = stacktrace_strdup(&trace.allocator, info.dli_fname);
+            } else {
+                file_name = stacktrace_strdup(&trace.allocator, "<unknown>");
+            }
+        }
+
+        trace.frames[i].function_name = func_name;
+        trace.frames[i].file_name = file_name;
+        trace.frames[i].line_number = line_num;
     }
 
-    // Free the symbols array allocated by backtrace_symbols
     if (symbols != NULL) {
         free(symbols);
     }
@@ -465,7 +552,176 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
     return trace;
 }
 
-#endif /* STACKTRACE_PLATFORM_LINUX || STACKTRACE_PLATFORM_MACOS */
+#endif /* STACKTRACE_PLATFORM_LINUX */
+
+#if defined(STACKTRACE_PLATFORM_MACOS)
+
+// macOS implementation using atos for symbol resolution
+
+// Parse atos output: "function_name (in binary) (file:line)" or "function_name (in binary) + offset"
+static void stacktrace_parse_atos(StackTrace_Allocator* allocator,
+                                   const char* output,
+                                   char** func_name,
+                                   char** file_name,
+                                   size_t* line_num) {
+    *func_name = NULL;
+    *file_name = NULL;
+    *line_num = 0;
+
+    if (output == NULL || output[0] == '\0') {
+        return;
+    }
+
+    // atos format: "function_name (in binary) (file:line)"
+    // or: "function_name (in binary) + offset"
+    // or just: "0x1234" if resolution failed
+
+    // Skip if it looks like an unresolved address
+    if (output[0] == '0' && output[1] == 'x') {
+        return;
+    }
+
+    // Find " (in " to extract function name
+    const char* in_marker = strstr(output, " (in ");
+    if (in_marker != NULL) {
+        size_t func_len = (size_t)(in_marker - output);
+        if (func_len > 0) {
+            char* func = (char*)stacktrace_alloc_realloc(allocator, NULL, func_len + 1);
+            memcpy(func, output, func_len);
+            func[func_len] = '\0';
+            *func_name = func;
+        }
+
+        // Look for source location in parentheses after binary name
+        // Format: (in binary) (file:line)
+        const char* close_paren = strchr(in_marker + 5, ')');
+        if (close_paren != NULL) {
+            const char* src_start = strstr(close_paren, " (");
+            if (src_start != NULL) {
+                src_start += 2; // skip " ("
+                const char* src_end = strchr(src_start, ')');
+                if (src_end != NULL) {
+                    // Find the colon separating file and line
+                    const char* colon = strrchr(src_start, ':');
+                    if (colon != NULL && colon < src_end) {
+                        size_t file_len = (size_t)(colon - src_start);
+                        char* file = (char*)stacktrace_alloc_realloc(allocator, NULL, file_len + 1);
+                        memcpy(file, src_start, file_len);
+                        file[file_len] = '\0';
+                        *file_name = file;
+                        *line_num = (size_t)atoi(colon + 1);
+                    }
+                }
+            }
+        }
+    } else {
+        // No "(in " marker, just use the whole line as function name (trimmed)
+        size_t len = strlen(output);
+        while (len > 0 && (output[len-1] == '\n' || output[len-1] == '\r')) {
+            len--;
+        }
+        if (len > 0) {
+            char* func = (char*)stacktrace_alloc_realloc(allocator, NULL, len + 1);
+            memcpy(func, output, len);
+            func[len] = '\0';
+            *func_name = func;
+        }
+    }
+}
+
+static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
+    StackTrace trace = {0};
+    trace.allocator = allocator;
+    stacktrace_init_allocator(&trace.allocator);
+
+    void* stack[STACKTRACE_MAX_FRAMES];
+
+    int frames_count = backtrace(stack, STACKTRACE_MAX_FRAMES);
+    if (frames_count <= 1) {
+        return trace;
+    }
+
+    int start_frame = 1;
+    int actual_count = frames_count - start_frame;
+
+    trace.frames = (StackTrace_Frame*)stacktrace_alloc_realloc(&trace.allocator, NULL, (size_t)actual_count * sizeof(StackTrace_Frame));
+    trace.length = (size_t)actual_count;
+
+    // Get executable path using _NSGetExecutablePath
+    char exe_path[4096];
+    uint32_t size = sizeof(exe_path);
+    int have_exe_path = (_NSGetExecutablePath(exe_path, &size) == 0);
+
+    // Get process ID for atos
+    pid_t pid = getpid();
+
+    // Fallback symbols
+    char** symbols = backtrace_symbols(stack, frames_count);
+
+    for (int i = 0; i < actual_count; i++) {
+        int stack_idx = i + start_frame;
+        void* addr = stack[stack_idx];
+        char* func_name = NULL;
+        char* file_name = NULL;
+        size_t line_num = 0;
+
+        // Try atos for symbol resolution (requires debug symbols)
+        if (have_exe_path) {
+            char cmd[4300];
+            snprintf(cmd, sizeof(cmd), "atos -o \"%s\" -p %d %p 2>/dev/null", exe_path, pid, addr);
+
+            FILE* pipe = popen(cmd, "r");
+            if (pipe != NULL) {
+                char output[2048];
+                size_t total_read = 0;
+                while (total_read < sizeof(output) - 1) {
+                    size_t bytes = fread(output + total_read, 1, sizeof(output) - 1 - total_read, pipe);
+                    if (bytes == 0) break;
+                    total_read += bytes;
+                }
+                output[total_read] = '\0';
+                pclose(pipe);
+
+                stacktrace_parse_atos(&trace.allocator, output, &func_name, &file_name, &line_num);
+            }
+        }
+
+        // Fall back to dladdr if atos didn't work
+        if (func_name == NULL) {
+            Dl_info info;
+            if (dladdr(addr, &info) && info.dli_sname != NULL) {
+                func_name = stacktrace_strdup(&trace.allocator, info.dli_sname);
+            } else if (symbols != NULL && symbols[stack_idx] != NULL) {
+                func_name = stacktrace_strdup(&trace.allocator, symbols[stack_idx]);
+            } else {
+                char unknown_func[32];
+                snprintf(unknown_func, sizeof(unknown_func), "%p", addr);
+                func_name = stacktrace_strdup(&trace.allocator, unknown_func);
+            }
+        }
+
+        if (file_name == NULL) {
+            Dl_info info;
+            if (dladdr(addr, &info) && info.dli_fname != NULL) {
+                file_name = stacktrace_strdup(&trace.allocator, info.dli_fname);
+            } else {
+                file_name = stacktrace_strdup(&trace.allocator, "<unknown>");
+            }
+        }
+
+        trace.frames[i].function_name = func_name;
+        trace.frames[i].file_name = file_name;
+        trace.frames[i].line_number = line_num;
+    }
+
+    if (symbols != NULL) {
+        free(symbols);
+    }
+
+    return trace;
+}
+
+#endif /* STACKTRACE_PLATFORM_MACOS */
 
 // API /////////////////////////////////////////////////////////////////////////
 
