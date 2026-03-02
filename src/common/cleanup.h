@@ -1,0 +1,29 @@
+// Cleanup header to undefine anything that we don't want to leak into the public API
+
+#undef LIBRARY_CONCAT_IMPL
+#undef LIBRARY_CONCAT
+#undef LIBRARY_FUNC
+#undef LIBRARY_TYPE
+#undef LIBRARY_MACRO
+#undef LIBRARY_ASSERT
+
+#undef LIBRARY_UNIQUE_NAME
+
+#undef DYNARRAY_MEMBERS
+#undef DYNARRAY
+#undef DYNARRAY_LEN
+#undef DYNARRAY_AT
+#undef DYNARRAY_LAST
+#undef DYNARRAY_RESERVE
+#undef DYNARRAY_PUSH
+#undef DYNARRAY_PUSH_RANGE
+#undef DYNARRAY_POP
+#undef DYNARRAY_INSERT
+#undef DYNARRAY_INSERT_RANGE
+#undef DYNARRAY_REMOVE
+#undef DYNARRAY_REMOVE_RANGE
+#undef DYNARRAY_FREE
+
+#undef LIBRARY_NAME_LOWER
+#undef LIBRARY_NAME_CAPITALIZED
+#undef LIBRARY_NAME_UPPER
