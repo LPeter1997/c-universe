@@ -423,8 +423,8 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
     int actual_count = frames_count - start_frame;
 
     // Allocate frames array
-    trace.frames = (StackTrace_Frame*)stacktrace_alloc_realloc(&trace.allocator, NULL, actual_count * sizeof(StackTrace_Frame));
-    trace.length = actual_count;
+    trace.frames = (StackTrace_Frame*)stacktrace_alloc_realloc(&trace.allocator, NULL, (size_t)actual_count * sizeof(StackTrace_Frame));
+    trace.length = (size_t)actual_count;
 
     // Get symbol names using backtrace_symbols for fallback
     char** symbols = backtrace_symbols(stack, frames_count);
