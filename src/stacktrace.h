@@ -67,8 +67,8 @@ typedef struct StackTrace_Allocator {
 } StackTrace_Allocator;
 
 typedef struct StackTrace_Frame {
-    const char* function_name;
-    const char* file_name;
+    char* function_name;
+    char* file_name;
     size_t line_number;
 } StackTrace_Frame;
 
@@ -776,8 +776,8 @@ StackTrace stacktrace_capture(StackTrace_Allocator allocator) {
 
 void stacktrace_free(StackTrace* trace) {
     for (size_t i = 0; i < trace->length; i++) {
-        stacktrace_alloc_free(&trace->allocator, (void*)trace->frames[i].function_name);
-        stacktrace_alloc_free(&trace->allocator, (void*)trace->frames[i].file_name);
+        stacktrace_alloc_free(&trace->allocator, trace->frames[i].function_name);
+        stacktrace_alloc_free(&trace->allocator, trace->frames[i].file_name);
     }
     stacktrace_alloc_free(&trace->allocator, trace->frames);
 }
