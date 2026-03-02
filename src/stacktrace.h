@@ -47,7 +47,7 @@
 #endif
 
 #ifndef STACKTRACE_ASSERT
-    #define STACKTRACE_ASSERT(condition, message) ((void)message, (condition))
+    #define STACKTRACE_ASSERT(condition, message) assert(((void)message, condition))
 #endif
 
 #ifdef __cplusplus
