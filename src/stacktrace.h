@@ -172,6 +172,7 @@ static char* stacktrace_strdup(StackTrace_Allocator* allocator, const char* str)
     #include <execinfo.h>
     #include <dlfcn.h>
     #include <unistd.h>
+    #include <stdint.h>
 #elif defined(STACKTRACE_PLATFORM_MACOS)
     #include <execinfo.h>
     #include <dlfcn.h>
@@ -487,10 +488,10 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
     }
 
     // Get the base load address of the main executable for PIE support
-    // We use dladdr on our own function to get the base address
+    // We use dladdr on the first stack frame to get the base address
     Dl_info self_info;
     void* exe_base = NULL;
-    if (dladdr((void*)stacktrace_capture_posix, &self_info)) {
+    if (frames_count > 0 && dladdr(stack[0], &self_info)) {
         exe_base = self_info.dli_fbase;
     }
 
