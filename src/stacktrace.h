@@ -450,7 +450,7 @@ static void stacktrace_parse_addr2line_linux(StackTrace_Allocator* allocator,
         // Skip if file is "??" or empty
         if (!(file_len == 2 && file_start[0] == '?' && file_start[1] == '?') && file_len > 0) {
             // Remove trailing newline from file path if present
-            const char* file_end = colon;
+            //const char* file_end = colon;
             char* file = (char*)stacktrace_alloc_realloc(allocator, NULL, file_len + 1);
             memcpy(file, file_start, file_len);
             file[file_len] = '\0';
