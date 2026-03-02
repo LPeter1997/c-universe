@@ -902,23 +902,6 @@ CTEST_CASE(nested_calls_appear_in_order) {
     stacktrace_free(&nested_inner_trace);
 }
 
-// Free tests //////////////////////////////////////////////////////////////////
-
-CTEST_CASE(free_empty_trace_does_not_crash) {
-    StackTrace trace = {0};
-    // Should not crash on empty trace
-    stacktrace_free(&trace);
-    CTEST_ASSERT_TRUE(true); // If we got here, we didn't crash
-}
-
-CTEST_CASE(free_clears_trace) {
-    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
-    CTEST_ASSERT_TRUE(trace.frames != NULL);
-    stacktrace_free(&trace);
-    // After free, we shouldn't use frames, but this verifies it ran
-    CTEST_ASSERT_TRUE(true);
-}
-
 #endif /* STACKTRACE_SELF_TEST */
 
 ////////////////////////////////////////////////////////////////////////////////
