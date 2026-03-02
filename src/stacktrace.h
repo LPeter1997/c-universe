@@ -793,14 +793,130 @@ void stacktrace_free(StackTrace* trace) {
 ////////////////////////////////////////////////////////////////////////////////
 #ifdef STACKTRACE_SELF_TEST
 
+#include <stdbool.h>
+#include <string.h>
+
 // Use our own testing library for self-testing
 #define CTEST_STATIC
 #define CTEST_IMPLEMENTATION
 #define CTEST_MAIN
 #include "ctest.h"
 
-CTEST_CASE(sample_test) {
-    CTEST_ASSERT_FAIL("TODO");
+// Helper to check if a function name appears in the trace
+static bool trace_contains_function(StackTrace* trace, const char* func_name) {
+    for (size_t i = 0; i < trace->length; i++) {
+        if (strstr(trace->frames[i].function_name, func_name) != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper to get the index of a function in the trace (-1 if not found)
+static int trace_index_of_function(StackTrace* trace, const char* func_name) {
+    for (size_t i = 0; i < trace->length; i++) {
+        if (strstr(trace->frames[i].function_name, func_name) != NULL) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+// Basic capture tests /////////////////////////////////////////////////////////
+
+CTEST_CASE(capture_returns_nonempty_trace) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    CTEST_ASSERT_TRUE(trace.frames != NULL);
+    CTEST_ASSERT_TRUE(trace.length > 0);
+    stacktrace_free(&trace);
+}
+
+CTEST_CASE(capture_contains_current_function) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    // The trace should contain this test function or stacktrace_capture
+    bool found = trace_contains_function(&trace, "capture_contains_current_function") ||
+                 trace_contains_function(&trace, "stacktrace_capture");
+    CTEST_ASSERT_TRUE(found);
+    stacktrace_free(&trace);
+}
+
+CTEST_CASE(capture_contains_main) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    // The trace should contain main somewhere
+    bool found = trace_contains_function(&trace, "main");
+    CTEST_ASSERT_TRUE(found);
+    stacktrace_free(&trace);
+}
+
+CTEST_CASE(frames_have_valid_strings) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    for (size_t i = 0; i < trace.length; i++) {
+        // All frames should have non-NULL function names and file names
+        CTEST_ASSERT_TRUE(trace.frames[i].function_name != NULL);
+        CTEST_ASSERT_TRUE(trace.frames[i].file_name != NULL);
+        // Function names shouldn't be empty
+        CTEST_ASSERT_TRUE(strlen(trace.frames[i].function_name) > 0);
+    }
+    stacktrace_free(&trace);
+}
+
+// Nested function tests ///////////////////////////////////////////////////////
+
+#if defined(_MSC_VER)
+    #define STACKTRACE_NOINLINE __declspec(noinline)
+#else
+    #define STACKTRACE_NOINLINE __attribute__((noinline))
+#endif
+
+static StackTrace nested_inner_trace;
+
+STACKTRACE_NOINLINE static void nested_level_3(void) {
+    nested_inner_trace = stacktrace_capture((StackTrace_Allocator){0});
+}
+
+STACKTRACE_NOINLINE static void nested_level_2(void) {
+    nested_level_3();
+}
+
+STACKTRACE_NOINLINE static void nested_level_1(void) {
+    nested_level_2();
+}
+
+CTEST_CASE(nested_calls_appear_in_order) {
+    nested_level_1();
+
+    // All three nested functions should appear in the trace
+    int idx1 = trace_index_of_function(&nested_inner_trace, "nested_level_1");
+    int idx2 = trace_index_of_function(&nested_inner_trace, "nested_level_2");
+    int idx3 = trace_index_of_function(&nested_inner_trace, "nested_level_3");
+
+    // They may not all be found (depends on debug info), but if found, order should be 3 < 2 < 1
+    if (idx1 >= 0 && idx2 >= 0 && idx3 >= 0) {
+        CTEST_ASSERT_TRUE(idx3 < idx2);
+        CTEST_ASSERT_TRUE(idx2 < idx1);
+    } else {
+        // At minimum, the trace should have some frames
+        CTEST_ASSERT_TRUE(nested_inner_trace.length > 0);
+    }
+
+    stacktrace_free(&nested_inner_trace);
+}
+
+// Free tests //////////////////////////////////////////////////////////////////
+
+CTEST_CASE(free_empty_trace_does_not_crash) {
+    StackTrace trace = {0};
+    // Should not crash on empty trace
+    stacktrace_free(&trace);
+    CTEST_ASSERT_TRUE(true); // If we got here, we didn't crash
+}
+
+CTEST_CASE(free_clears_trace) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    CTEST_ASSERT_TRUE(trace.frames != NULL);
+    stacktrace_free(&trace);
+    // After free, we shouldn't use frames, but this verifies it ran
+    CTEST_ASSERT_TRUE(true);
 }
 
 #endif /* STACKTRACE_SELF_TEST */

@@ -121,7 +121,10 @@ Compile-And-Run `
     -Defines @("COLLECTIONS_EXAMPLE")
 
 # 7. Stacktrace library
-# NOTE, we just run the example, there's no self-test yet
+Write-Host "running self-test for Stacktrace library..."
+Compile-And-Run `
+    -Sources @("../src/stacktrace.h") `
+    -Defines @("STACKTRACE_STATIC", "STACKTRACE_IMPLEMENTATION", "STACKTRACE_SELF_TEST")
 Write-Host "running example for Stacktrace library..."
 Compile-And-Run `
     -Sources @("../src/stacktrace.h") `
