@@ -119,3 +119,13 @@ Write-Host "running example for Collections library..."
 Compile-And-Run `
     -Sources @("../src/collections.h") `
     -Defines @("COLLECTIONS_EXAMPLE")
+
+# 7. Stacktrace library
+Write-Host "running self-test for Stacktrace library..."
+Compile-And-Run `
+    -Sources @("../src/stacktrace.h") `
+    -Defines @("STACKTRACE_STATIC", "STACKTRACE_IMPLEMENTATION", "STACKTRACE_SELF_TEST")
+Write-Host "running example for Stacktrace library..."
+Compile-And-Run `
+    -Sources @("../src/stacktrace.h") `
+    -Defines @("STACKTRACE_EXAMPLE")

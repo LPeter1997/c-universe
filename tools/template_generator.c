@@ -56,7 +56,7 @@ static void declaration_section(CodeBuilder* cb, char const* libName) {
         "#endif\n"
         "\n"
         "#ifndef %s_ASSERT\n"
-        "    #define %s_ASSERT(condition, message) ((void)message, (condition))\n"
+        "    #define %s_ASSERT(condition, message) assert(((void)message, condition))\n"
         "#endif\n"
         "\n"
         "#ifdef __cplusplus\n"
