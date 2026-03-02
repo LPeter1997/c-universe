@@ -486,6 +486,14 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
         exe_path[len] = '\0';
     }
 
+    // Get the base load address of the main executable for PIE support
+    // We use dladdr on our own function to get the base address
+    Dl_info self_info;
+    void* exe_base = NULL;
+    if (dladdr((void*)stacktrace_capture_posix, &self_info)) {
+        exe_base = self_info.dli_fbase;
+    }
+
     // Fallback symbols from backtrace_symbols
     char** symbols = backtrace_symbols(stack, frames_count);
 
@@ -496,10 +504,36 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
         char* file_name = NULL;
         size_t line_num = 0;
 
-        // Try addr2line first if we have the executable path
-        if (have_exe_path) {
+        // Determine if this address is in the main executable or a shared library
+        Dl_info addr_info;
+        int is_main_exe = 0;
+        void* base_addr = NULL;
+        const char* object_path = exe_path;
+
+        if (dladdr(addr, &addr_info)) {
+            base_addr = addr_info.dli_fbase;
+            // Check if this is the main executable by comparing base addresses
+            if (exe_base != NULL && base_addr == exe_base) {
+                is_main_exe = 1;
+            } else if (addr_info.dli_fname != NULL) {
+                object_path = addr_info.dli_fname;
+            }
+        }
+
+        // Try addr2line if we have a valid object path
+        if (have_exe_path || (addr_info.dli_fname != NULL)) {
             char cmd[4200];
-            snprintf(cmd, sizeof(cmd), "addr2line -f -C -e \"%s\" %p 2>/dev/null", exe_path, addr);
+
+            // For PIE executables, we need to use the offset from the base address
+            // addr2line expects file offsets, not runtime addresses
+            if (base_addr != NULL) {
+                uintptr_t offset = (uintptr_t)addr - (uintptr_t)base_addr;
+                snprintf(cmd, sizeof(cmd), "addr2line -f -C -e \"%s\" 0x%lx 2>/dev/null",
+                         is_main_exe ? exe_path : object_path, (unsigned long)offset);
+            } else {
+                snprintf(cmd, sizeof(cmd), "addr2line -f -C -e \"%s\" %p 2>/dev/null",
+                         exe_path, addr);
+            }
 
             FILE* pipe = popen(cmd, "r");
             if (pipe != NULL) {
@@ -519,9 +553,8 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
 
         // Fall back to dladdr/backtrace_symbols if addr2line didn't work
         if (func_name == NULL) {
-            Dl_info info;
-            if (dladdr(addr, &info) && info.dli_sname != NULL) {
-                func_name = stacktrace_strdup(&trace.allocator, info.dli_sname);
+            if (addr_info.dli_sname != NULL) {
+                func_name = stacktrace_strdup(&trace.allocator, addr_info.dli_sname);
             } else if (symbols != NULL && symbols[stack_idx] != NULL) {
                 func_name = stacktrace_strdup(&trace.allocator, symbols[stack_idx]);
             } else {
@@ -532,9 +565,8 @@ static StackTrace stacktrace_capture_posix(StackTrace_Allocator allocator) {
         }
 
         if (file_name == NULL) {
-            Dl_info info;
-            if (dladdr(addr, &info) && info.dli_fname != NULL) {
-                file_name = stacktrace_strdup(&trace.allocator, info.dli_fname);
+            if (addr_info.dli_fname != NULL) {
+                file_name = stacktrace_strdup(&trace.allocator, addr_info.dli_fname);
             } else {
                 file_name = stacktrace_strdup(&trace.allocator, "<unknown>");
             }
