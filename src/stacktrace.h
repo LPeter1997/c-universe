@@ -226,8 +226,21 @@ CTEST_CASE(sample_test) {
 #define STACKTRACE_STATIC
 #include "stacktrace.h"
 
+static void bar(void) {
+    StackTrace trace = stacktrace_capture((StackTrace_Allocator){0});
+    for (size_t i = 0; i < trace.length; i++) {
+        printf("%s at %s:%zu\n", trace.frames[i].function_name, trace.frames[i].file_name, trace.frames[i].line_number);
+    }
+    stacktrace_free(&trace);
+}
+
+static void foo(void) {
+    bar();
+}
+
 int main(void) {
-    // TODO: Example usage goes here
+    bar();
+    foo();
     return 0;
 }
 
