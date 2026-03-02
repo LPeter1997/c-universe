@@ -30,6 +30,11 @@
  * Check the example section at the end of this file for a full example.
  */
 
+#define LIBRARY_NAME_LOWER sb
+#define LIBRARY_NAME_CAPITALIZED SB
+#define LIBRARY_NAME_UPPER STRING_BUILDER
+#include "common/macros.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
@@ -54,17 +59,7 @@
 extern "C" {
 #endif
 
-/**
- * An allocator struct that allows customizing memory allocation for the string builder.
- */
-typedef struct SB_Allocator {
-    // A user-defined context pointer that will be passed to realloc and free
-    void* context;
-    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
-    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
-    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
-    void(*free)(void* ctx, void* ptr);
-} SB_Allocator;
+#include "common/allocator.h"
 
 /**
  * A simple dynamic string builder.
@@ -280,38 +275,7 @@ STRING_BUILDER_DEF void code_builder_dedent(CodeBuilder* cb);
 extern "C" {
 #endif
 
-// Allocation //////////////////////////////////////////////////////////////////
-
-static void* sb_default_realloc(void* ctx, void* ptr, size_t new_size) {
-    (void)ctx;
-    return realloc(ptr, new_size);
-}
-
-static void sb_default_free(void* ctx, void* ptr) {
-    (void)ctx;
-    free(ptr);
-}
-
-static void sb_init_allocator(SB_Allocator* allocator) {
-    if (allocator->realloc != NULL || allocator->free != NULL) {
-        STRING_BUILDER_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
-        return;
-    }
-    allocator->realloc = sb_default_realloc;
-    allocator->free = sb_default_free;
-}
-
-static void* sb_alloc_realloc(SB_Allocator* allocator, void* ptr, size_t size) {
-    sb_init_allocator(allocator);
-    void* result = allocator->realloc(allocator->context, ptr, size);
-    STRING_BUILDER_ASSERT(result != NULL, "failed to allocate memory");
-    return result;
-}
-
-static void sb_alloc_free(SB_Allocator* allocator, void* ptr) {
-    sb_init_allocator(allocator);
-    allocator->free(allocator->context, ptr);
-}
+#include "common/allocator.c"
 
 // String builder //////////////////////////////////////////////////////////////
 
@@ -321,20 +285,20 @@ void sb_reserve(StringBuilder* sb, size_t capacity) {
     size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
     while (newCapacity < capacity) newCapacity *= 2;
 
-    char* newBuffer = (char*)sb_alloc_realloc(&sb->allocator, sb->buffer, sizeof(char) * newCapacity);
+    char* newBuffer = (char*)sb_allocator_realloc(&sb->allocator, sb->buffer, sizeof(char) * newCapacity);
     sb->buffer = newBuffer;
     sb->capacity = newCapacity;
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
-    char* cstr = (char*)sb_alloc_realloc(&sb->allocator, NULL, sizeof(char) * (sb->length + 1));
+    char* cstr = (char*)sb_allocator_realloc(&sb->allocator, NULL, sizeof(char) * (sb->length + 1));
     memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
     return cstr;
 }
 
 void sb_free(StringBuilder* sb) {
-    sb_alloc_free(&sb->allocator, sb->buffer);
+    sb_allocator_free(&sb->allocator, sb->buffer);
     sb->buffer = NULL;
     sb->length = 0;
     sb->capacity = 0;
@@ -561,10 +525,10 @@ void code_builder_vformat(CodeBuilder* cb, char const* format, va_list args) {
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
     STRING_BUILDER_ASSERT(formattedLength >= 0, "failed to compute formatted string length in code builder");
-    char* formattedStr = (char*)sb_alloc_realloc(&cb->builder.allocator, NULL, sizeof(char) * ((size_t)formattedLength + 1));
+    char* formattedStr = (char*)sb_allocator_realloc(&cb->builder.allocator, NULL, sizeof(char) * ((size_t)formattedLength + 1));
     vsnprintf(formattedStr, (size_t)formattedLength + 1, format, args);
     code_builder_putsn(cb, formattedStr, (size_t)formattedLength);
-    sb_alloc_free(&cb->builder.allocator, formattedStr);
+    sb_allocator_free(&cb->builder.allocator, formattedStr);
 }
 
 void code_builder_indent(CodeBuilder* cb) {
@@ -1358,3 +1322,5 @@ int main(void) {
 }
 
 #endif /* STRING_BUILDER_EXAMPLE */
+
+#include "common/cleanup.h"

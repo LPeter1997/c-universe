@@ -33,6 +33,11 @@
  *  - Customize memory allocation by providing a custom Argparse_Allocator to the root command and use argparse_realloc and argparse_free for memory management
  */
 
+#define LIBRARY_NAME_LOWER argparse
+#define LIBRARY_NAME_CAPITALIZED Argparse
+#define LIBRARY_NAME_UPPER ARGPARSE
+#include "common/macros.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
@@ -57,21 +62,11 @@
 extern "C" {
 #endif
 
+#include "common/allocator.h"
+
 struct Argparse_Command;
 struct Argparse_Argument;
 struct Argparse_Option;
-
-/**
- * An allocator struct that allows customizing memory allocation for the library.
- */
-typedef struct Argparse_Allocator {
-    // A user-defined context pointer that will be passed to realloc and free
-    void* context;
-    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
-    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
-    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
-    void(*free)(void* ctx, void* ptr);
-} Argparse_Allocator;
 
 /**
  * The result of parsing command-line arguments, containing the parsed values and any errors that were encountered during parsing.
@@ -346,35 +341,14 @@ extern "C" {
 
 // Allocation //////////////////////////////////////////////////////////////////
 
-static void* argparse_default_realloc(void* ctx, void* ptr, size_t new_size) {
-    (void)ctx;
-    return realloc(ptr, new_size);
-}
-
-static void argparse_default_free(void* ctx, void* ptr) {
-    (void)ctx;
-    free(ptr);
-}
-
-static void argparse_init_allocator(Argparse_Allocator* allocator) {
-    if (allocator->realloc != NULL || allocator->free != NULL) {
-        ARGPARSE_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
-        return;
-    }
-    allocator->realloc = argparse_default_realloc;
-    allocator->free = argparse_default_free;
-}
+#include "common/allocator.c"
 
 void* argparse_realloc(Argparse_Allocator* allocator, void* ptr, size_t size) {
-    argparse_init_allocator(allocator);
-    void* result = allocator->realloc(allocator->context, ptr, size);
-    ARGPARSE_ASSERT(result != NULL, "failed to allocate memory");
-    return result;
+    return argparse_allocator_realloc(allocator, ptr, size);
 }
 
 void argparse_free(Argparse_Allocator* allocator, void* ptr) {
-    argparse_init_allocator(allocator);
-    allocator->free(allocator->context, ptr);
+    argparse_allocator_free(allocator, ptr);
 }
 
 // Misc ////////////////////////////////////////////////////////////////////////
@@ -2454,3 +2428,5 @@ int main(int argc, char** argv) {
 //   project clean --all
 
 #endif /* ARGPARSE_EXAMPLE */
+
+#include "common/cleanup.h"

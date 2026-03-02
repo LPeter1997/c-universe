@@ -32,6 +32,11 @@
     #define _GNU_SOURCE
 #endif
 
+#define LIBRARY_NAME_LOWER gc
+#define LIBRARY_NAME_CAPITALIZED GC
+#define LIBRARY_NAME_UPPER GC
+#include "common/macros.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
@@ -58,6 +63,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "common/allocator.h"
 
 struct GC_HashBucket;
 struct GC_GlobalSection;
@@ -87,11 +94,7 @@ typedef struct GC_World {
     void* stack_bottom;
 
     // Custom allocation
-    struct {
-        void* context;
-        void*(*realloc)(void* ctx, void* ptr, size_t new_size);
-        void(*free)(void* ctx, void* ptr);
-    } allocator;
+    GC_Allocator allocator;
 } GC_World;
 
 /**
@@ -188,38 +191,7 @@ GC_DEF void gc_free(GC_World* gc, void* mem);
 extern "C" {
 #endif
 
-// Allocation //////////////////////////////////////////////////////////////////
-
-static void* gc_default_realloc(void* ctx, void* ptr, size_t new_size) {
-    (void)ctx;
-    return realloc(ptr, new_size);
-}
-
-static void gc_default_free(void* ctx, void* ptr) {
-    (void)ctx;
-    free(ptr);
-}
-
-static void gc_init_allocator(GC_World* world) {
-    if (world->allocator.realloc != NULL || world->allocator.free != NULL) {
-        GC_ASSERT(world->allocator.realloc != NULL && world->allocator.free != NULL, "both realloc and free function pointers must be set in allocator");
-        return;
-    }
-    world->allocator.realloc = gc_default_realloc;
-    world->allocator.free = gc_default_free;
-}
-
-static void* gc_alloc_realloc(GC_World* world, void* ptr, size_t size) {
-    gc_init_allocator(world);
-    void* result = world->allocator.realloc(world->allocator.context, ptr, size);
-    GC_ASSERT(result != NULL, "failed to allocate memory");
-    return result;
-}
-
-static void gc_alloc_free(GC_World* world, void* ptr) {
-    gc_init_allocator(world);
-    world->allocator.free(world->allocator.context, ptr);
-}
+#include "common/allocator.c"
 
 // General /////////////////////////////////////////////////////////////////////
 
@@ -255,7 +227,7 @@ typedef struct GC_HashBucket {
 static void gc_add_global_section(GC_World* gc, GC_GlobalSection section) {
     // NOTE: It's inefficient to resize each time, but for now we expect at most 2 sections to be present
     ++gc->global_sections.length;
-    gc->global_sections.sections = (GC_GlobalSection*)gc_alloc_realloc(gc, gc->global_sections.sections, sizeof(GC_GlobalSection) * gc->global_sections.length);
+    gc->global_sections.sections = (GC_GlobalSection*)gc_allocator_realloc(&gc->allocator, gc->global_sections.sections, sizeof(GC_GlobalSection) * gc->global_sections.length);
     gc->global_sections.sections[gc->global_sections.length - 1] = section;
     GC_LOG("global section '%s' added (start: %p, end: %p)", section.name, section.start, section.end);
 }
@@ -264,18 +236,18 @@ static void gc_free_data_structures(GC_World* gc) {
     // First, we free hash map
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
-        gc_alloc_free(gc, bucket->entries);
+        gc_allocator_free(&gc->allocator, bucket->entries);
         bucket->entries = NULL;
         bucket->length = 0;
         bucket->capacity = 0;
     }
-    gc_alloc_free(gc, gc->hash_map.buckets);
+    gc_allocator_free(&gc->allocator, gc->hash_map.buckets);
     gc->hash_map.buckets = NULL;
     gc->hash_map.buckets_length = 0;
     gc->hash_map.entry_count = 0;
 
     // Then the sections array
-    gc_alloc_free(gc, gc->global_sections.sections);
+    gc_allocator_free(&gc->allocator, gc->global_sections.sections);
     gc->global_sections.sections = NULL;
     gc->global_sections.length = 0;
 }
@@ -454,7 +426,7 @@ static void gc_add_entry_to_bucket(GC_World* gc, GC_HashBucket* bucket, GC_HashE
         // Need to resize
         bucket->capacity *= 2;
         if (bucket->capacity < 8) bucket->capacity = 8;
-        bucket->entries = (GC_HashEntry*)gc_alloc_realloc(gc, bucket->entries, sizeof(GC_HashEntry) * bucket->capacity);
+        bucket->entries = (GC_HashEntry*)gc_allocator_realloc(&gc->allocator, bucket->entries, sizeof(GC_HashEntry) * bucket->capacity);
     }
     bucket->entries[bucket->length++] = entry;
 }
@@ -475,7 +447,7 @@ static void gc_recompute_sweep_limit(GC_World* gc);
 static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
     if (gc->hash_map.buckets_length == newLength) return;
     // Allocate a new bucket array
-    GC_HashBucket* newBuckets = (GC_HashBucket*)gc_alloc_realloc(gc, NULL, sizeof(GC_HashBucket) * newLength);
+    GC_HashBucket* newBuckets = (GC_HashBucket*)gc_allocator_realloc(&gc->allocator, NULL, sizeof(GC_HashBucket) * newLength);
     // Initialize the new bucket arrays
     memset(newBuckets, 0, sizeof(GC_HashBucket) * newLength);
     // Add each item from each bucket to the new bucket array, essentially redistributing
@@ -490,10 +462,10 @@ static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
             gc_add_entry_to_bucket(gc, &newBuckets[newBucketIndex], entry);
         }
         // The old bucket's elements have been redistributed, free it up
-        gc_alloc_free(gc, oldBucket->entries);
+        gc_allocator_free(&gc->allocator, oldBucket->entries);
     }
     // Free the old bucket, replace entries
-    gc_alloc_free(gc, gc->hash_map.buckets);
+    gc_allocator_free(&gc->allocator, gc->hash_map.buckets);
     gc->hash_map.buckets = newBuckets;
     gc->hash_map.buckets_length = newLength;
     // Recompute sweep limit
@@ -690,7 +662,7 @@ static size_t gc_sweep(GC_World* gc) {
             }
             // Entry is unmarked, we need to free it
             GC_LOG("sweep found unmarked allocation (address: %p size: %zu), freeing it", allocation->base_address, allocation->size);
-            gc_alloc_free(gc, allocation->base_address);
+            gc_allocator_free(&gc->allocator, allocation->base_address);
             freedMem += allocation->size;
             // NOTE: We are allowed to remove like this, this won't trigger shrinking
             gc_remove_from_hash_bucket_at(gc, bucket, j);
@@ -775,7 +747,7 @@ void gc_unpin(GC_World* gc, void* mem) {
 }
 
 void* gc_alloc(GC_World* gc, size_t size) {
-    void* mem = gc_alloc_realloc(gc, NULL, size);
+    void* mem = gc_allocator_realloc(&gc->allocator, NULL, size);
     if (mem == NULL) {
         GC_LOG("gc_alloc failed to allocate memory of size %zu", size);
         return NULL;
@@ -804,7 +776,7 @@ void* gc_realloc(GC_World* gc, void* mem, size_t size) {
     uintptr_t oldMem = (uintptr_t)mem;
 
     // Call out to reallocation
-    void* reMem = gc_alloc_realloc(gc, mem, size);
+    void* reMem = gc_allocator_realloc(&gc->allocator, mem, size);
     if (reMem == NULL) {
         GC_LOG("gc_realloc with memory %p failed to reallocate memory of size %zu to %zu", (void*)oldMem, oldSize, size);
         return NULL;
@@ -839,7 +811,7 @@ void gc_free(GC_World* gc, void* mem) {
     }
 
     GC_LOG("maunally freeing allocation (address: %p, size: %zu)", removedAllocation.base_address, removedAllocation.size);
-    gc_alloc_free(gc, removedAllocation.base_address);
+    gc_allocator_free(&gc->allocator, removedAllocation.base_address);
 }
 
 #ifdef __cplusplus
@@ -1319,3 +1291,5 @@ int main(void) {
 }
 
 #endif /* GC_EXAMPLE */
+
+#include "common/cleanup.h"

@@ -24,6 +24,11 @@
  * Check the example section at the end of this file for a full example.
  */
 
+#define LIBRARY_NAME_LOWER json
+#define LIBRARY_NAME_CAPITALIZED Json
+#define LIBRARY_NAME_UPPER JSON
+#include "common/macros.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 // Declaration section                                                        //
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,17 +53,7 @@
 extern "C" {
 #endif
 
-/**
- * An allocator struct that allows customizing memory allocation for the JSON library.
- */
-typedef struct Json_Allocator {
-    // Context pointer that will be passed to the realloc and free functions
-    void* context;
-    // A function pointer for reallocating memory, with the same semantics as the standard realloc but with an additional context parameter
-    void*(*realloc)(void* ctx, void* ptr, size_t new_size);
-    // A function pointer for freeing memory, with the same semantics as the standard free but with an additional context parameter
-    void(*free)(void* ctx, void* ptr);
-} Json_Allocator;
+#include "common/allocator.h"
 
 /**
  * Extension flags for the JSON parser, allowing it to support common, non-standard JSON features.
@@ -443,7 +438,7 @@ JSON_DEF char const* json_as_string(Json_Value* value);
     do { \
         if ((array).length + 1 > (array).capacity) { \
             size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
-            void* newElements = json_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
+            void* newElements = json_allocator_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
             (array).elements = newElements; \
             (array).capacity = newCapacity; \
         } \
@@ -454,38 +449,7 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 extern "C" {
 #endif
 
-// Allocation //////////////////////////////////////////////////////////////////
-
-static void* json_default_realloc(void* ctx, void* ptr, size_t new_size) {
-    (void)ctx;
-    return realloc(ptr, new_size);
-}
-
-static void json_default_free(void* ctx, void* ptr) {
-    (void)ctx;
-    free(ptr);
-}
-
-static void json_init_allocator(Json_Allocator* allocator) {
-    if (allocator->realloc != NULL || allocator->free != NULL) {
-        JSON_ASSERT(allocator->realloc != NULL && allocator->free != NULL, "both realloc and free function pointers must be set in allocator");
-        return;
-    }
-    allocator->realloc = json_default_realloc;
-    allocator->free = json_default_free;
-}
-
-static void* json_realloc(Json_Allocator* allocator, void* ptr, size_t size) {
-    json_init_allocator(allocator);
-    void* result = allocator->realloc(allocator->context, ptr, size);
-    JSON_ASSERT(result != NULL, "failed to allocate memory");
-    return result;
-}
-
-static void json_free(Json_Allocator* allocator, void* ptr) {
-    json_init_allocator(allocator);
-    allocator->free(allocator->context, ptr);
-}
+#include "common/allocator.c"
 
 // General /////////////////////////////////////////////////////////////////////
 
@@ -537,7 +501,7 @@ static bool json_isxdigit(char ch, int* out_value) {
 
 static char* json_strdup(Json_Allocator* allocator, char const* str) {
     size_t length = strlen(str);
-    char* copy = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
+    char* copy = (char*)json_allocator_realloc(allocator, NULL, (length + 1) * sizeof(char));
     memcpy(copy, str, length * sizeof(char));
     copy[length] = '\0';
     return copy;
@@ -551,7 +515,7 @@ static char* json_format(Json_Allocator* allocator, const char* format, ...) {
     int length = vsnprintf(NULL, 0, format, args_copy);
     JSON_ASSERT(length >= 0, "failed to compute length of formatted string");
     va_end(args_copy);
-    char* buffer = (char*)json_realloc(allocator, NULL, ((size_t)length + 1) * sizeof(char));
+    char* buffer = (char*)json_allocator_realloc(allocator, NULL, ((size_t)length + 1) * sizeof(char));
     vsnprintf(buffer, (size_t)length + 1, format, args);
     va_end(args);
     return buffer;
@@ -608,7 +572,7 @@ typedef struct Json_Parser {
 static void json_parser_report_error(Json_Parser* parser, Json_Position position, char* message) {
     Json_Allocator* allocator = &parser->options.allocator;
     if (parser->sax.on_error == NULL) {
-        json_free(allocator, message);
+        json_allocator_free(allocator, message);
         return;
     }
     Json_Error error = {
@@ -843,7 +807,7 @@ static void json_parse_string_value(Json_Parser* parser) {
     size_t parserToAdvance;
     size_t length = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
     if (sax->on_string != NULL) {
-        char* buffer = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
+        char* buffer = (char*)json_allocator_realloc(allocator, NULL, (length + 1) * sizeof(char));
         json_parse_string_value_impl(parser, buffer, length, &parserToAdvance);
         buffer[length] = '\0';
         sax->on_string(parser->user_data, buffer, length);
@@ -1067,7 +1031,7 @@ static void json_parse_object_value(Json_Parser* parser) {
         size_t keyLength = json_parse_string_value_impl(parser, NULL, 0, &parserToAdvance);
         if (sax->on_object_key != NULL) {
             // We only actually allocate, if the consumer has a callback for the key, otherwise we can just skip it
-            char* keyBuffer = (char*)json_realloc(allocator, NULL, (keyLength + 1) * sizeof(char));
+            char* keyBuffer = (char*)json_allocator_realloc(allocator, NULL, (keyLength + 1) * sizeof(char));
             json_parse_string_value_impl(parser, keyBuffer, keyLength, &parserToAdvance);
             keyBuffer[keyLength] = '\0';
             sax->on_object_key(parser->user_data, keyBuffer, keyLength);
@@ -1202,7 +1166,7 @@ static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value v
         JSON_ASSERT(current->last_key != NULL, "attempted to append value to object without a key in DOM builder");
         json_object_set(&current->value, current->last_key, value);
         // We assume that json_object_set copies, we need to free the key
-        json_free(&builder->document.allocator, current->last_key);
+        json_allocator_free(&builder->document.allocator, current->last_key);
         current->last_key = NULL;
     }
     else {
@@ -1301,7 +1265,7 @@ Json_Document json_parse(char const* json, Json_Options options) {
     // We must have cleaned up everything properly
     JSON_ASSERT(builder.stack.length == 0, "DOM builder stack is not empty after parsing complete document");
     // Deallocate the stack memory, we don't need it anymore
-    json_free(&builder.document.allocator, builder.stack.elements);
+    json_allocator_free(&builder.document.allocator, builder.stack.elements);
     return builder.document;
 }
 
@@ -1449,7 +1413,7 @@ static double json_hash_table_load_factor(Json_Value* value) {
 static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
     Json_Allocator* allocator = &value->value.object.allocator;
     JSON_ASSERT(value->type == JSON_VALUE_OBJECT, "attempted to resize hash table on non-object value");
-    Json_HashBucket* newBuckets = (Json_HashBucket*)json_realloc(allocator, NULL, newBucketCount * sizeof(Json_HashBucket));
+    Json_HashBucket* newBuckets = (Json_HashBucket*)json_allocator_realloc(allocator, NULL, newBucketCount * sizeof(Json_HashBucket));
     memset(newBuckets, 0, newBucketCount * sizeof(Json_HashBucket));
     // Add each item from each bucket to the new bucket array, essentially redistributing
     for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
@@ -1461,10 +1425,10 @@ static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
             JSON_ADD_TO_ARRAY(allocator, *newBucket, entry);
         }
         // Old bucket entries have been moved to the new buckets, we can free the old bucket entries array
-        json_free(allocator, oldBucket->elements);
+        json_allocator_free(allocator, oldBucket->elements);
     }
     // Free the old buckets and replace with the new ones
-    json_free(allocator, value->value.object.buckets);
+    json_allocator_free(allocator, value->value.object.buckets);
     value->value.object.buckets = newBuckets;
     value->value.object.buckets_length = newBucketCount;
 }
@@ -1560,7 +1524,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
             if (out_value != NULL) *out_value = entry->value;
             else json_free_value(&entry->value);
             // Free the key
-            json_free(&object->value.object.allocator, entry->key);
+            json_allocator_free(&object->value.object.allocator, entry->key);
             // Remove the entry by shifting the remaining entries
             memmove(&bucket->elements[i], &bucket->elements[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
             --bucket->length;
@@ -1793,7 +1757,7 @@ char* json_write(Json_Value value, Json_Options options, size_t* out_length) {
     Json_Allocator* allocator = &options.allocator;
     // Simply compute the length, then allocate a buffer of the needed size and write into it
     size_t length = json_swrite(value, options, NULL, 0);
-    char* buffer = (char*)json_realloc(allocator, NULL, (length + 1) * sizeof(char));
+    char* buffer = (char*)json_allocator_realloc(allocator, NULL, (length + 1) * sizeof(char));
     json_swrite(value, options, buffer, length);
     buffer[length] = '\0';
     if (out_length != NULL) *out_length = length;
@@ -1806,7 +1770,7 @@ void json_free_value(Json_Value* value) {
     switch (value->type) {
     case JSON_VALUE_STRING: {
         Json_Allocator* allocator = &value->value.string.allocator;
-        json_free(allocator, value->value.string.data);
+        json_allocator_free(allocator, value->value.string.data);
         // NULL out in case it's shared somewhere
         value->value.string.data = NULL;
         break;
@@ -1816,7 +1780,7 @@ void json_free_value(Json_Value* value) {
             json_free_value(&value->value.array.elements[i]);
         }
         Json_Allocator* allocator = &value->value.array.allocator;
-        json_free(allocator, value->value.array.elements);
+        json_allocator_free(allocator, value->value.array.elements);
         // NULL out in case it's shared somewhere
         value->value.array.elements = NULL;
         value->value.array.length = 0;
@@ -1830,11 +1794,11 @@ void json_free_value(Json_Value* value) {
                 Json_HashEntry* entry = &bucket->elements[j];
                 // Free the value and the key
                 json_free_value(&entry->value);
-                json_free(allocator, entry->key);
+                json_allocator_free(allocator, entry->key);
             }
-            json_free(allocator, bucket->elements);
+            json_allocator_free(allocator, bucket->elements);
         }
-        json_free(allocator, value->value.object.buckets);
+        json_allocator_free(allocator, value->value.object.buckets);
         // NULL out in case it's shared somewhere
         value->value.object.buckets = NULL;
         value->value.object.buckets_length = 0;
@@ -1849,9 +1813,9 @@ void json_free_document(Json_Document* doc) {
     json_free_value(&doc->root);
     // Free each error message
     for (size_t i = 0; i < doc->errors.length; ++i) {
-        json_free(&doc->allocator, doc->errors.elements[i].message);
+        json_allocator_free(&doc->allocator, doc->errors.elements[i].message);
     }
-    json_free(&doc->allocator, doc->errors.elements);
+    json_allocator_free(&doc->allocator, doc->errors.elements);
     doc->errors.elements = NULL;
     doc->errors.length = 0;
     doc->errors.capacity = 0;
@@ -2322,3 +2286,5 @@ int main(void) {
 }
 
 #endif /* JSON_EXAMPLE */
+
+#include "common/cleanup.h"
