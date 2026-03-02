@@ -74,29 +74,12 @@ struct Argparse_Option;
 typedef struct Argparse_Pack {
     // The name of the ran program, which is the first argument.
     char const* program_name;
-
     // The resolved command.
     struct Argparse_Command* command;
-
     // Owned array of options that were parsed for the command
-    struct {
-        // The arguments that were parsed for the command.
-        struct Argparse_Argument* elements;
-        // The number of parsed arguments.
-        size_t length;
-        // The capacity of the elements array.
-        size_t capacity;
-    } arguments;
-
+    DYNARRAY(struct Argparse_Argument) arguments;
     // Owned list of errors
-    struct {
-        // The error messages that were produced.
-        char** elements;
-        // The number of error messages.
-        size_t length;
-        // The capacity of the errors array.
-        size_t capacity;
-    } errors;
+    DYNARRAY(char*) errors;
 } Argparse_Pack;
 
 /**
@@ -159,25 +142,10 @@ typedef struct Argparse_Command {
     char const* description;
     // The handler function corresponding to this command. Can be NULL.
     Argparse_HandlerFn* handler_fn;
-
-    struct {
-        // The options that this command accepts. This includes both named options and positional arguments.
-        Argparse_Option* elements;
-        // The number of options.
-        size_t length;
-        // The capacity of the options array.
-        size_t capacity;
-    } options;
-
-    struct {
-        // The subcommands that this command accepts.
-        struct Argparse_Command* elements;
-        // The number of subcommands.
-        size_t length;
-        // The capacity of the subcommands array.
-        size_t capacity;
-    } subcommands;
-
+    // The options that this command accepts.
+    DYNARRAY(Argparse_Option) options;
+    // The subcommands that this command accepts.
+    DYNARRAY(struct Argparse_Command) subcommands;
     // Optional custom allocator. Only specify for the root command before adding subcommands, it will be inherited by all subcommands
     // when they are registered. Mixing the command tree with different allocators is UB by the library.
     Argparse_Allocator allocator;
@@ -189,14 +157,8 @@ typedef struct Argparse_Command {
 typedef struct Argparse_Argument {
     // The option that was parsed. This points to the corresponding option in the command's options array.
     Argparse_Option* option;
-    struct {
-        // The values that were provided for the option.
-        void** elements;
-        // The number of values provided.
-        size_t length;
-        // The capacity of the values array.
-        size_t capacity;
-    } values;
+    // The specified values for this argument.
+    DYNARRAY(void*) values;
 } Argparse_Argument;
 
 /**
@@ -324,17 +286,6 @@ ARGPARSE_DEF void argparse_free(Argparse_Allocator* allocator, void* ptr);
 #include <string.h>
 #include <stdlib.h>
 
-#define ARGPARSE_ADD_TO_ARRAY(allocator, array, element) \
-    do { \
-        if ((array).length + 1 > (array).capacity) { \
-            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
-            void* newElements = argparse_realloc((allocator), (array).elements, newCapacity * sizeof(*((array).elements))); \
-            (array).elements = newElements; \
-            (array).capacity = newCapacity; \
-        } \
-        (array).elements[(array).length++] = element; \
-    } while (false)
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -363,8 +314,8 @@ static bool argparse_is_positional_option(Argparse_Option* option) {
 }
 
 static Argparse_Command* argparse_find_subcommand_with_name_n(Argparse_Command* command, char const* name, size_t nameLength) {
-    for (size_t i = 0; i < command->subcommands.length; ++i) {
-        Argparse_Command* subcommand = &command->subcommands.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(command->subcommands); ++i) {
+        Argparse_Command* subcommand = &DYNARRAY_AT(command->subcommands, i);
         if (strlen(subcommand->name) == nameLength && strncmp(subcommand->name, name, nameLength) == 0) {
             return subcommand;
         }
@@ -373,8 +324,8 @@ static Argparse_Command* argparse_find_subcommand_with_name_n(Argparse_Command* 
 }
 
 static Argparse_Option* argparse_find_option_with_name_n(Argparse_Command* command, char const* name, size_t nameLength) {
-    for (size_t i = 0; i < command->options.length; ++i) {
-        Argparse_Option* option = &command->options.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(command->options); ++i) {
+        Argparse_Option* option = &DYNARRAY_AT(command->options, i);
         if ((option->long_name != NULL && strlen(option->long_name) == nameLength && strncmp(option->long_name, name, nameLength) == 0)
          || (option->short_name != NULL && strlen(option->short_name) == nameLength && strncmp(option->short_name, name, nameLength) == 0)) {
             return option;
@@ -384,15 +335,15 @@ static Argparse_Option* argparse_find_option_with_name_n(Argparse_Command* comma
 }
 
 static void argparse_add_error(Argparse_Pack* pack, char* error) {
-    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, pack->errors, error);
+    DYNARRAY_PUSH(&pack->command->allocator, pack->errors, error);
 }
 
 static void argparse_add_argument(Argparse_Pack* pack, Argparse_Argument arg) {
-    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, pack->arguments, arg);
+    DYNARRAY_PUSH(&pack->command->allocator, pack->arguments, arg);
 }
 
 static void argparse_add_value_to_argument(Argparse_Pack* pack, Argparse_Argument* argument, void* value) {
-    ARGPARSE_ADD_TO_ARRAY(&pack->command->allocator, argument->values, value);
+    DYNARRAY_PUSH(&pack->command->allocator, argument->values, value);
 }
 
 // Tokenization logic //////////////////////////////////////////////////////////
@@ -428,7 +379,7 @@ static bool argparse_argument_can_take_value(Argparse_Argument* argument) {
         return false;
     case ARGPARSE_ARITY_ZERO_OR_ONE:
     case ARGPARSE_ARITY_EXACTLY_ONE:
-        return argument->values.length < 1;
+        return DYNARRAY_LEN(argument->values) < 1;
     case ARGPARSE_ARITY_ZERO_OR_MORE:
     case ARGPARSE_ARITY_ONE_OR_MORE:
         return true;
@@ -453,45 +404,37 @@ typedef struct Argparse_Tokenizer {
     int argc;
     char** argv;
     size_t argvIndex;
-    struct {
-        Argparse_Response* elements;
-        size_t capacity;
-        size_t length;
-    } responseStack;
+    DYNARRAY(Argparse_Response) responseStack;
     Argparse_Token currentToken;
 } Argparse_Tokenizer;
 
 static void argparse_tokenizer_free(Argparse_Tokenizer* tokenizer) {
     Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
-    for (size_t i = 0; i < tokenizer->responseStack.length; ++i) {
-        Argparse_Response* response = &tokenizer->responseStack.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(tokenizer->responseStack); ++i) {
+        Argparse_Response* response = &DYNARRAY_AT(tokenizer->responseStack, i);
         argparse_free(allocator, response->text);
     }
-    argparse_free(allocator, tokenizer->responseStack.elements);
-    tokenizer->responseStack.elements = NULL;
-    tokenizer->responseStack.length = 0;
-    tokenizer->responseStack.capacity = 0;
+    DYNARRAY_FREE(allocator, tokenizer->responseStack);
 }
 
 static Argparse_Response* argparse_tokenizer_current_response(Argparse_Tokenizer* tokenizer) {
-    if (tokenizer->responseStack.length == 0) return NULL;
-    return &tokenizer->responseStack.elements[tokenizer->responseStack.length - 1];
+    if (DYNARRAY_LEN(tokenizer->responseStack) == 0) return NULL;
+    return &DYNARRAY_AT(tokenizer->responseStack, DYNARRAY_LEN(tokenizer->responseStack) - 1);
 }
 
 static void argparse_tokenizer_push_response(Argparse_Tokenizer* tokenizer, Argparse_Response response) {
     Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
-    ARGPARSE_ADD_TO_ARRAY(allocator, tokenizer->responseStack, response);
+    DYNARRAY_PUSH(allocator, tokenizer->responseStack, response);
 }
 
 static void argparse_tokenizer_pop_response(Argparse_Tokenizer* tokenizer) {
     Argparse_Allocator* allocator = &tokenizer->pack->command->allocator;
-    Argparse_Response* toPop = argparse_tokenizer_current_response(tokenizer);
-    ARGPARSE_ASSERT(toPop != NULL, "cannot pop response, response stack is empty");
-    --tokenizer->responseStack.length;
-    argparse_free(allocator, toPop->text);
-    toPop->text = NULL;
-    toPop->length = 0;
-    toPop->index = 0;
+    ARGPARSE_ASSERT(DYNARRAY_LEN(tokenizer->responseStack) > 0, "cannot pop response, response stack is empty");
+    Argparse_Response top = DYNARRAY_POP(tokenizer->responseStack);
+    argparse_free(allocator, top.text);
+    top.text = NULL;
+    top.length = 0;
+    top.index = 0;
 }
 
 static void argparse_tokenizer_read_current_from_response(Argparse_Tokenizer* tokenizer) {
@@ -536,7 +479,7 @@ start:
 // Does not do any extra handling
 // If the source is exhausted, sets currentToken.text to NULL
 static void argparse_tokenizer_read_current(Argparse_Tokenizer* tokenizer) {
-    if (tokenizer->responseStack.length == 0) {
+    if (DYNARRAY_LEN(tokenizer->responseStack) == 0) {
         Argparse_Token* token = &tokenizer->currentToken;
         // Easy, read from argv
         if (tokenizer->argvIndex >= (size_t)tokenizer->argc) {
@@ -635,7 +578,7 @@ start:
         // Try to read the current token
         argparse_tokenizer_read_current(tokenizer);
         // If we still don't have a token and the response stack is empty, we are done
-        if (tokenizer->currentToken.text == NULL && tokenizer->responseStack.length == 0) return false;
+        if (tokenizer->currentToken.text == NULL && DYNARRAY_LEN(tokenizer->responseStack) == 0) return false;
         // If we got a token, check if it's a response file token and handle it if so
         if (tokenizer->currentToken.text != NULL) {
             if (argparse_tokenizer_handle_current_as_response(tokenizer)) {
@@ -717,9 +660,9 @@ static Argparse_Argument* argparse_try_get_or_add_option_by_name(Argparse_Pack* 
     if (option == NULL) return NULL;
 
     // The command accepts such argument, check if we already added it, if so, return that
-    for (size_t i = 0; i < pack->arguments.length; ++i) {
-        if (pack->arguments.elements[i].option == option) {
-            return &pack->arguments.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(pack->arguments); ++i) {
+        if (DYNARRAY_AT(pack->arguments, i).option == option) {
+            return &DYNARRAY_AT(pack->arguments, i);
         }
     }
     // No match, we need to add a new argument for this option
@@ -728,7 +671,7 @@ static Argparse_Argument* argparse_try_get_or_add_option_by_name(Argparse_Pack* 
         .values = { 0 },
     };
     argparse_add_argument(pack, argument);
-    return &pack->arguments.elements[pack->arguments.length - 1];
+    return &DYNARRAY_AT(pack->arguments, DYNARRAY_LEN(pack->arguments) - 1);
 }
 
 static Argparse_Argument* argparse_try_add_option_argument(Argparse_Pack* pack, char* name, size_t nameLength) {
@@ -793,15 +736,15 @@ static void argparse_parse_value_to_argument(Argparse_Pack* pack, Argparse_Argum
 
 static Argparse_Argument* argparse_get_current_positional_argument_for_value(Argparse_Pack* pack) {
     // Look through the positional arguments in order they are declared in the command
-    for (size_t optionArgIndex = 0; optionArgIndex < pack->command->options.length; ++optionArgIndex) {
-        Argparse_Option* option = &pack->command->options.elements[optionArgIndex];
+    for (size_t optionArgIndex = 0; optionArgIndex < DYNARRAY_LEN(pack->command->options); ++optionArgIndex) {
+        Argparse_Option* option = &DYNARRAY_AT(pack->command->options, optionArgIndex);
         if (!argparse_is_positional_option(option)) continue;
 
         // This is a positional argument, look for the corresponding argument in the pack
         Argparse_Argument* argument = NULL;
-        for (size_t i = 0; i < pack->arguments.length; ++i) {
-            if (pack->arguments.elements[i].option == option) {
-                argument = &pack->arguments.elements[i];
+        for (size_t i = 0; i < DYNARRAY_LEN(pack->arguments); ++i) {
+            if (DYNARRAY_AT(pack->arguments, i).option == option) {
+                argument = &DYNARRAY_AT(pack->arguments, i);
                 break;
             }
         }
@@ -812,7 +755,7 @@ static Argparse_Argument* argparse_get_current_positional_argument_for_value(Arg
                 .values = { 0 },
             };
             argparse_add_argument(pack, newArgument);
-            return &pack->arguments.elements[pack->arguments.length - 1];
+            return &DYNARRAY_AT(pack->arguments, DYNARRAY_LEN(pack->arguments) - 1);
         }
         // This argument is already present, check if it can take more values
         if (argparse_argument_can_take_value(argument)) {
@@ -826,7 +769,7 @@ static Argparse_Argument* argparse_get_current_positional_argument_for_value(Arg
 
 static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option* option, Argparse_Argument* argument) {
     Argparse_Allocator* allocator = &pack->command->allocator;
-    size_t valueCount = (argument != NULL) ? argument->values.length : 0;
+    size_t valueCount = (argument != NULL) ? DYNARRAY_LEN(argument->values) : 0;
     Argparse_Arity arity = option->arity;
     bool valid = false;
     switch (arity) {
@@ -858,8 +801,8 @@ static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option*
         if (optionName == NULL) {
             // Positional argument, we report the index instead of the name
             size_t positionalIndex = 0;
-            for (size_t i = 0; i < pack->command->options.length; ++i) {
-                if (&pack->command->options.elements[i] == option) {
+            for (size_t i = 0; i < DYNARRAY_LEN(pack->command->options); ++i) {
+                if (&DYNARRAY_AT(pack->command->options, i) == option) {
                     positionalIndex = i + 1;
                     break;
                 }
@@ -877,10 +820,10 @@ static void argparse_validate_option_arity(Argparse_Pack* pack, Argparse_Option*
 
 int argparse_run(int argc, char** argv, Argparse_Command* root) {
     Argparse_Pack pack = argparse_parse(argc, argv, root);
-    if (pack.errors.length > 0) {
+    if (DYNARRAY_LEN(pack.errors) > 0) {
         // Print errors
-        for (size_t i = 0; i < pack.errors.length; ++i) {
-            fprintf(stderr, "Error: %s\n", pack.errors.elements[i]);
+        for (size_t i = 0; i < DYNARRAY_LEN(pack.errors); ++i) {
+            fprintf(stderr, "Error: %s\n", DYNARRAY_AT(pack.errors, i));
         }
         // Print usage
         argparse_print_usage(root);
@@ -900,20 +843,20 @@ int argparse_run(int argc, char** argv, Argparse_Command* root) {
 
 void argparse_print_usage(Argparse_Command* command) {
     fprintf(stderr, "Usage: %s", command->name);
-    if (command->options.length > 0) {
+    if (DYNARRAY_LEN(command->options) > 0) {
         fprintf(stderr, " [options]");
     }
-    if (command->subcommands.length > 0) {
+    if (DYNARRAY_LEN(command->subcommands) > 0) {
         fprintf(stderr, " <subcommand>");
     }
     fprintf(stderr, "\n");
     if (command->description != NULL) {
         fprintf(stderr, "%s\n", command->description);
     }
-    if (command->options.length > 0) {
+    if (DYNARRAY_LEN(command->options) > 0) {
         fprintf(stderr, "Options:\n");
-        for (size_t i = 0; i < command->options.length; ++i) {
-            Argparse_Option* option = &command->options.elements[i];
+        for (size_t i = 0; i < DYNARRAY_LEN(command->options); ++i) {
+            Argparse_Option* option = &DYNARRAY_AT(command->options, i);
             char optionNames[128] = { 0 };
             if (option->short_name != NULL) {
                 strcat(optionNames, option->short_name);
@@ -927,10 +870,10 @@ void argparse_print_usage(Argparse_Command* command) {
             fprintf(stderr, "  %-20s %s\n", optionNames, option->description != NULL ? option->description : "");
         }
     }
-    if (command->subcommands.length > 0) {
+    if (DYNARRAY_LEN(command->subcommands) > 0) {
         fprintf(stderr, "Subcommands:\n");
-        for (size_t i = 0; i < command->subcommands.length; ++i) {
-            Argparse_Command* subcommand = &command->subcommands.elements[i];
+        for (size_t i = 0; i < DYNARRAY_LEN(command->subcommands); ++i) {
+            Argparse_Command* subcommand = &DYNARRAY_AT(command->subcommands, i);
             fprintf(stderr, "  %-20s %s\n", subcommand->name, subcommand->description != NULL ? subcommand->description : "");
         }
     }
@@ -989,7 +932,7 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
             // Has to be a value for prev. option
             if (currentArgument == NULL) {
                 // NOTE: We just throw it away, error should have been reported
-                ARGPARSE_ASSERT(pack.errors.length > 0, "an error was expected to be reported for throwaway value");
+                ARGPARSE_ASSERT(DYNARRAY_LEN(pack.errors) > 0, "an error was expected to be reported for throwaway value");
                 continue;
             }
             else {
@@ -1048,12 +991,12 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
     argparse_tokenizer_free(&tokenizer);
 
     // Now we need to validate the arity of each option
-    for (size_t i = 0; i < pack.command->options.length; ++i) {
-        Argparse_Option* option = &pack.command->options.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(pack.command->options); ++i) {
+        Argparse_Option* option = &DYNARRAY_AT(pack.command->options, i);
         Argparse_Argument* argument = NULL;
-        for (size_t j = 0; j < pack.arguments.length; ++j) {
-            if (pack.arguments.elements[j].option == option) {
-                argument = &pack.arguments.elements[j];
+        for (size_t j = 0; j < DYNARRAY_LEN(pack.arguments); ++j) {
+            if (DYNARRAY_AT(pack.arguments, j).option == option) {
+                argument = &DYNARRAY_AT(pack.arguments, j);
                 break;
             }
         }
@@ -1064,9 +1007,9 @@ Argparse_Pack argparse_parse(int argc, char** argv, Argparse_Command* root) {
 }
 
 Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) {
-    for (size_t i = 0; i < pack->arguments.length; ++i) {
-        if (argparse_option_has_name(pack->arguments.elements[i].option, name)) {
-            return &pack->arguments.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(pack->arguments); ++i) {
+        if (argparse_option_has_name(DYNARRAY_AT(pack->arguments, i).option, name)) {
+            return &DYNARRAY_AT(pack->arguments, i);
         }
     }
     return NULL;
@@ -1074,14 +1017,14 @@ Argparse_Argument* argparse_get_argument(Argparse_Pack* pack, char const* name) 
 
 Argparse_Argument* argparse_get_positional(Argparse_Pack* pack, size_t position) {
     size_t positionalIndex = 0;
-    for (size_t i = 0; i < pack->command->options.length; ++i) {
-        Argparse_Option* option = &pack->command->options.elements[i];
+    for (size_t i = 0; i < DYNARRAY_LEN(pack->command->options); ++i) {
+        Argparse_Option* option = &DYNARRAY_AT(pack->command->options, i);
         if (!argparse_is_positional_option(option)) continue;
         if (positionalIndex == position) {
             // Found the right positional index, look for the corresponding argument
-            for (size_t j = 0; j < pack->arguments.length; ++j) {
-                if (pack->arguments.elements[j].option == option) {
-                    return &pack->arguments.elements[j];
+            for (size_t j = 0; j < DYNARRAY_LEN(pack->arguments); ++j) {
+                if (DYNARRAY_AT(pack->arguments, j).option == option) {
+                    return &DYNARRAY_AT(pack->arguments, j);
                 }
             }
             // No argument found, this means this positional was not provided, we return NULL
@@ -1097,41 +1040,38 @@ void argparse_free_pack(Argparse_Pack* pack) {
     Argparse_Allocator* allocator = &pack->command->allocator;
     // Free all allocated memory for the parsed arguments
     // Do not deallocate the command or options, as they are owned by the command hierarchy
-    for (size_t i = 0; i < pack->arguments.length; ++i) {
-        Argparse_Argument* argument = &pack->arguments.elements[i];
-        for (size_t j = 0; j < argument->values.length; ++j) {
-            argparse_free(allocator, argument->values.elements[j]);
+    for (size_t i = 0; i < DYNARRAY_LEN(pack->arguments); ++i) {
+        Argparse_Argument* argument = &DYNARRAY_AT(pack->arguments, i);
+        for (size_t j = 0; j < DYNARRAY_LEN(argument->values); ++j) {
+            argparse_free(allocator, DYNARRAY_AT(argument->values, j));
         }
-        argparse_free(allocator, argument->values.elements);
+        DYNARRAY_FREE(allocator, argument->values);
     }
-    argparse_free(allocator, pack->arguments.elements);
-    for (size_t i = 0; i < pack->errors.length; ++i) {
-        argparse_free(allocator, pack->errors.elements[i]);
+    DYNARRAY_FREE(allocator, pack->arguments);
+    for (size_t i = 0; i < DYNARRAY_LEN(pack->errors); ++i) {
+        argparse_free(allocator, DYNARRAY_AT(pack->errors, i));
     }
-    argparse_free(allocator, pack->errors.elements);
+    DYNARRAY_FREE(allocator, pack->errors);
 }
 
 void argparse_add_option(Argparse_Command* command, Argparse_Option option) {
-    ARGPARSE_ADD_TO_ARRAY(&command->allocator, command->options, option);
+    DYNARRAY_PUSH(&command->allocator, command->options, option);
 }
 
 void argparse_add_subcommand(Argparse_Command* command, Argparse_Command subcommand) {
     // Inherit allocator
     subcommand.allocator = command->allocator;
-    ARGPARSE_ADD_TO_ARRAY(&subcommand.allocator, command->subcommands, subcommand);
+    DYNARRAY_PUSH(&subcommand.allocator, command->subcommands, subcommand);
 }
 
 void argparse_free_command(Argparse_Command* command) {
     // We assume name and description are static, so we don't free them
     // We only free the options and subcommands arrays, as well as the subcommands themselves
-    for (size_t i = 0; i < command->subcommands.length; ++i) {
-        argparse_free_command(&command->subcommands.elements[i]);
+    for (size_t i = 0; i < DYNARRAY_LEN(command->subcommands); ++i) {
+        argparse_free_command(&DYNARRAY_AT(command->subcommands, i));
     }
-    argparse_free(&command->allocator, command->subcommands.elements);
-    argparse_free(&command->allocator, command->options.elements);
-    // We null out the pointers to avoid double-free, in case this command is shared in the hierarchy
-    command->subcommands.elements = NULL;
-    command->options.elements = NULL;
+    DYNARRAY_FREE(&command->allocator, command->subcommands);
+    DYNARRAY_FREE(&command->allocator, command->options);
 }
 
 char* argparse_format(Argparse_Allocator* allocator, char const* format, ...) {
@@ -1156,8 +1096,6 @@ char* argparse_vformat(Argparse_Allocator* allocator, char const* format, va_lis
 #ifdef __cplusplus
 }
 #endif
-
-#undef ARGPARSE_ADD_TO_ARRAY
 
 #endif /* ARGPARSE_IMPLEMENTATION */
 

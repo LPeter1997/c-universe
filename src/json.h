@@ -160,9 +160,7 @@ typedef struct Json_Value {
             Json_Allocator allocator;
         } string;
         struct {
-            struct Json_Value* elements;
-            size_t length;
-            size_t capacity;
+            DYNARRAY_MEMBERS(struct Json_Value);
             Json_Allocator allocator;
         } array;
         struct {
@@ -179,11 +177,7 @@ typedef struct Json_Value {
  */
 typedef struct Json_Document {
     Json_Value root;
-    struct {
-        Json_Error* elements;
-        size_t length;
-        size_t capacity;
-    } errors;
+    DYNARRAY(Json_Error) errors;
     Json_Allocator allocator;
 } Json_Document;
 
@@ -434,17 +428,6 @@ JSON_DEF char const* json_as_string(Json_Value* value);
 #include <stdlib.h>
 #include <string.h>
 
-#define JSON_ADD_TO_ARRAY(allocator, array, element) \
-    do { \
-        if ((array).length + 1 > (array).capacity) { \
-            size_t newCapacity = ((array).capacity == 0) ? 8 : ((array).capacity * 2); \
-            void* newElements = json_allocator_realloc((allocator), (array).elements, newCapacity * sizeof(*(array).elements)); \
-            (array).elements = newElements; \
-            (array).capacity = newCapacity; \
-        } \
-        (array).elements[(array).length++] = element; \
-    } while (false)
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -460,9 +443,7 @@ typedef struct Json_HashEntry {
 } Json_HashEntry;
 
 typedef struct Json_HashBucket {
-    Json_HashEntry* elements;
-    size_t length;
-    size_t capacity;
+    DYNARRAY_MEMBERS(Json_HashEntry);
 } Json_HashBucket;
 
 static const double Json_HashTable_UpsizeLoadFactor = 0.75;
@@ -1128,23 +1109,19 @@ typedef struct Json_DomFrame {
 } Json_DomFrame;
 
 typedef struct Json_DomBuilder {
-    struct {
-        Json_DomFrame* elements;
-        size_t length;
-        size_t capacity;
-    } stack;
+    DYNARRAY(Json_DomFrame) stack;
     Json_Document document;
     bool document_root_set;
 } Json_DomBuilder;
 
 static void json_dom_builder_push(Json_DomBuilder* builder, Json_Value value) {
     Json_DomFrame frame = { .value = value, .last_key = NULL };
-    JSON_ADD_TO_ARRAY(&builder->document.allocator, builder->stack, frame);
+    DYNARRAY_PUSH(&builder->document.allocator, builder->stack, frame);
 }
 
 static Json_Value json_dom_builder_pop(Json_DomBuilder* builder) {
     JSON_ASSERT(builder->stack.length > 0, "attempted to pop from empty DOM builder stack");
-    Json_DomFrame frame = builder->stack.elements[--builder->stack.length];
+    Json_DomFrame frame = DYNARRAY_POP(builder->stack);
     JSON_ASSERT(frame.last_key == NULL, "DOM builder frame has pending object key on pop");
     return frame.value;
 }
@@ -1158,7 +1135,7 @@ static void json_dom_builder_append_value(Json_DomBuilder* builder, Json_Value v
         return;
     }
     // Otherwise, we need to append it to the current container on top of the stack
-    Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
+    Json_DomFrame* current = &DYNARRAY_AT(builder->stack, builder->stack.length - 1);
     if (current->value.type == JSON_VALUE_ARRAY) {
         json_array_append(&current->value, value);
     }
@@ -1227,7 +1204,7 @@ static void json_dom_builder_on_object_key(void* user_data, char* key, size_t le
     (void)length;
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     // The key is owned already, we just need to keep track of it until we get the value
-    Json_DomFrame* current = &builder->stack.elements[builder->stack.length - 1];
+    Json_DomFrame* current = &DYNARRAY_AT(builder->stack, builder->stack.length - 1);
     current->last_key = key;
 }
 
@@ -1240,7 +1217,7 @@ static void json_dom_builder_on_object_end(void* user_data) {
 static void json_dom_builder_on_error(void* user_data, Json_Error error) {
     Json_DomBuilder* builder = (Json_DomBuilder*)user_data;
     Json_Document* doc = &builder->document;
-    JSON_ADD_TO_ARRAY(&builder->document.allocator, doc->errors, error);
+    DYNARRAY_PUSH(&builder->document.allocator, doc->errors, error);
 }
 
 Json_Document json_parse(char const* json, Json_Options options) {
@@ -1265,7 +1242,7 @@ Json_Document json_parse(char const* json, Json_Options options) {
     // We must have cleaned up everything properly
     JSON_ASSERT(builder.stack.length == 0, "DOM builder stack is not empty after parsing complete document");
     // Deallocate the stack memory, we don't need it anymore
-    json_allocator_free(&builder.document.allocator, builder.stack.elements);
+    DYNARRAY_FREE(&builder.document.allocator, builder.stack);
     return builder.document;
 }
 
@@ -1284,7 +1261,7 @@ Json_Value json_copy(Json_Value* value) {
     case JSON_VALUE_ARRAY: {
         Json_Value array = json_array(value->value.array.allocator);
         for (size_t i = 0; i < value->value.array.length; ++i) {
-            json_array_append(&array, json_copy(&value->value.array.elements[i]));
+            json_array_append(&array, json_copy(&DYNARRAY_AT(value->value.array, i)));
         }
         return array;
     }
@@ -1293,7 +1270,7 @@ Json_Value json_copy(Json_Value* value) {
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->elements[j];
+                Json_HashEntry* entry = &DYNARRAY_AT(*bucket, j);
                 json_object_set(&object, entry->key, json_copy(&entry->value));
             }
         }
@@ -1360,7 +1337,7 @@ Json_Value json_null(void) {
 
 void json_array_append(Json_Value* array, Json_Value value) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to append to non-array value");
-    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
+    DYNARRAY_PUSH(&array->value.array.allocator, array->value.array, value);
 }
 
 void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
@@ -1372,24 +1349,23 @@ void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
         return;
     }
     // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
-    JSON_ADD_TO_ARRAY(&array->value.array.allocator, array->value.array, value);
-    memmove(&array->value.array.elements[index + 1], &array->value.array.elements[index], (array->value.array.length - index - 1) * sizeof(Json_Value));
-    array->value.array.elements[index] = value;
+    DYNARRAY_PUSH(&array->value.array.allocator, array->value.array, value);
+    memmove(&DYNARRAY_AT(array->value.array, index + 1), &DYNARRAY_AT(array->value.array, index), (array->value.array.length - index - 1) * sizeof(Json_Value));
+    DYNARRAY_AT(array->value.array, index) = value;
 }
 
 Json_Value* json_array_at(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to get index on non-array value");
     JSON_ASSERT(index < array->value.array.length, "attempted to get index out of bounds in array");
-    return &array->value.array.elements[index];
+    return &DYNARRAY_AT(array->value.array, index);
 }
 
 void json_array_remove(Json_Value* array, size_t index) {
     JSON_ASSERT(array->type == JSON_VALUE_ARRAY, "attempted to remove index on non-array value");
     JSON_ASSERT(index < array->value.array.length, "attempted to remove index out of bounds in array");
-    Json_Value* elements = array->value.array.elements;
     // Free the value being removed
-    json_free_value(&elements[index]);
-    memmove(&elements[index], &elements[index + 1], (array->value.array.length - index - 1) * sizeof(Json_Value));
+    json_free_value(&DYNARRAY_AT(array->value.array, index));
+    memmove(&DYNARRAY_AT(array->value.array, index), &DYNARRAY_AT(array->value.array, index + 1), (array->value.array.length - index - 1) * sizeof(Json_Value));
     --array->value.array.length;
 }
 
@@ -1419,13 +1395,13 @@ static void json_hash_table_resize(Json_Value* value, size_t newBucketCount) {
     for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
         Json_HashBucket* oldBucket = &value->value.object.buckets[i];
         for (size_t j = 0; j < oldBucket->length; ++j) {
-            Json_HashEntry entry = oldBucket->elements[j];
+            Json_HashEntry entry = DYNARRAY_AT(*oldBucket, j);
             size_t newBucketIndex = entry.hash % newBucketCount;
             Json_HashBucket* newBucket = &newBuckets[newBucketIndex];
-            JSON_ADD_TO_ARRAY(allocator, *newBucket, entry);
+            DYNARRAY_PUSH(allocator, *newBucket, entry);
         }
         // Old bucket entries have been moved to the new buckets, we can free the old bucket entries array
-        json_allocator_free(allocator, oldBucket->elements);
+        DYNARRAY_FREE(allocator, *oldBucket);
     }
     // Free the old buckets and replace with the new ones
     json_allocator_free(allocator, value->value.object.buckets);
@@ -1453,7 +1429,7 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Check if the key already exists in the bucket, if so, replace the value
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->elements[i];
+        Json_HashEntry* entry = &DYNARRAY_AT(*bucket, i);
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // Free the old value if needed
             json_free_value(&entry->value);
@@ -1468,7 +1444,7 @@ void json_object_set(Json_Value* object, char const* key, Json_Value value) {
         .value = value,
         .hash = hash,
     };
-    JSON_ADD_TO_ARRAY(allocator, *bucket, newEntry);
+    DYNARRAY_PUSH(allocator, *bucket, newEntry);
     // New element was added
     ++object->value.object.entry_count;
 }
@@ -1482,7 +1458,7 @@ Json_Value* json_object_get(Json_Value* object, char const* key) {
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->elements[i];
+        Json_HashEntry* entry = &DYNARRAY_AT(*bucket, i);
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             return &entry->value;
         }
@@ -1498,7 +1474,7 @@ bool json_object_get_at(Json_Value* object, size_t index, char const** out_key, 
         Json_HashBucket* bucket = &object->value.object.buckets[i];
         for (size_t j = 0; j < bucket->length; ++j) {
             if (currentIndex == index) {
-                Json_HashEntry* entry = &bucket->elements[j];
+                Json_HashEntry* entry = &DYNARRAY_AT(*bucket, j);
                 if (out_key != NULL) *out_key = entry->key;
                 if (out_value != NULL) *out_value = entry->value;
                 return true;
@@ -1518,7 +1494,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
     Json_HashBucket* bucket = &object->value.object.buckets[bucketIndex];
     // Look for the key in the bucket
     for (size_t i = 0; i < bucket->length; ++i) {
-        Json_HashEntry* entry = &bucket->elements[i];
+        Json_HashEntry* entry = &DYNARRAY_AT(*bucket, i);
         if (entry->hash == hash && strcmp(entry->key, key) == 0) {
             // If old value is wanted, copy it out, otherwise free it
             if (out_value != NULL) *out_value = entry->value;
@@ -1526,7 +1502,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
             // Free the key
             json_allocator_free(&object->value.object.allocator, entry->key);
             // Remove the entry by shifting the remaining entries
-            memmove(&bucket->elements[i], &bucket->elements[i + 1], (bucket->length - i - 1) * sizeof(Json_HashEntry));
+            memmove(&DYNARRAY_AT(*bucket, i), &DYNARRAY_AT(*bucket, i + 1), (bucket->length - i - 1) * sizeof(Json_HashEntry));
             --bucket->length;
             --object->value.object.entry_count;
             return true;
@@ -1700,7 +1676,7 @@ static void json_write_value(Json_Writer* writer, Json_Value value) {
         ++writer->indent;
         for (size_t i = 0; i < value.value.array.length; ++i) {
             json_writer_append_indent(writer);
-            json_write_value(writer, value.value.array.elements[i]);
+            json_write_value(writer, DYNARRAY_AT(value.value.array, i));
             if (i < value.value.array.length - 1) json_writer_append_char(writer, ',');
             json_writer_append(writer, writer->options.newline_str);
         }
@@ -1722,7 +1698,7 @@ static void json_write_value(Json_Writer* writer, Json_Value value) {
         for (size_t i = 0; i < value.value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value.value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j, ++entryIndex) {
-                Json_HashEntry* entry = &bucket->elements[j];
+                Json_HashEntry* entry = &DYNARRAY_AT(*bucket, j);
                 json_writer_append_indent(writer);
                 json_write_string_value(writer, entry->key);
                 json_writer_append(writer, ": ");
@@ -1777,26 +1753,22 @@ void json_free_value(Json_Value* value) {
     }
     case JSON_VALUE_ARRAY: {
         for (size_t i = 0; i < value->value.array.length; ++i) {
-            json_free_value(&value->value.array.elements[i]);
+            json_free_value(&DYNARRAY_AT(value->value.array, i));
         }
         Json_Allocator* allocator = &value->value.array.allocator;
-        json_allocator_free(allocator, value->value.array.elements);
-        // NULL out in case it's shared somewhere
-        value->value.array.elements = NULL;
-        value->value.array.length = 0;
-        value->value.array.capacity = 0;
+        DYNARRAY_FREE(allocator, value->value.array);
     } break;
     case JSON_VALUE_OBJECT: {
         Json_Allocator* allocator = &value->value.object.allocator;
         for (size_t i = 0; i < value->value.object.buckets_length; ++i) {
             Json_HashBucket* bucket = &value->value.object.buckets[i];
             for (size_t j = 0; j < bucket->length; ++j) {
-                Json_HashEntry* entry = &bucket->elements[j];
+                Json_HashEntry* entry = &DYNARRAY_AT(*bucket, j);
                 // Free the value and the key
                 json_free_value(&entry->value);
                 json_allocator_free(allocator, entry->key);
             }
-            json_allocator_free(allocator, bucket->elements);
+            DYNARRAY_FREE(allocator, *bucket);
         }
         json_allocator_free(allocator, value->value.object.buckets);
         // NULL out in case it's shared somewhere
@@ -1813,19 +1785,14 @@ void json_free_document(Json_Document* doc) {
     json_free_value(&doc->root);
     // Free each error message
     for (size_t i = 0; i < doc->errors.length; ++i) {
-        json_allocator_free(&doc->allocator, doc->errors.elements[i].message);
+        json_allocator_free(&doc->allocator, DYNARRAY_AT(doc->errors, i).message);
     }
-    json_allocator_free(&doc->allocator, doc->errors.elements);
-    doc->errors.elements = NULL;
-    doc->errors.length = 0;
-    doc->errors.capacity = 0;
+    DYNARRAY_FREE(&doc->allocator, doc->errors);
 }
 
 #ifdef __cplusplus
 }
 #endif
-
-#undef JSON_ADD_TO_ARRAY
 
 #endif /* JSON_IMPLEMENTATION */
 

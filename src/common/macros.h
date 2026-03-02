@@ -26,3 +26,38 @@
 
 // References the library's assert macro
 #define LIBRARY_ASSERT(cond, msg) LIBRARY_MACRO(ASSERT)(cond, msg)
+
+// A semi-reliable way to get a unique name to avoid shadowing
+#define LIBRARY_UNIQUE_NAME(name) __ ## LIBRARY_NAME_UPPER ## _ ## name ## _ ## __LINE__
+
+// Dynamic array helpers
+#define DYNARRAY_MEMBERS(T) \
+    T* elements; \
+    size_t length; \
+    size_t capacity
+#define DYNARRAY(T) struct { DYNARRAY_MEMBERS(T); }
+#define DYNARRAY_LEN(array) ((array).length)
+#define DYNARRAY_AT(array, index) ((array).elements[index])
+#define DYNARRAY_RESERVE(allocator, array, new_capacity) \
+    do { \
+        if ((new_capacity) > (array).capacity) { \
+            size_t LIBRARY_UNIQUE_NAME(new_cap) = (array).capacity == 0 ? 8 : (array).capacity * 2; \
+            while (LIBRARY_UNIQUE_NAME(new_cap) < (new_capacity)) LIBRARY_UNIQUE_NAME(new_cap) *= 2; \
+            void* LIBRARY_UNIQUE_NAME(new_elements) = LIBRARY_FUNC(allocator_realloc)(allocator, (array).elements, LIBRARY_UNIQUE_NAME(new_cap) * sizeof(*(array).elements)); \
+            (array).elements = LIBRARY_UNIQUE_NAME(new_elements); \
+            (array).capacity = LIBRARY_UNIQUE_NAME(new_cap); \
+        } \
+    } while (false)
+#define DYNARRAY_PUSH(allocator, array, element) \
+    do { \
+        DYNARRAY_RESERVE(allocator, array, (array).length + 1); \
+        (array).elements[(array).length++] = (element); \
+    } while (false)
+#define DYNARRAY_POP(array) (array).elements[--(array).length]
+#define DYNARRAY_FREE(allocator, array) \
+    do { \
+        LIBRARY_FUNC(allocator_free)(allocator, (array).elements); \
+        (array).elements = NULL; \
+        (array).length = 0; \
+        (array).capacity = 0; \
+    } while (false)
