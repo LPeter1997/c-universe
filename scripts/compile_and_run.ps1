@@ -29,6 +29,9 @@ param(
     [Parameter(Mandatory=$false)]
     [switch]$AllowUnusedFunctions,
 
+    [Parameter(Mandatory=$false)]
+    [string[]]$AdditionalCompilerArgs = @(),
+
     [Parameter(Mandatory=$false, ValueFromRemainingArguments=$true)]
     [string[]]$RunArgs = @()
 )
@@ -132,6 +135,9 @@ function Compile {
     } else {
         throw "unknown style $Style"
     }
+
+    # Add any additional compiler args specified by the user
+    $Args += $AdditionalCompilerArgs
 
     & $Compiler $Args
 

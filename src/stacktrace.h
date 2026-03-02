@@ -83,6 +83,10 @@ void stacktrace_free(StackTrace* trace);
 #if defined(_WIN32)
     #include <windows.h>
     #include <dbghelp.h>
+
+    #if defined(_MSC_VER)
+        #pragma comment(lib, "dbghelp.lib")
+    #endif
 #else
     #error "unsupported platform"
 #endif
@@ -139,8 +143,8 @@ StackTrace stacktrace_capture(StackTrace_Allocator allocator) {
     BOOL symInitSuccess = SymInitialize(process, NULL, TRUE);
     STACKTRACE_ASSERT(symInitSuccess, "SymInitialize failed");
 
-    void* stack[MAXUSHORT];
-    WORD frames = CaptureStackBackTrace(0, (DWORD)MAXUSHORT, stack, NULL);
+    void* stack[65535];
+    WORD frames = CaptureStackBackTrace(0, 65535, stack, NULL);
 
     StackTrace trace;
     trace.allocator = allocator;
@@ -148,7 +152,7 @@ StackTrace stacktrace_capture(StackTrace_Allocator allocator) {
     trace.frames = stacktrace_alloc_realloc(&allocator, NULL, frames * sizeof(StackTrace_Frame));
     memset(trace.frames, 0, frames * sizeof(StackTrace_Frame));
 
-    SYMBOL_INFO* symbol = (SYMBOL_INFO*)stacktrace_alloc_realloc(sizeof(SYMBOL_INFO) + 256);
+    SYMBOL_INFO* symbol = (SYMBOL_INFO*)stacktrace_alloc_realloc(&allocator, NULL, sizeof(SYMBOL_INFO) + 256);
     for (WORD i = 0; i < frames; i++) {
         DWORD64 address = (DWORD64)(stack[i]);
         memset(symbol, 0, sizeof(SYMBOL_INFO) + 256);
