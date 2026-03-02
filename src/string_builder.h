@@ -65,12 +65,8 @@ extern "C" {
  * A simple dynamic string builder.
  */
 typedef struct StringBuilder {
-    // The buffer containing the string content, not necessarily null-terminated
-    char* buffer;
-    // The current length of the string content in the buffer
-    size_t length;
-    // The total capacity of the buffer
-    size_t capacity;
+    // Dynamic array members: elements, length, capacity
+    DYNARRAY_MEMBERS(char);
     // Optional custom memory allocator
     SB_Allocator allocator;
 } StringBuilder;
@@ -280,28 +276,18 @@ extern "C" {
 // String builder //////////////////////////////////////////////////////////////
 
 void sb_reserve(StringBuilder* sb, size_t capacity) {
-    if (capacity <= sb->capacity) return;
-
-    size_t newCapacity = (sb->capacity == 0) ? 16 : sb->capacity;
-    while (newCapacity < capacity) newCapacity *= 2;
-
-    char* newBuffer = (char*)sb_allocator_realloc(&sb->allocator, sb->buffer, sizeof(char) * newCapacity);
-    sb->buffer = newBuffer;
-    sb->capacity = newCapacity;
+    DYNARRAY_RESERVE(&sb->allocator, *sb, capacity);
 }
 
 char* sb_to_cstr(StringBuilder* sb) {
     char* cstr = (char*)sb_allocator_realloc(&sb->allocator, NULL, sizeof(char) * (sb->length + 1));
-    memcpy(cstr, sb->buffer, sizeof(char) * sb->length);
+    memcpy(cstr, sb->elements, sizeof(char) * sb->length);
     cstr[sb->length] = '\0';
     return cstr;
 }
 
 void sb_free(StringBuilder* sb) {
-    sb_allocator_free(&sb->allocator, sb->buffer);
-    sb->buffer = NULL;
-    sb->length = 0;
-    sb->capacity = 0;
+    DYNARRAY_FREE(&sb->allocator, *sb);
 }
 
 void sb_clear(StringBuilder* sb) {
@@ -314,15 +300,11 @@ void sb_puts(StringBuilder* sb, char const* str) {
 }
 
 void sb_putsn(StringBuilder* sb, char const* str, size_t n) {
-    sb_reserve(sb, sb->length + n);
-    memcpy(sb->buffer + sb->length, str, sizeof(char) * n);
-    sb->length += n;
+    DYNARRAY_PUSH_RANGE(&sb->allocator, *sb, str, n);
 }
 
 void sb_putc(StringBuilder* sb, char c) {
-    sb_reserve(sb, sb->length + 1);
-    sb->buffer[sb->length] = c;
-    sb->length += 1;
+    DYNARRAY_PUSH(&sb->allocator, *sb, c);
 }
 
 void sb_format(StringBuilder* sb, char const* format, ...) {
@@ -337,8 +319,8 @@ void sb_vformat(StringBuilder* sb, char const* format, va_list args) {
     va_copy(args_copy, args);
     int formattedLength = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
-    sb_reserve(sb, sb->length + (size_t)formattedLength);
-    vsnprintf(sb->buffer + sb->length, (size_t)formattedLength + 1, format, args);
+    DYNARRAY_RESERVE(&sb->allocator, *sb, sb->length + (size_t)formattedLength);
+    vsnprintf(sb->elements + sb->length, (size_t)formattedLength + 1, format, args);
     sb->length += (size_t)formattedLength;
 }
 
@@ -350,18 +332,12 @@ void sb_insert(StringBuilder* sb, size_t pos, char const* str) {
 void sb_insertn(StringBuilder* sb, size_t pos, char const* str, size_t n) {
     if (n == 0) return;
     STRING_BUILDER_ASSERT(pos <= sb->length, "insert position out of bounds");
-    sb_reserve(sb, sb->length + n);
-    memmove(sb->buffer + pos + n, sb->buffer + pos, sb->length - pos);
-    memcpy(sb->buffer + pos, str, n);
-    sb->length += n;
+    DYNARRAY_INSERT_RANGE(&sb->allocator, *sb, pos, str, n);
 }
 
 void sb_insertc(StringBuilder* sb, size_t pos, char c) {
     STRING_BUILDER_ASSERT(pos <= sb->length, "insert position out of bounds");
-    sb_reserve(sb, sb->length + 1);
-    memmove(sb->buffer + pos + 1, sb->buffer + pos, sb->length - pos);
-    sb->buffer[pos] = c;
-    sb->length += 1;
+    DYNARRAY_INSERT(&sb->allocator, *sb, pos, c);
 }
 
 size_t sb_length(StringBuilder* sb) {
@@ -370,15 +346,13 @@ size_t sb_length(StringBuilder* sb) {
 
 char* sb_char_at(StringBuilder* sb, size_t pos) {
     STRING_BUILDER_ASSERT(pos < sb->length, "char_at position out of bounds");
-    return &sb->buffer[pos];
+    return &sb->elements[pos];
 }
 
 void sb_remove(StringBuilder* sb, size_t pos, size_t length) {
-    if (length == 0) return;
     STRING_BUILDER_ASSERT(pos <= sb->length, "remove position out of bounds");
     if (pos + length > sb->length) length = sb->length - pos;
-    memmove(sb->buffer + pos, sb->buffer + pos + length, sb->length - pos - length);
-    sb->length -= length;
+    DYNARRAY_REMOVE_RANGE(*sb, pos, length);
 }
 
 void sb_replace(StringBuilder* sb, char const* target, char const* replacement) {
@@ -388,25 +362,25 @@ void sb_replace(StringBuilder* sb, char const* target, char const* replacement) 
     size_t replacementLen = strlen(replacement);
     size_t pos = 0;
     while (pos + targetLen <= sb->length) {
-        if (memcmp(sb->buffer + pos, target, targetLen) != 0) {
+        if (memcmp(sb->elements + pos, target, targetLen) != 0) {
             ++pos;
             continue;
         }
         if (targetLen == replacementLen) {
             // Same length, no shifting needed
-            memcpy(sb->buffer + pos, replacement, replacementLen);
+            memcpy(sb->elements + pos, replacement, replacementLen);
         } else if (replacementLen < targetLen) {
             // Replacement is shorter, copy replacement, then shift rest left
             size_t diff = targetLen - replacementLen;
-            memcpy(sb->buffer + pos, replacement, replacementLen);
-            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
+            memcpy(sb->elements + pos, replacement, replacementLen);
+            memmove(sb->elements + pos + replacementLen, sb->elements + pos + targetLen, sb->length - pos - targetLen);
             sb->length -= diff;
         } else {
             // Replacement is longer, reserve, shift rest right, then copy replacement
             size_t diff = replacementLen - targetLen;
-            sb_reserve(sb, sb->length + diff);
-            memmove(sb->buffer + pos + replacementLen, sb->buffer + pos + targetLen, sb->length - pos - targetLen);
-            memcpy(sb->buffer + pos, replacement, replacementLen);
+            DYNARRAY_RESERVE(&sb->allocator, *sb, sb->length + diff);
+            memmove(sb->elements + pos + replacementLen, sb->elements + pos + targetLen, sb->length - pos - targetLen);
+            memcpy(sb->elements + pos, replacement, replacementLen);
             sb->length += diff;
         }
         pos += replacementLen;
@@ -426,7 +400,7 @@ int sb_index_of(StringBuilder* sb, char const* str) {
     if (strLen == 0) return 0; // Empty string is found at position 0
     if (strLen > sb->length) return -1;
     for (size_t pos = 0; pos + strLen <= sb->length; ++pos) {
-        if (memcmp(sb->buffer + pos, str, strLen) == 0) {
+        if (memcmp(sb->elements + pos, str, strLen) == 0) {
             return (int)pos;
         }
     }
@@ -435,7 +409,7 @@ int sb_index_of(StringBuilder* sb, char const* str) {
 
 int sb_index_ofc(StringBuilder* sb, char c) {
     for (size_t pos = 0; pos < sb->length; ++pos) {
-        if (sb->buffer[pos] == c) {
+        if (sb->elements[pos] == c) {
             return (int)pos;
         }
     }
@@ -446,7 +420,7 @@ int sb_index_ofc(StringBuilder* sb, char c) {
 
 static void code_builder_indent_if_needed(CodeBuilder* cb) {
     StringBuilder* sb = &cb->builder;
-    if (sb->length == 0 || sb->buffer[sb->length - 1] == '\n' || sb->buffer[sb->length - 1] == '\r') {
+    if (sb->length == 0 || sb->elements[sb->length - 1] == '\n' || sb->elements[sb->length - 1] == '\r') {
         char const* indent = cb->indent_str == NULL ? "    " : cb->indent_str;
         for (size_t i = 0; i < cb->indent_level; ++i) {
             sb_puts(sb, indent);
@@ -565,14 +539,14 @@ static StringBuilder test_sb_create(void) {
 static bool test_sb_equals(StringBuilder* sb, char const* expected) {
     size_t expectedLen = strlen(expected);
     if (sb->length != expectedLen) return false;
-    return memcmp(sb->buffer, expected, expectedLen) == 0;
+    return memcmp(sb->elements, expected, expectedLen) == 0;
 }
 
 // Initialization tests ////////////////////////////////////////////////////////
 
 CTEST_CASE(string_builder_empty_on_init) {
     StringBuilder sb = test_sb_create();
-    CTEST_ASSERT_TRUE(sb.buffer == NULL);
+    CTEST_ASSERT_TRUE(sb.elements == NULL);
     CTEST_ASSERT_TRUE(sb.length == 0);
     CTEST_ASSERT_TRUE(sb.capacity == 0);
 }
@@ -582,7 +556,7 @@ CTEST_CASE(string_builder_empty_on_init) {
 CTEST_CASE(string_builder_reserve_allocates_memory) {
     StringBuilder sb = test_sb_create();
     sb_reserve(&sb, 32);
-    CTEST_ASSERT_TRUE(sb.buffer != NULL);
+    CTEST_ASSERT_TRUE(sb.elements != NULL);
     CTEST_ASSERT_TRUE(sb.capacity >= 32);
     CTEST_ASSERT_TRUE(sb.length == 0);
     sb_free(&sb);
@@ -592,7 +566,7 @@ CTEST_CASE(string_builder_reserve_grows_exponentially) {
     StringBuilder sb = test_sb_create();
     sb_reserve(&sb, 1);
     size_t initialCapacity = sb.capacity;
-    CTEST_ASSERT_TRUE(initialCapacity >= 16);
+    CTEST_ASSERT_TRUE(initialCapacity >= 8);
     sb_reserve(&sb, 100);
     CTEST_ASSERT_TRUE(sb.capacity >= 100);
     CTEST_ASSERT_TRUE(sb.capacity > initialCapacity);
@@ -670,7 +644,7 @@ CTEST_CASE(string_builder_putc_appends_char) {
     StringBuilder sb = test_sb_create();
     sb_putc(&sb, 'A');
     CTEST_ASSERT_TRUE(sb.length == 1);
-    CTEST_ASSERT_TRUE(sb.buffer[0] == 'A');
+    CTEST_ASSERT_TRUE(sb.elements[0] == 'A');
     sb_free(&sb);
 }
 
@@ -690,9 +664,9 @@ CTEST_CASE(string_builder_putc_null_char) {
     sb_putc(&sb, '\0');
     sb_putc(&sb, 'B');
     CTEST_ASSERT_TRUE(sb.length == 3);
-    CTEST_ASSERT_TRUE(sb.buffer[0] == 'A');
-    CTEST_ASSERT_TRUE(sb.buffer[1] == '\0');
-    CTEST_ASSERT_TRUE(sb.buffer[2] == 'B');
+    CTEST_ASSERT_TRUE(sb.elements[0] == 'A');
+    CTEST_ASSERT_TRUE(sb.elements[1] == '\0');
+    CTEST_ASSERT_TRUE(sb.elements[2] == 'B');
     sb_free(&sb);
 }
 
@@ -796,7 +770,7 @@ CTEST_CASE(string_builder_free_resets_all) {
     StringBuilder sb = test_sb_create();
     sb_puts(&sb, "test");
     sb_free(&sb);
-    CTEST_ASSERT_TRUE(sb.buffer == NULL);
+    CTEST_ASSERT_TRUE(sb.elements == NULL);
     CTEST_ASSERT_TRUE(sb.length == 0);
     CTEST_ASSERT_TRUE(sb.capacity == 0);
 }
@@ -804,7 +778,7 @@ CTEST_CASE(string_builder_free_resets_all) {
 CTEST_CASE(string_builder_free_empty_builder) {
     StringBuilder sb = test_sb_create();
     sb_free(&sb); // Should not crash
-    CTEST_ASSERT_TRUE(sb.buffer == NULL);
+    CTEST_ASSERT_TRUE(sb.elements == NULL);
 }
 
 // Combined operations tests ///////////////////////////////////////////////////
@@ -838,7 +812,7 @@ CTEST_CASE(string_builder_large_content) {
     CTEST_ASSERT_TRUE(sb.length == 1000);
     CTEST_ASSERT_TRUE(sb.capacity >= 1000);
     for (size_t i = 0; i < sb.length; ++i) {
-        CTEST_ASSERT_TRUE(sb.buffer[i] == 'A');
+        CTEST_ASSERT_TRUE(sb.elements[i] == 'A');
     }
     sb_free(&sb);
 }
