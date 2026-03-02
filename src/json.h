@@ -1348,10 +1348,7 @@ void json_array_insert(Json_Value* array, size_t index, Json_Value value) {
         json_array_append(array, value);
         return;
     }
-    // Quite a stupid way, add to end to ensure capacity, shift, then insert at the right place
-    DYNARRAY_PUSH(&array->value.array.allocator, array->value.array, value);
-    memmove(&DYNARRAY_AT(array->value.array, index + 1), &DYNARRAY_AT(array->value.array, index), (array->value.array.length - index - 1) * sizeof(Json_Value));
-    DYNARRAY_AT(array->value.array, index) = value;
+    DYNARRAY_INSERT(&array->value.array.allocator, array->value.array, index, value);
 }
 
 Json_Value* json_array_at(Json_Value* array, size_t index) {
@@ -1365,8 +1362,7 @@ void json_array_remove(Json_Value* array, size_t index) {
     JSON_ASSERT(index < array->value.array.length, "attempted to remove index out of bounds in array");
     // Free the value being removed
     json_free_value(&DYNARRAY_AT(array->value.array, index));
-    memmove(&DYNARRAY_AT(array->value.array, index), &DYNARRAY_AT(array->value.array, index + 1), (array->value.array.length - index - 1) * sizeof(Json_Value));
-    --array->value.array.length;
+    DYNARRAY_REMOVE(array->value.array, index);
 }
 
 // Object manipulation /////////////////////////////////////////////////////////
@@ -1502,8 +1498,7 @@ bool json_object_remove(Json_Value* object, char const* key, Json_Value* out_val
             // Free the key
             json_allocator_free(&object->value.object.allocator, entry->key);
             // Remove the entry by shifting the remaining entries
-            memmove(&DYNARRAY_AT(*bucket, i), &DYNARRAY_AT(*bucket, i + 1), (bucket->length - i - 1) * sizeof(Json_HashEntry));
-            --bucket->length;
+            DYNARRAY_REMOVE(*bucket, i);
             --object->value.object.entry_count;
             return true;
         }

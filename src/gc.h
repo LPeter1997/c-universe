@@ -418,9 +418,8 @@ static void gc_add_to_hash_bucket(GC_World* gc, GC_HashBucket* bucket, GC_HashEn
 }
 
 static void gc_remove_from_hash_bucket_at(GC_World* gc, GC_HashBucket* bucket, size_t index) {
-    --bucket->length;
+    DYNARRAY_REMOVE(*bucket, index);
     --gc->hash_map.entry_count;
-    memmove(&DYNARRAY_AT(*bucket, index), &DYNARRAY_AT(*bucket, index + 1), sizeof(GC_HashEntry) * (bucket->length - index));
 }
 
 static void gc_recompute_sweep_limit(GC_World* gc);
@@ -436,7 +435,7 @@ static void gc_resize_hash_map(GC_World* gc, size_t newLength) {
     // incrementing entry_count (entries are being moved, not added)
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* oldBucket = &gc->hash_map.buckets[i];
-        for (size_t j = 0; j < oldBucket->length; ++j) {
+        for (size_t j = 0; j < DYNARRAY_LEN(*oldBucket); ++j) {
             GC_HashEntry entry = DYNARRAY_AT(*oldBucket, j);
             // Compute the new bucket index
             size_t newBucketIndex = entry.hash_code % newLength;
@@ -494,10 +493,10 @@ static bool gc_remove_from_hash_map(GC_World* gc, void* baseAddress, GC_Allocati
     // Look for the index within the bucket
     GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
     bool found = false;
-    for (size_t i = 0; i < bucket->length; ++i) {
+    for (size_t i = 0; i < DYNARRAY_LEN(*bucket); ++i) {
         GC_Allocation* allocation = &DYNARRAY_AT(*bucket, i).allocation;
         if (allocation->base_address == baseAddress) {
-            // Found - copy out BEFORE removing (memmove will overwrite this memory)
+            // Found - copy out BEFORE removing
             if (outAllocation != NULL) *outAllocation = *allocation;
             gc_remove_from_hash_bucket_at(gc, bucket, i);
             found = true;
@@ -518,7 +517,7 @@ static GC_Allocation* gc_get_from_hash_map(GC_World* gc, void* baseAddress) {
     size_t bucketIndex = gc_hash_code(baseAddress) % gc->hash_map.buckets_length;
      // Search within bucket
     GC_HashBucket* bucket = &gc->hash_map.buckets[bucketIndex];
-    for (size_t i = 0; i < bucket->length; ++i) {
+    for (size_t i = 0; i < DYNARRAY_LEN(*bucket); ++i) {
         GC_Allocation* allocation = &DYNARRAY_AT(*bucket, i).allocation;
         // Found
         if (allocation->base_address == baseAddress) return allocation;
@@ -567,7 +566,7 @@ static void gc_mark_pinned(GC_World* gc) {
     // Simply enumerate the allocations and mark everything with the pinned flag
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
-        for (size_t j = 0; j < bucket->length; ++j) {
+        for (size_t j = 0; j < DYNARRAY_LEN(*bucket); ++j) {
             GC_Allocation* allocation = &DYNARRAY_AT(*bucket, j).allocation;
             if ((allocation->flags & GC_FLAG_PINNED) != 0) {
                 GC_LOG("marking pinned allocation (base: %p, size: %zu)", allocation->base_address, allocation->size);
@@ -601,7 +600,7 @@ static void gc_mark_stack(GC_World* gc) {
 }
 
 static void gc_mark_globals(GC_World* gc) {
-    for (size_t i = 0; i < gc->global_sections.length; ++i) {
+    for (size_t i = 0; i < DYNARRAY_LEN(gc->global_sections); ++i) {
         GC_GlobalSection* section = &DYNARRAY_AT(gc->global_sections, i);
         GC_LOG("scanning global section '%s' (start: %p, end: %p)", section->name, section->start, section->end);
         gc_mark_values_in_address_range(gc, section->start, section->end);
@@ -633,7 +632,7 @@ static size_t gc_sweep(GC_World* gc) {
     size_t freedMem = 0;
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
-        for (size_t j = 0; j < bucket->length; ) {
+        for (size_t j = 0; j < DYNARRAY_LEN(*bucket); ) {
             GC_Allocation* allocation = &DYNARRAY_AT(*bucket, j).allocation;
             if ((allocation->flags & GC_FLAG_MARKED) != 0) {
                 // Marked, don't free, just clear flag
@@ -670,7 +669,7 @@ void gc_stop(GC_World* gc) {
     // Let's unpin all pinned allocations, then run a cycle of mark and sweep
     for (size_t i = 0; i < gc->hash_map.buckets_length; ++i) {
         GC_HashBucket* bucket = &gc->hash_map.buckets[i];
-        for (size_t j = 0; j < bucket->length; ++j) {
+        for (size_t j = 0; j < DYNARRAY_LEN(*bucket); ++j) {
             GC_Allocation* allocation = &DYNARRAY_AT(*bucket, j).allocation;
             allocation->flags &= ~GC_FLAG_PINNED;
         }

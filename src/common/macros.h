@@ -38,6 +38,7 @@
 #define DYNARRAY(T) struct { DYNARRAY_MEMBERS(T); }
 #define DYNARRAY_LEN(array) ((array).length)
 #define DYNARRAY_AT(array, index) ((array).elements[index])
+#define DYNARRAY_LAST(array) DYNARRAY_AT(array, (array).length - 1)
 #define DYNARRAY_RESERVE(allocator, array, new_capacity) \
     do { \
         if ((new_capacity) > (array).capacity) { \
@@ -53,7 +54,19 @@
         DYNARRAY_RESERVE(allocator, array, (array).length + 1); \
         (array).elements[(array).length++] = (element); \
     } while (false)
-#define DYNARRAY_POP(array) (array).elements[--(array).length]
+#define DYNARRAY_POP(array) DYNARRAY_AT(array, --(array).length)
+#define DYNARRAY_INSERT(allocator, array, index, element) \
+    do { \
+        DYNARRAY_RESERVE(allocator, array, (array).length + 1); \
+        memmove(&(array).elements[(index) + 1], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
+        (array).elements[index] = (element); \
+        ++(array).length; \
+    } while (false)
+#define DYNARRAY_REMOVE(array, index) \
+    do { \
+        memmove(&(array).elements[index], &(array).elements[(index) + 1], ((array).length - (index) - 1) * sizeof(*(array).elements)); \
+        --(array).length; \
+    } while (false)
 #define DYNARRAY_FREE(allocator, array) \
     do { \
         LIBRARY_FUNC(allocator_free)(allocator, (array).elements); \
