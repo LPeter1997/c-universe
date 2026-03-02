@@ -54,6 +54,7 @@
         DYNARRAY_RESERVE(allocator, array, (array).length + 1); \
         (array).elements[(array).length++] = (element); \
     } while (false)
+#define DYNARRAY_PUSH_RANGE(allocator, array, elements, count) DYNARRAY_INSERT_RANGE(allocator, array, (array).length, elements, count)
 #define DYNARRAY_POP(array) DYNARRAY_AT(array, --(array).length)
 #define DYNARRAY_INSERT(allocator, array, index, element) \
     do { \
@@ -62,10 +63,18 @@
         (array).elements[index] = (element); \
         ++(array).length; \
     } while (false)
-#define DYNARRAY_REMOVE(array, index) \
+#define DYNARRAY_INSERT_RANGE(allocator, array, index, elements, count) \
     do { \
-        memmove(&(array).elements[index], &(array).elements[(index) + 1], ((array).length - (index) - 1) * sizeof(*(array).elements)); \
-        --(array).length; \
+        DYNARRAY_RESERVE(allocator, array, (array).length + (count)); \
+        memmove(&(array).elements[(index) + (count)], &(array).elements[index], ((array).length - (index)) * sizeof(*(array).elements)); \
+        memcpy(&(array).elements[index], (elements), (count) * sizeof(*(array).elements)); \
+        (array).length += (count); \
+    } while (false)
+#define DYNARRAY_REMOVE(array, index) DYNARRAY_REMOVE_RANGE(array, index, 1)
+#define DYNARRAY_REMOVE_RANGE(array, index, count) \
+    do { \
+        memmove(&(array).elements[index], &(array).elements[(index) + (count)], ((array).length - (index) - (count)) * sizeof(*(array).elements)); \
+        (array).length -= (count); \
     } while (false)
 #define DYNARRAY_FREE(allocator, array) \
     do { \
