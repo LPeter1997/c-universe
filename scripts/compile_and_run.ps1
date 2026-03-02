@@ -38,8 +38,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Platform detection
+$IsWindowsPlatform = $IsWindows -or $env:OS -eq "Windows_NT"
+$IsLinuxPlatform = $IsLinux -or (Test-Path "/proc/version" -ErrorAction SilentlyContinue)
+$IsMacOSPlatform = $IsMacOS -or (Test-Path "/System/Library" -ErrorAction SilentlyContinue)
+
 # Windows executable suffix
-if ($IsWindows -or $env:OS -eq "Windows_NT") {
+if ($IsWindowsPlatform) {
     if (-not $Output.EndsWith(".exe")) {
         $Output = "$Output.exe"
     }
@@ -51,8 +56,34 @@ if ($Action -eq "run" -and $Sources.Count -eq 0) {
 
 # On Windows we add _CRT_SECURE_NO_WARNINGS to the defines
 # This must be at script scope, not inside a function, to avoid PowerShell scoping issues with +=
-if ($IsWindows -or $env:OS -eq "Windows_NT") {
+if ($IsWindowsPlatform) {
     $Defines += "_CRT_SECURE_NO_WARNINGS"
+}
+
+# Platform-specific compiler/linker flags
+# These are added automatically based on platform and compiler style
+$PlatformCompilerArgs = @()
+$PlatformLinkerArgs = @()
+
+if ($Style -eq "gcc") {
+    # Always include debug symbols for meaningful stack traces and debugging
+    $PlatformCompilerArgs += "-g"
+
+    if ($IsLinuxPlatform) {
+        # -rdynamic: Export symbols for dladdr() to resolve function names
+        # -ldl: Link with libdl for dladdr()
+        $PlatformLinkerArgs += "-rdynamic"
+        $PlatformLinkerArgs += "-ldl"
+    } elseif ($IsMacOSPlatform) {
+        # -ldl: Link with libdl for dladdr()
+        $PlatformLinkerArgs += "-ldl"
+    }
+    # Windows + MinGW: -g is already added above, addr2line doesn't need extra linker flags
+} elseif ($Style -eq "msvc") {
+    # /Zi: Generate debug info for PDB (needed for DbgHelp symbol resolution)
+    # /DEBUG: Linker flag to generate PDB file
+    $PlatformCompilerArgs += "/Zi"
+    $PlatformLinkerArgs += "/DEBUG"
 }
 
 function Show-Version {
@@ -136,10 +167,34 @@ function Compile {
         throw "unknown style $Style"
     }
 
+    # Add platform-specific compiler args
+    $Args += $PlatformCompilerArgs
+
     # Add any additional compiler args specified by the user
     $Args += $AdditionalCompilerArgs
 
-    & $Compiler $Args
+    # Add platform-specific linker args
+    if ($Style -eq "msvc") {
+        # MSVC: linker args go after /link
+        if ($PlatformLinkerArgs.Count -gt 0) {
+            $Args += "/link"
+            $Args += $PlatformLinkerArgs
+        }
+    } elseif ($Style -eq "gcc") {
+        # GCC: linker args go at the end
+        $Args += $PlatformLinkerArgs
+    }
+
+    # Run the compiler. We temporarily set ErrorActionPreference to Continue because
+    # MSVC writes its version banner to stderr, which PowerShell would otherwise treat
+    # as an error. We check LASTEXITCODE manually instead.
+    $OldErrorPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Compiler $Args 2>&1 | Write-Host
+    } finally {
+        $ErrorActionPreference = $OldErrorPreference
+    }
 
     if ($LASTEXITCODE -ne 0) {
         throw "tool $Compiler failed with exit code $LASTEXITCODE"
@@ -163,7 +218,17 @@ function Run {
 
     try {
         Write-Host "running $AbsOutput from $SourceDir..."
-        & $AbsOutput @RunArgs
+
+        # Temporarily set ErrorActionPreference to Continue because programs may
+        # legitimately write to stderr (e.g., error messages, debug info), which
+        # PowerShell would otherwise treat as errors. We check LASTEXITCODE manually.
+        $OldErrorPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $AbsOutput @RunArgs 2>&1 | Write-Host
+        } finally {
+            $ErrorActionPreference = $OldErrorPreference
+        }
 
         if ($LASTEXITCODE -ne 0) {
             throw "running $Output failed with exit code $LASTEXITCODE"
